@@ -55,8 +55,30 @@ export const api = {
 export interface Sucursal {
   id: number
   nombre: string
+  direccion: string | null
+  localidad: string | null
+  telefono: string | null
+  email: string | null
   punto_venta_arca: number | null
   activa: boolean
+  observaciones: string | null
+}
+
+/** Lo que se manda al crear o editar una sucursal. */
+export interface SucursalEntrada {
+  nombre: string
+  direccion: string | null
+  localidad: string | null
+  telefono: string | null
+  email: string | null
+  /** 🔴 Único entre sucursales, y lo garantiza un índice parcial en la base.
+   *  La numeración de comprobantes de ARCA es por `(tipo, punto_venta)` y **no
+   *  lleva CUIT**: dos sucursales con el mismo punto de venta se pisan la
+   *  numeración entre ellas. `null` no colisiona — una sucursal que todavía no
+   *  factura puede quedar sin punto de venta. */
+  punto_venta_arca: number | null
+  activa: boolean
+  observaciones: string | null
 }
 
 export interface Cancha {
@@ -112,6 +134,22 @@ export interface Cliente {
   id: number
   nombre: string
   telefono: string | null
+  email: string | null
+  documento: string | null
+  cuit: string | null
+  activo: boolean
+  observaciones: string | null
+}
+
+/** Lo que se manda al crear o editar un cliente. */
+export interface ClienteEntrada {
+  nombre: string
+  telefono: string | null
+  email: string | null
+  documento: string | null
+  cuit: string | null
+  activo: boolean
+  observaciones: string | null
 }
 
 export interface Reserva {
@@ -130,6 +168,10 @@ export interface Reserva {
 
 export const sucursales = {
   listar: () => api.get<Sucursal[]>('/api/sucursales'),
+  crear: (cuerpo: SucursalEntrada) => api.post<Sucursal>('/api/sucursales', cuerpo),
+  editar: (id: number, cuerpo: SucursalEntrada) =>
+    api.put<Sucursal>(`/api/sucursales/${id}`, cuerpo),
+  borrar: (id: number) => api.del(`/api/sucursales/${id}`),
 }
 
 /** Lo que se manda al crear o editar una cancha. */
@@ -186,12 +228,25 @@ export const tarifas = {
   borrar: (id: number) => api.del(`/api/tarifas/${id}`),
 }
 
+/** El mínimo para dar de alta un cliente desde el diálogo de reserva.
+ *
+ *  Los demás campos quedan en su default del schema: un cliente que llama por
+ *  teléfono para reservar da su nombre, y pedirle el CUIT en ese momento es la
+ *  forma más rápida de que el encargado no lo cargue. Se completan después
+ *  desde la pantalla de Clientes. */
+export type ClienteMinimo = { nombre: string; telefono?: string | null }
+
 export const clientes = {
   listar: () => api.get<Cliente[]>('/api/clientes'),
-  // El alta de cliente la puede hacer un encargado, no sólo un admin: es lo que
-  // permite tomarle la reserva a alguien que llama por primera vez.
-  crear: (cuerpo: { nombre: string; telefono?: string | null }) =>
+  // 🔑 El alta y la edición de clientes las puede hacer un encargado (`staff`),
+  // no sólo un admin — es lo que permite tomarle la reserva a alguien que llama
+  // por primera vez. Es el único de los cinco maestros con ese permiso; ver
+  // `construir_abm` en el backend.
+  crear: (cuerpo: ClienteEntrada | ClienteMinimo) =>
     api.post<Cliente>('/api/clientes', cuerpo),
+  editar: (id: number, cuerpo: ClienteEntrada) =>
+    api.put<Cliente>(`/api/clientes/${id}`, cuerpo),
+  borrar: (id: number) => api.del(`/api/clientes/${id}`),
 }
 
 export const agenda = {

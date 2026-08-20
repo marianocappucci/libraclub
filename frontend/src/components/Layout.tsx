@@ -4,8 +4,10 @@ import { useSucursal } from '@/context/SucursalContext'
 
 const SECCIONES = [
   { a: '/agenda', texto: 'Agenda' },
+  { a: '/clientes', texto: 'Clientes' },
   { a: '/canchas', texto: 'Canchas' },
   { a: '/tarifas', texto: 'Tarifas' },
+  { a: '/sucursales', texto: 'Sucursales' },
 ]
 
 export function Layout() {
