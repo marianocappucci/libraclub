@@ -110,6 +110,20 @@ export interface Cliente {
   telefono: string | null
 }
 
+export interface Reserva {
+  id: number
+  cancha_id: number
+  cliente_id: number | null
+  estado: string
+  origen: string
+  comienza_at: string
+  termina_at: string
+  precio: string | null
+  sena: string | null
+  motivo: string | null
+  observaciones: string | null
+}
+
 export const sucursales = {
   listar: () => api.get<Sucursal[]>('/api/sucursales'),
 }
@@ -124,6 +138,10 @@ export const tarifas = {
 
 export const clientes = {
   listar: () => api.get<Cliente[]>('/api/clientes'),
+  // El alta de cliente la puede hacer un encargado, no sólo un admin: es lo que
+  // permite tomarle la reserva a alguien que llama por primera vez.
+  crear: (cuerpo: { nombre: string; telefono?: string | null }) =>
+    api.post<Cliente>('/api/clientes', cuerpo),
 }
 
 export const agenda = {
@@ -135,9 +153,17 @@ export const agenda = {
   reservar: (cuerpo: {
     cancha_id: number
     cliente_id: number
+    // 🔴 ISO **con offset**, tal cual lo devolvió la grilla. No se reconstruye a
+    // partir del día y la hora: el backend ya mandó el instante correcto, y
+    // rearmarlo en el cliente es donde aparecen las reservas corridas tres
+    // horas.
     comienza_at: string
     duracion_min?: number
-  }) => api.post<{ id: number }>('/api/reservas', cuerpo),
+    estado?: string
+    origen?: string
+    precio?: string
+    observaciones?: string | null
+  }) => api.post<Reserva>('/api/reservas', cuerpo),
   cambiarEstado: (id: number, estado: string, motivo?: string) =>
     api.post(`/api/reservas/${id}/estado`, { estado, motivo }),
 }
