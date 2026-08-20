@@ -21,6 +21,10 @@ from app.config import Config
 from app.routers import admin, disponibilidad, maestros, reservas, salud
 from app.routers import auth as auth_router
 
+# Con alias: más abajo hay una variable local `usuarios` con el repositorio, y
+# sin el alias el import queda pisado.
+from app.routers import usuarios as usuarios_router
+
 
 def _instancia_a_respaldar(config: Config) -> Instancia:
     """Qué se lleva el backup.
@@ -73,6 +77,7 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
         app.include_router(router)
     app.include_router(reservas.router)
     app.include_router(disponibilidad.router)
+    app.include_router(usuarios_router.router)
     app.include_router(admin.router)
 
     # "Datos / Backup": el motor de la familia, con la dependencia de rol de este
