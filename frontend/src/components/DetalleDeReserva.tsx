@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Modal } from '@/components/Modal'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
 import { agenda } from '@/lib/api'
 import type { Cancha, Turno } from '@/lib/api'
 import { fecha, hora } from '@/lib/fechas'
@@ -91,70 +93,76 @@ export function DetalleDeReserva({
     }
   }
 
+  // `onOpenChange` recibe el estado NUEVO. Se llama a `onCerrar` sólo cuando
+  // llega `false`: el padre es quien tiene el estado y quien decide. Hoy nunca
+  // llega `true` —ninguno de estos diálogos tiene `DialogTrigger`, los abre el
+  // padre—, así que el `if` es defensivo. Ver la nota en `dialogos.test.tsx`
+  // sobre por qué no se puede cubrir con un test.
   return (
-    <Modal
-      abierto={abierto}
-      titulo={estado === 'bloqueo' ? 'Bloqueo' : 'Reserva'}
-      onCerrar={onCerrar}
-    >
-      <div className="space-y-4">
-        <div className="rounded-md bg-slate-100 px-3 py-2 text-sm">
-          <div className="font-medium">{cancha.nombre}</div>
-          <div className="text-slate-600">
-            {fecha(turno.comienza_at)} · {hora(turno.comienza_at)} a{' '}
-            {hora(turno.termina_at)}
-          </div>
-          <div className="text-slate-600">
-            {turno.cliente ?? turno.motivo ?? '—'} · {NOMBRE[estado] ?? estado}
-          </div>
-        </div>
-
-        {acciones.length === 0 ? (
-          <p className="text-sm text-slate-500">
-            Una reserva {NOMBRE[estado]?.toLowerCase()} ya no se puede cambiar.
-          </p>
-        ) : (
-          <>
-            <label className="block space-y-1">
-              <span className="text-sm text-slate-600">
-                Motivo <span className="text-slate-400">(obligatorio para cancelar)</span>
-              </span>
-              <input
-                className="w-full rounded-md border border-slate-300 px-3 py-2"
-                value={motivo}
-                onChange={(e) => setMotivo(e.target.value)}
-              />
-            </label>
-
-            {error && (
-              <p
-                role="alert"
-                className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
-              >
-                {error}
-              </p>
-            )}
-
-            <div className="flex flex-wrap justify-end gap-2">
-              {acciones.map((a) => (
-                <button
-                  key={a.estado}
-                  type="button"
-                  disabled={enviando}
-                  onClick={() => accionar(a.estado, Boolean(a.peligro))}
-                  className={`rounded-md px-3 py-2 text-sm disabled:opacity-50 ${
-                    a.peligro
-                      ? 'border border-red-300 text-red-800 hover:bg-red-50'
-                      : 'bg-slate-900 text-white'
-                  }`}
-                >
-                  {a.texto}
-                </button>
-              ))}
+    <Dialog open={abierto} onOpenChange={(o) => { if (!o) onCerrar() }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{estado === 'bloqueo' ? 'Bloqueo' : 'Reserva'}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="rounded-md bg-slate-100 px-3 py-2 text-sm">
+            <div className="font-medium">{cancha.nombre}</div>
+            <div className="text-slate-600">
+              {fecha(turno.comienza_at)} · {hora(turno.comienza_at)} a{' '}
+              {hora(turno.termina_at)}
             </div>
-          </>
-        )}
-      </div>
-    </Modal>
+            <div className="text-slate-600">
+              {turno.cliente ?? turno.motivo ?? '—'} · {NOMBRE[estado] ?? estado}
+            </div>
+          </div>
+
+          {acciones.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              Una reserva {NOMBRE[estado]?.toLowerCase()} ya no se puede cambiar.
+            </p>
+          ) : (
+            <>
+              <label className="block space-y-1">
+                <span className="text-sm text-slate-600">
+                  Motivo <span className="text-slate-400">(obligatorio para cancelar)</span>
+                </span>
+                <input
+                  className="w-full rounded-md border border-slate-300 px-3 py-2"
+                  value={motivo}
+                  onChange={(e) => setMotivo(e.target.value)}
+                />
+              </label>
+
+              {error && (
+                <p
+                  role="alert"
+                  className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
+                >
+                  {error}
+                </p>
+              )}
+
+              <div className="flex flex-wrap justify-end gap-2">
+                {acciones.map((a) => (
+                  <button
+                    key={a.estado}
+                    type="button"
+                    disabled={enviando}
+                    onClick={() => accionar(a.estado, Boolean(a.peligro))}
+                    className={`rounded-md px-3 py-2 text-sm disabled:opacity-50 ${
+                      a.peligro
+                        ? 'border border-red-300 text-red-800 hover:bg-red-50'
+                        : 'bg-slate-900 text-white'
+                    }`}
+                  >
+                    {a.texto}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

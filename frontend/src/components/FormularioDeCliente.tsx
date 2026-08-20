@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Modal } from '@/components/Modal'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
 import { clientes as api } from '@/lib/api'
 import type { Cliente, ClienteEntrada } from '@/lib/api'
 
@@ -79,114 +81,120 @@ export function FormularioDeCliente({
     }
   }
 
+  // `onOpenChange` recibe el estado NUEVO. Se llama a `onCerrar` sólo cuando
+  // llega `false`: el padre es quien tiene el estado y quien decide. Hoy nunca
+  // llega `true` —ninguno de estos diálogos tiene `DialogTrigger`, los abre el
+  // padre—, así que el `if` es defensivo. Ver la nota en `dialogos.test.tsx`
+  // sobre por qué no se puede cubrir con un test.
   return (
-    <Modal
-      abierto={abierto}
-      titulo={cliente ? `Editar ${cliente.nombre}` : 'Nuevo cliente'}
-      onCerrar={onCerrar}
-    >
-      <form onSubmit={enviar} className="space-y-3">
-        <label className="block space-y-1">
-          <span className="text-sm text-slate-600">Nombre</span>
-          <input
-            className="w-full rounded-md border border-slate-300 px-3 py-2"
-            value={datos.nombre}
-            onChange={(e) => set('nombre', e.target.value)}
-          />
-        </label>
-        <p className="text-xs text-slate-500">
-          Un solo campo y no nombre + apellido: la reserva se toma por teléfono y
-          lo que queda anotado es "Juan de los martes". Partirlo en dos deja dos
-          columnas medio vacías y una búsqueda peor.
-        </p>
-
-        <div className="grid grid-cols-2 gap-2">
-          <label className="space-y-1">
-            <span className="text-sm text-slate-600">Teléfono</span>
+    <Dialog open={abierto} onOpenChange={(o) => { if (!o) onCerrar() }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{cliente ? `Editar ${cliente.nombre}` : 'Nuevo cliente'}</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={enviar} className="space-y-3">
+          <label className="block space-y-1">
+            <span className="text-sm text-slate-600">Nombre</span>
             <input
               className="w-full rounded-md border border-slate-300 px-3 py-2"
-              value={datos.telefono ?? ''}
-              onChange={(e) => set('telefono', e.target.value)}
+              value={datos.nombre}
+              onChange={(e) => set('nombre', e.target.value)}
             />
           </label>
-          <label className="space-y-1">
-            <span className="text-sm text-slate-600">Email</span>
-            <input
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-              value={datos.email ?? ''}
-              onChange={(e) => set('email', e.target.value)}
-            />
-          </label>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2">
-          <label className="space-y-1">
-            <span className="text-sm text-slate-600">Documento</span>
-            <input
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-              value={datos.documento ?? ''}
-              onChange={(e) => set('documento', e.target.value)}
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="text-sm text-slate-600">CUIT</span>
-            <input
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-              value={datos.cuit ?? ''}
-              onChange={(e) => set('cuit', e.target.value)}
-            />
-          </label>
-        </div>
-        <p className="text-xs text-slate-500">
-          Documento y CUIT son texto, no números: un DNI con cero adelante no
-          sobrevive a un entero, y el CUIT puede venir con guiones. Hacen falta
-          para facturar.
-        </p>
-
-        <label className="block space-y-1">
-          <span className="text-sm text-slate-600">Observaciones</span>
-          <input
-            className="w-full rounded-md border border-slate-300 px-3 py-2"
-            value={datos.observaciones ?? ''}
-            onChange={(e) => set('observaciones', e.target.value)}
-          />
-        </label>
-
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={datos.activo}
-            onChange={(e) => set('activo', e.target.checked)}
-          />
-          Activo
-        </label>
-
-        {error && (
-          <p
-            role="alert"
-            className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
-          >
-            {error}
+          <p className="text-xs text-slate-500">
+            Un solo campo y no nombre + apellido: la reserva se toma por teléfono y
+            lo que queda anotado es "Juan de los martes". Partirlo en dos deja dos
+            columnas medio vacías y una búsqueda peor.
           </p>
-        )}
 
-        <div className="flex justify-end gap-2 pt-1">
-          <button
-            type="button"
-            onClick={onCerrar}
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100"
-          >
-            Cancelar
-          </button>
-          <button
-            type="submit"
-            disabled={enviando}
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
-          >
-            {enviando ? 'Guardando…' : 'Guardar'}
-          </button>
-        </div>
-      </form>
-    </Modal>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="space-y-1">
+              <span className="text-sm text-slate-600">Teléfono</span>
+              <input
+                className="w-full rounded-md border border-slate-300 px-3 py-2"
+                value={datos.telefono ?? ''}
+                onChange={(e) => set('telefono', e.target.value)}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm text-slate-600">Email</span>
+              <input
+                className="w-full rounded-md border border-slate-300 px-3 py-2"
+                value={datos.email ?? ''}
+                onChange={(e) => set('email', e.target.value)}
+              />
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <label className="space-y-1">
+              <span className="text-sm text-slate-600">Documento</span>
+              <input
+                className="w-full rounded-md border border-slate-300 px-3 py-2"
+                value={datos.documento ?? ''}
+                onChange={(e) => set('documento', e.target.value)}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm text-slate-600">CUIT</span>
+              <input
+                className="w-full rounded-md border border-slate-300 px-3 py-2"
+                value={datos.cuit ?? ''}
+                onChange={(e) => set('cuit', e.target.value)}
+              />
+            </label>
+          </div>
+          <p className="text-xs text-slate-500">
+            Documento y CUIT son texto, no números: un DNI con cero adelante no
+            sobrevive a un entero, y el CUIT puede venir con guiones. Hacen falta
+            para facturar.
+          </p>
+
+          <label className="block space-y-1">
+            <span className="text-sm text-slate-600">Observaciones</span>
+            <input
+              className="w-full rounded-md border border-slate-300 px-3 py-2"
+              value={datos.observaciones ?? ''}
+              onChange={(e) => set('observaciones', e.target.value)}
+            />
+          </label>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={datos.activo}
+              onChange={(e) => set('activo', e.target.checked)}
+            />
+            Activo
+          </label>
+
+          {error && (
+            <p
+              role="alert"
+              className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
+            >
+              {error}
+            </p>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onCerrar}
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={enviando}
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+            >
+              {enviando ? 'Guardando…' : 'Guardar'}
+            </button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
