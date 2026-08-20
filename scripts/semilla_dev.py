@@ -37,10 +37,11 @@ with S() as s:
                       punto_venta_arca=1)
     norte = Sucursal(nombre="Complejo Norte", localidad="Mercedes",
                      telefono="2324-556677", punto_venta_arca=2)
-    s.add_all([centro, norte]); s.commit()
+    s.add_all([centro, norte])
+    s.commit()
 
     canchas = [
-        Cancha(sucursal_id=centro.id, nombre="Cancha %d" % i, deporte=Deporte.PADEL,
+        Cancha(sucursal_id=centro.id, nombre=f"Cancha {i}", deporte=Deporte.PADEL,
                duracion_turno_min=90, techada=(i != 3), orden=i)
         for i in (1, 2, 3)
     ]
@@ -48,13 +49,15 @@ with S() as s:
                           deporte=Deporte.FUTBOL, duracion_turno_min=60, orden=9))
     canchas.append(Cancha(sucursal_id=norte.id, nombre="Cancha A",
                           deporte=Deporte.PADEL, duracion_turno_min=90, orden=1))
-    s.add_all(canchas); s.commit()
+    s.add_all(canchas)
+    s.commit()
 
     s.add_all([
         Cliente(nombre="Juan Perez", telefono="2324-401122"),
         Cliente(nombre="Grupo de los martes", telefono="2324-556677"),
         Cliente(nombre="Ana Gomez", telefono="11-5566-7788"),
-    ]); s.commit()
+    ])
+    s.commit()
 
     s.add_all([
         Tarifa(sucursal_id=centro.id, nombre="Diurna", alcance_dia=AlcanceDia.TODOS,
@@ -70,5 +73,6 @@ with S() as s:
         Tarifa(sucursal_id=norte.id, nombre="Unica", alcance_dia=AlcanceDia.TODOS,
                hora_desde=time(8, 0), hora_hasta=time(23, 59),
                precio=Decimal("11000.00")),
-    ]); s.commit()
+    ])
+    s.commit()
     print("sembrado: 2 sucursales, 5 canchas, 3 clientes, 4 tarifas")
