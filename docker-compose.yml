@@ -1,0 +1,95 @@
+# Instancia `dev` de LibraClub en el VPS, y entorno de desarrollo local.
+#
+# Mismo patrón que los `dev` del resto de la familia: NO es `panel_admin.py`
+# —ese vive en LibraCore y provisiona instancias de CLIENTE bajo
+# `clientes/<slug>/`—. Un compose, dos redes, y Nginx Proxy Manager alcanza al
+# contenedor por su alias en la red compartida.
+
+services:
+  # 🔴 La clave del servicio lleva el nombre del producto y no es `db` ni
+  # `postgres`: Compose convierte la clave en un alias de red, y `stack-net` la
+  # comparte todo el VPS. Dos composes con la misma clave se turnan por
+  # round-robin del DNS interno — ya pasó en esta familia, y el síntoma fue un
+  # dominio de cliente sirviendo la demo.
+  libraclub-postgres:
+    # La MISMA imagen que el CI y que producción: el collation viene de la
+    # imagen y la alpine ordena por bytes.
+    image: postgres:16
+    container_name: libraclub-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: libraclub
+      POSTGRES_USER: libraclub
+      # Sin default a propósito: `:?` aborta el `up` si falta, en vez de
+      # levantar la base con una clave escrita en git.
+      POSTGRES_PASSWORD: ${LIBRACLUB_POSTGRES_PASSWORD:?hay que definirla en el .env}
+      TZ: America/Argentina/Buenos_Aires
+    volumes:
+      - libraclub-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U libraclub -d libraclub"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # Sin `ports:` a propósito: sólo se llega desde la red interna.
+    networks: [datos]
+
+  libraclub-dev:
+    build:
+      context: .
+    container_name: libraclub-dev
+    depends_on:
+      libraclub-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 768m
+    mem_reservation: 256m
+    cpus: 1.0
+    ports:
+      - "8098:8000"
+    volumes:
+      # El bind mount es para el `--reload` del código Python. Taparía el build
+      # del frontend si viviera dentro de /app: por eso el Dockerfile lo hornea
+      # en /opt/frontend-dist, fuera del árbol montado.
+      - ./:/app
+      # Los ZIP de backup, en un volumen propio y NO en el árbol montado de
+      # arriba: ese árbol es el checkout de git del servidor, y dejarle archivos
+      # nuevos adentro le complica el `git pull` del próximo deploy. Va después
+      # del bind mount a propósito — el montaje más específico gana.
+      - libraclub-datos:/app/datos
+    command: uvicorn app.asgi:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      # Las tres sin default: la app tiene que fallar al arrancar si falta
+      # alguna, no levantar con un secreto de juguete en un dominio público.
+      - SECRET_KEY=${SECRET_KEY:?hay que definirla en el .env}
+      - LIBRACLUB_ADMIN_USERNAME=${LIBRACLUB_ADMIN_USERNAME:-admin}
+      - LIBRACLUB_ADMIN_PASSWORD=${LIBRACLUB_ADMIN_PASSWORD:?hay que definirla en el .env}
+      - DATABASE_URL=postgresql+psycopg://libraclub:${LIBRACLUB_POSTGRES_PASSWORD:?hay que definirla en el .env}@libraclub-postgres:5432/libraclub
+      - ENTORNO=dev
+      # Como el backoffice (admin.libraclub.com.ar) administra los usuarios de
+      # esta instancia, y como el panel del dueño pide `/admin/resumen`.
+      # **Con default vacío a propósito**, al revés que las tres de arriba:
+      # `libraauth` trata el token vacío como "no definido" y el endpoint se
+      # comporta igual que si pidiera sesión de admin. O sea que no ponerlo no
+      # abre nada; lo que abriría algo sería ponerle un valor adivinable, y por
+      # eso no hay uno de ejemplo.
+      - LIBRA_SERVICE_TOKEN=${LIBRA_SERVICE_TOKEN:-}
+      # Dónde escribe los backups. Sin esto caen en `./datos` relativo al
+      # directorio de trabajo, o sea adentro del bind mount.
+      - DATA_DIR=/app/datos
+      - TZ=America/Argentina/Buenos_Aires
+    networks: [stack-net, datos]
+
+volumes:
+  libraclub-postgres-data:
+  libraclub-datos:
+
+networks:
+  datos:
+    name: libraclub-dev-datos
+  # La red compartida del VPS, donde vive Nginx Proxy Manager. Es la que hace
+  # que el proxy host pueda apuntar a `libraclub-dev:8000` por nombre.
+  stack-net:
+    external: true
+    name: stack_stack-net

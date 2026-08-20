@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+/* Tokens propios, mientras `libra-ui` no esté integrado (ver TASKS.md). Están
+   acá y no repetidos por componente para que el día que entre el kit de la
+   suite se cambien en un solo lugar. */
+@theme {
+  --color-cancha: oklch(0.62 0.14 155);
+  --color-ocupado: oklch(0.58 0.16 25);
+  --color-bloqueo: oklch(0.55 0.02 260);
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+}

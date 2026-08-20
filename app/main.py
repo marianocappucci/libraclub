@@ -1,0 +1,95 @@
+"""Construcción de la aplicación.
+
+`crear_app()` no se ejecuta al importar: el entrypoint es `app/asgi.py`. Es a
+propósito — con la app armada al importar, la configuración queda resuelta por
+el primer import y un test que quiera otra base ya llega tarde.
+"""
+
+from __future__ import annotations
+
+import os
+
+from fastapi import Depends, FastAPI
+from libraauth.bootstrap import ensure_default_admin
+from libraauth.models import Base as AuthBase
+from libracore.config_router import build_backup_router
+from libracore.respaldo import Instancia
+
+from app import db
+from app.auth import UserRepository, construir_session_auth, require_admin
+from app.config import Config
+from app.routers import admin, disponibilidad, maestros, reservas, salud
+from app.routers import auth as auth_router
+
+
+def _instancia_a_respaldar(config: Config) -> Instancia:
+    """Qué se lleva el backup.
+
+    Una sola base y ningún archivo en disco: `usuarios` vive en la misma base
+    que el dominio, y no hay logos ni adjuntos todavía. `directorios=[]` no es un
+    pendiente — es que el backup **es** exactamente el dump, y no hay forma de
+    bajarse una copia a la que le falte algo.
+
+    Cuando entre la facturación (F3) esto cambia: el certificado de ARCA es un
+    archivo, y hay que decidir explícitamente si entra al ZIP o no.
+    """
+    return Instancia(nombre="libraclub", postgres_url=config.database_url)
+
+
+def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> FastAPI:
+    # Se resuelve acá y no adentro de `db.inicializar` porque el router de backup
+    # necesita la MISMA config: la URL para el dump y el directorio de datos para
+    # los ZIP.
+    config = config or Config.desde_entorno()
+    db.inicializar(config)
+    motor = db.engine()
+
+    # Las tablas del motor de auth las crea el motor, con el mismo engine que el
+    # dominio: `usuarios` vive en la MISMA base, así que las FK de sus tablas
+    # satélite resuelven. Las tablas propias van por Alembic; las de `libraauth`
+    # no, porque su schema lo versiona él y no nosotros.
+    AuthBase.metadata.create_all(motor)
+
+    usuarios = UserRepository(db.fabrica_de_sesiones())
+    if sembrar_admin:
+        # Variante **fail-closed**: sin `LIBRACLUB_ADMIN_PASSWORD` la app no
+        # levanta, salvo `ENV=development`. La otra (`ensure_admin_user`) inventa
+        # una contraseña y la imprime, y no son intercambiables.
+        ensure_default_admin(usuarios, env_prefix="LIBRACLUB")
+
+    app = FastAPI(
+        title="LibraClub",
+        description="Gestión de complejos deportivos — familia Libra",
+        version="0.1.0",
+    )
+    # El router de `libraauth` los lee de acá por nombre: sin estos dos, el login
+    # devuelve 500 al primer request y no al arrancar.
+    app.state.users = usuarios
+    app.state.session_auth = construir_session_auth(usuarios)
+
+    app.include_router(salud.router)
+    app.include_router(auth_router.router)
+    for router in maestros.TODOS:
+        app.include_router(router)
+    app.include_router(reservas.router)
+    app.include_router(disponibilidad.router)
+    app.include_router(admin.router)
+
+    # "Datos / Backup": el motor de la familia, con la dependencia de rol de este
+    # producto. El prefijo es `/api/config` porque es el que consume la pantalla
+    # compartida de `libra-ui`; renombrarlo obligaría a forkear esa pantalla.
+    #
+    # 🔴 `cerrar_conexiones`/`reabrir_conexiones` no son opcionales: sin ellos el
+    # restore contesta `ok` y no tiene efecto hasta que alguien reinicie el
+    # contenedor, porque el pool sigue con la conexión vieja. La pantalla diría
+    # que salió bien y los datos serían los de antes.
+    app.include_router(
+        build_backup_router(
+            _instancia_a_respaldar(config),
+            os.path.join(config.directorio_de_datos, "backups"),
+            cerrar_conexiones=motor.dispose,
+            reabrir_conexiones=motor.dispose,
+        ),
+        dependencies=[Depends(require_admin)],
+    )
+    return app

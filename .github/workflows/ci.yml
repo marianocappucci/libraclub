@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  # Sin `push` a ramas: `develop` y `main` estan protegidas, asi que todo entra
+  # por PR y el run del PR verifica el MERGE -- que es exactamente lo que queda
+  # en la rama. El push repetia esa misma verificacion sobre un arbol identico.
+  pull_request:
+    branches: [develop, main]
+
+# Una sola corrida viva por rama. Si entra un push nuevo mientras esta
+# corriendo, se cancela la anterior en vez de pagar las dos: su resultado ya no
+# le sirve a nadie, porque reporta sobre un codigo que no es el que quedo.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # La MISMA imagen que producción (ver docker-compose.yml). No es un
+        # detalle de tamaño: el collation viene de la imagen y `-alpine` ordena
+        # por bytes, así que un `ORDER BY` sobre texto puede dar distinto. Un CI
+        # verde sobre otra imagen no dice nada sobre producción.
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: libraclub_test
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+        ports: ['5432:5432']
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/libraclub_test
+      TZ: America/Argentina/Buenos_Aires
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # El backup corre `pg_dump`/`pg_restore` de verdad, así que el runner los
+      # necesita — y en la MISMA major que el servicio de arriba. No alcanza con
+      # "que estén": `pg_restore` 17 contra un servidor 16 aborta el restore
+      # entero. El `grep` convierte eso en un CI rojo hoy en vez de un botón roto
+      # en producción.
+      - name: Cliente de PostgreSQL (mismo major que el servicio)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-16
+          pg_restore --version
+          pg_restore --version | grep -q ' 16\.'
+
+      - run: pip install -e '.[dev]'
+
+      - name: Lint
+        run: ruff check .
+
+      # La suite corre contra PostgreSQL real. Nunca contra SQLite: la garantía
+      # central de este producto es un constraint de exclusión GiST, que SQLite
+      # ni siquiera tiene — una suite verde sobre SQLite estaría midiendo otro
+      # producto.
+      - name: Tests
+        # `-rs` lista los tests SALTEADOS con su motivo. Sin eso, un módulo que
+        # se saltea entero —por una dependencia que falta en el runner— deja el
+        # job igual de verde que uno que corrió todo. Y en esta suite el módulo
+        # que más importa es justamente el que necesita PostgreSQL.
+        run: pytest -q -rs --cov=app --cov-report=term-missing
+
+      # 🔑 El gate de F1 tiene que haber corrido de verdad, no haberse salteado.
+      # Un `pytest` verde con cero tests de concurrencia se ve idéntico a uno con
+      # los nueve — y la diferencia es toda la garantía del producto.
+      - name: El gate de concurrencia corrio
+        run: |
+          pytest tests/test_concurrencia.py -q --collect-only \
+            | tail -1 | grep -qE '[0-9]+ tests? collected'
+          pytest tests/test_concurrencia.py -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # `npm ci`, no `npm install`: instala exactamente lo del lock. Con
+      # `install` el CI podría estar probando otras versiones que las que se
+      # publican.
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+      # 🔴 No es redundante con el paso de arriba. `npm run build` devuelve 0
+      # aunque `tsc -b` haya fallado con errores y no haya escrito `dist/`. Sin
+      # este chequeo el job queda verde habiendo producido nada, que es
+      # exactamente lo que el job tiene que impedir.
+      - name: El build dejo algo de verdad
+        run: test -f dist/index.html
