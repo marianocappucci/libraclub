@@ -67,8 +67,10 @@ export interface Cancha {
   duracion_turno_min: number
   techada: boolean
   iluminacion: boolean
+  superficie: string | null
   orden: number
   activa: boolean
+  observaciones: string | null
 }
 
 export interface Tarifa {
@@ -82,6 +84,8 @@ export interface Tarifa {
   hora_hasta: string
   precio: string
   sena_porcentaje: number
+  vigente_desde: string | null
+  vigente_hasta: string | null
   prioridad: number
   activa: boolean
 }
@@ -128,12 +132,58 @@ export const sucursales = {
   listar: () => api.get<Sucursal[]>('/api/sucursales'),
 }
 
+/** Lo que se manda al crear o editar una cancha. */
+export interface CanchaEntrada {
+  sucursal_id: number
+  nombre: string
+  deporte: string
+  duracion_turno_min: number
+  techada: boolean
+  iluminacion: boolean
+  superficie: string | null
+  orden: number
+  activa: boolean
+  observaciones: string | null
+}
+
 export const canchas = {
   listar: () => api.get<Cancha[]>('/api/canchas'),
+  crear: (cuerpo: CanchaEntrada) => api.post<Cancha>('/api/canchas', cuerpo),
+  // PUT y no PATCH: el endpoint reemplaza la fila entera, asi que el formulario
+  // manda TODOS los campos. Mandar solo los tocados dejaria los demas en el
+  // default del schema —una cancha techada volveria a no serlo sin que nadie la
+  // haya tocado.
+  editar: (id: number, cuerpo: CanchaEntrada) =>
+    api.put<Cancha>(`/api/canchas/${id}`, cuerpo),
+  borrar: (id: number) => api.del(`/api/canchas/${id}`),
+}
+
+/** Lo que se manda al crear o editar una tarifa. */
+export interface TarifaEntrada {
+  sucursal_id: number
+  cancha_id: number | null
+  nombre: string
+  alcance_dia: 'todos' | 'dia_semana' | 'feriado'
+  /** Obligatorio con `alcance_dia = 'dia_semana'`, y PROHIBIDO en los otros dos:
+   *  hay un CHECK en la base y un validador en el schema. Mandar un dia con
+   *  alcance `feriado` devuelve 422, no se ignora. */
+  dia_semana: number | null
+  hora_desde: string
+  hora_hasta: string
+  precio: string
+  sena_porcentaje: number
+  vigente_desde: string | null
+  vigente_hasta: string | null
+  prioridad: number
+  activa: boolean
 }
 
 export const tarifas = {
   listar: () => api.get<Tarifa[]>('/api/tarifas'),
+  crear: (cuerpo: TarifaEntrada) => api.post<Tarifa>('/api/tarifas', cuerpo),
+  editar: (id: number, cuerpo: TarifaEntrada) =>
+    api.put<Tarifa>(`/api/tarifas/${id}`, cuerpo),
+  borrar: (id: number) => api.del(`/api/tarifas/${id}`),
 }
 
 export const clientes = {

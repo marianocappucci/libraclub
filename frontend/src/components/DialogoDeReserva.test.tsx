@@ -12,8 +12,10 @@ const CANCHA: Cancha = {
   duracion_turno_min: 90,
   techada: true,
   iluminacion: true,
+  superficie: null,
   orden: 0,
   activa: true,
+  observaciones: null,
 }
 
 const TURNO: Turno = {
