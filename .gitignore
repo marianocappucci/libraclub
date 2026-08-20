@@ -23,3 +23,15 @@ gate.xml
 # trackear adentro del árbol le complica el `git pull` del próximo deploy — y
 # hoy ya pasó una vez, con el script de siembra.
 admin/
+
+# Credenciales de la API de Nginx Proxy Manager, que usa el alta de un cliente
+# para crearle su dominio. Lo genera `scripts/npm_setup.py` en el servidor.
+#
+# 🔴 Su ausencia NO es ruidosa: `libracore.provisioning.client_from_config()`
+# hace `import npm_api` y devuelve `None` en silencio, así que un alta sin este
+# archivo termina sin crear el dominio y sin decir por qué.
+scripts/.npm_config.json
+
+# Las instancias de cliente que provisiona el backoffice. Son datos del
+# servidor, no del producto.
+clientes/
