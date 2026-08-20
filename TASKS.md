@@ -26,8 +26,11 @@ Trabajo concreto vigente. Lo estratégico está en `ROADMAP.md`.
 - [x] Grilla semanal de la agenda, con precio en los turnos libres
 - [x] Listado de canchas y de tarifas
 - [x] Helper único de fechas (`src/lib/fechas.ts`), con tests
-- [ ] **Alta de reserva desde la grilla** — hoy la agenda es de sólo lectura.
-      Es lo que falta para que F1 se pueda usar de verdad en un mostrador.
+- [x] **Alta de reserva desde la grilla.** Click en un turno libre → diálogo con
+      cliente (existente o nuevo), turnos, origen, estado y observaciones.
+      Verificado en un navegador real, no sólo con tests.
+- [x] Detalle de una reserva ocupada, con las acciones que su estado permite:
+      confirmar, marcar jugada, no vino y cancelar (con motivo obligatorio).
 - [ ] ABM (alta/edición/baja) de canchas y tarifas desde la UI. La API los
       soporta enteros; las pantallas todavía sólo listan.
 - [ ] **Integrar `libra-ui`.** El estándar de la familia es
@@ -43,6 +46,23 @@ Trabajo concreto vigente. Lo estratégico está en `ROADMAP.md`.
       `["ok", "ok"]`. Sin ese control, el verde de arriba no prueba nada.
 - [x] Un tercer test verifica que el constraint volvió: el `finally` que lo
       repone es justo donde no conviene confiar.
+
+## Decisiones de la UI que valen como regla de negocio
+
+- **Una reserva de N turnos manda el precio explícito.** La tarifa es por turno
+  estándar y el backend **no prorratea ni multiplica**: librado a sí mismo,
+  cobraría un solo turno por una reserva de tres horas. El diálogo muestra la
+  cuenta (`3 × $14.000 = $42.000`) y la manda como `precio`. Multiplicar en
+  silencio del lado del servidor sería inventar una regla; así el número lo ve y
+  lo confirma una persona.
+  > Consecuencia: con precio explícito **no se calcula seña** (el servicio no
+  > inventa una seña sobre un número elegido a mano). Con un solo turno, que es
+  > el caso normal, decide el tarifario y la seña sale sola.
+- **Cancelar exige motivo.** Sin él, una discusión con un cliente dentro de un
+  mes no se puede reconstruir.
+- La tabla de transiciones del detalle es un **espejo** de la máquina de estados
+  del backend, no la fuente: el servidor sigue rechazando con 409 lo que no
+  corresponda. Lo que hace la UI es no ofrecer un botón que va a fallar.
 
 ## Conocidos, decididos y no arreglados
 
