@@ -10,6 +10,18 @@
    familia sale sin estilos. Mismo patrón que el resto de los productos. */
 @source "../node_modules/libra-ui";
 
+/* 🔴 **Los tests NO se escanean.** Tailwind lee el fuente como texto plano, así
+   que las clases que un test usa como DATO terminan emitidas en el CSS de
+   producción. Pasó el 2026-08-20 con `sin-colores-fijos.test.ts`, que lleva
+   `text-slate-600`, `bg-gray-100`, `border-zinc-300` y `border-neutral-400`
+   como controles de su patrón: las cuatro viajaron al bundle desplegado —
+   medido sobre el CSS servido por `dev.libraclub.com.ar`—. O sea que la guarda
+   contra los colores fijos era la que los estaba metiendo.
+
+   Va como exclusión general y no arreglando ese archivo: cualquier test futuro
+   que mencione una clase tendría el mismo efecto, y nadie se acordaría. */
+@source not "./**/*.test.{ts,tsx}";
+
 @custom-variant dark (&:is(.dark *));
 
 /* 🔴 **Sin este bloque no hay colores.** En Tailwind v4 una utilidad como
