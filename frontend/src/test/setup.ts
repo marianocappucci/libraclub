@@ -47,3 +47,29 @@ if (typeof HTMLDialogElement !== 'undefined' && !HTMLDialogElement.prototype.sho
     this.dispatchEvent(new Event('close'))
   }
 }
+
+/**
+ * jsdom no implementa `window.matchMedia`.
+ *
+ * `libra-ui/use-mobile` lo llama para decidir si la sidebar arranca colapsada,
+ * así que **cualquier** test que monte el Layout del kit explota con
+ * "matchMedia is not a function" — un error del entorno, no del código.
+ *
+ * 🟡 **Devuelve siempre "no matchea", y hay que saber qué NO prueba.** Con este
+ * doble todo test corre en la rama de escritorio: el comportamiento en mobile
+ * —que la sidebar arranque cerrada, que aparezca el trigger flotante— es
+ * invisible acá. Eso se mide en un navegador, redimensionando de verdad.
+ */
+if (typeof window !== 'undefined' && !window.matchMedia) {
+  window.matchMedia = (query: string) =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList
+}

@@ -11,12 +11,12 @@ import { AuthProvider, useAuth } from '@/context/AuthContext'
 import { SucursalProvider } from '@/context/SucursalContext'
 
 function Ruteo() {
-  const { usuario, cargando } = useAuth()
+  const { user, loading } = useAuth()
 
-  // Mientras no se sepa si hay sesión no se decide nada: con un `if (!usuario)`
+  // Mientras no se sepa si hay sesión no se decide nada: con un `if (!user)`
   // directo, cada recarga mandaría al login a alguien que ya estaba adentro.
-  if (cargando) return <p className="p-6 text-slate-500">Cargando…</p>
-  if (!usuario) return <Login />
+  if (loading) return <p className="p-6 text-muted-foreground">Cargando…</p>
+  if (!user) return <Login />
 
   return (
     <SucursalProvider>
