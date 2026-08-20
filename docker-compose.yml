@@ -47,7 +47,16 @@ services:
     mem_reservation: 256m
     cpus: 1.0
     ports:
-      - "8098:8000"
+      # 🔴 El puerto del HOST tiene que ser único en el VPS, que corre ~65
+      # contenedores. El 8098 —que era el valor original de este archivo— ya lo
+      # usa `libracargo-suitrans`, y el 8097 `libracargo-dev`. Si dos composes
+      # piden el mismo, el segundo `up` falla; y si alguien mide el servicio
+      # equivocado, el puerto contesta igual y parece que anduvo.
+      #
+      # Al asignar uno nuevo, mirar lo que **está escuchando de verdad**
+      # (`ss -ltn`) y no la lista de puertos que publica Docker: hay servicios
+      # del VPS que escuchan sin ser contenedores.
+      - "8099:8000"
     volumes:
       # El bind mount es para el `--reload` del código Python. Taparía el build
       # del frontend si viviera dentro de /app: por eso el Dockerfile lo hornea
