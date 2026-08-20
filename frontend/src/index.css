@@ -1,14 +1,375 @@
 @import "tailwindcss";
+/* Las animaciones de los componentes de Radix (`animate-in`, `fade-in`,
+   `slide-in-from-*`). Las usan el diálogo, el sheet, el select, el dropdown y
+   el tooltip: sin esto esas utilidades no existen y los cinco aparecen de
+   golpe, sin transición. */
+@import "tw-animate-css";
 
-/* Tokens propios, mientras `libra-ui` no esté integrado (ver TASKS.md). Están
-   acá y no repetidos por componente para que el día que entre el kit de la
-   suite se cambien en un solo lugar. */
-@theme {
-  --color-cancha: oklch(0.62 0.14 155);
-  --color-ocupado: oklch(0.58 0.16 25);
-  --color-bloqueo: oklch(0.55 0.02 260);
+/* Tailwind v4 no escanea node_modules por defecto, y `libra-ui` usa clases de
+   utilidad en su propio JSX: sin esto el motor no las genera y el layout de la
+   familia sale sin estilos. Mismo patrón que el resto de los productos. */
+@source "../node_modules/libra-ui";
+
+@custom-variant dark (&:is(.dark *));
+
+/* 🔴 **Sin este bloque no hay colores.** En Tailwind v4 una utilidad como
+   `bg-primary` sólo existe si el tema define `--color-primary`; no hay una
+   paleta implícita que la respalde. Hasta el 2026-08-19 este archivo tenía las
+   ocho líneas de arriba y nada más, y el build salía **sin una sola regla** de
+   `bg-primary`, `bg-sidebar`, `text-muted-foreground`, `border-border` ni
+   `bg-background` — medido sobre el CSS generado, que es donde se ve—. La
+   pantalla cargaba, la sidebar estaba, los botones estaban, y todo se veía en
+   blanco y negro.
+
+   Los valores son los mismos que el resto de la familia (referencia:
+   Gestiolibra). No se inventa una paleta propia: un producto que se ve distinto
+   de sus hermanos es una divergencia, no una identidad. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
-body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
 }
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* ------------------------------------------------------------------ imprimir
+   La hoja se monta en un portal, como hijo directo de `body`, y en pantalla
+   está oculta. Al imprimir se invierte: se esconde todo lo demás —incluida la
+   sidebar y la barra de filtros— y queda sólo la hoja.
+
+   🔴 `body > *:not(#hoja-impresa)` y no `#root { display: none }`: los diálogos
+   de Radix también se montan en portales fuera de `#root`, así que ocultar sólo
+   la raíz dejaba el diálogo abierto impreso encima del listado. */
+.hoja-impresa {
+  display: none;
+}
+
+@media print {
+  body > *:not(#hoja-impresa) {
+    display: none !important;
+  }
+
+  .hoja-impresa {
+    display: block !important;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 9pt;
+    color: #000;
+  }
+
+  .hoja-impresa h1 {
+    font-size: 14pt;
+    font-weight: 700;
+    margin: 0 0 2mm;
+  }
+
+  .hoja-impresa header p {
+    margin: 0 0 1mm;
+    font-size: 8pt;
+    color: #333;
+  }
+
+  .hoja-impresa header .aviso {
+    font-weight: 700;
+    color: #000;
+  }
+
+  .hoja-impresa table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 3mm;
+  }
+
+  /* Que el encabezado se repita en cada hoja. Sin esto, a partir de la página 2
+     la tabla son números sin nombre de columna. */
+  .hoja-impresa thead {
+    display: table-header-group;
+  }
+
+  .hoja-impresa tr {
+    page-break-inside: avoid;
+  }
+
+  .hoja-impresa th,
+  .hoja-impresa td {
+    border-bottom: 0.2mm solid #999;
+    padding: 1mm 1.5mm;
+    text-align: left;
+  }
+
+  .hoja-impresa th {
+    border-bottom-width: 0.4mm;
+    font-weight: 700;
+  }
+
+  .hoja-impresa .derecha {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .hoja-impresa footer {
+    margin-top: 3mm;
+    font-size: 9pt;
+  }
+
+
+  /* ---------------------------------------------- la orden de carga en papel
+     No es un listado: es un documento. Va con membrete, los datos en bloques,
+     los importes en una tabla chica a la derecha y las dos firmas abajo — el
+     papel viaja con el camión y vuelve firmado. */
+  .hoja-orden .membrete {
+    display: flex;
+    align-items: flex-start;
+    gap: 6mm;
+    border-bottom: 0.4mm solid #000;
+    padding-bottom: 3mm;
+  }
+
+  .hoja-orden .membrete .logo {
+    max-height: 20mm;
+    max-width: 45mm;
+    object-fit: contain;
+  }
+
+  .hoja-orden .membrete .quien {
+    flex: 1;
+  }
+
+  .hoja-orden .membrete .empresa {
+    font-size: 13pt;
+    font-weight: 700;
+    margin: 0 0 1mm;
+  }
+
+  .hoja-orden .membrete .quien p {
+    margin: 0;
+    font-size: 8pt;
+  }
+
+  .hoja-orden .membrete .titulo {
+    text-align: right;
+  }
+
+  .hoja-orden .membrete .que {
+    font-size: 12pt;
+    font-weight: 700;
+    margin: 0;
+    letter-spacing: 0.4mm;
+  }
+
+  .hoja-orden .membrete .numero {
+    font-size: 12pt;
+    margin: 0.5mm 0 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .hoja-orden .membrete .fecha {
+    margin: 0.5mm 0 0;
+    font-size: 9pt;
+  }
+
+  .hoja-orden .bloque {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 2mm 4mm;
+    margin-top: 4mm;
+    border-bottom: 0.2mm solid #999;
+    padding-bottom: 3mm;
+  }
+
+  .hoja-orden .dato.ancho {
+    grid-column: span 2;
+  }
+
+  .hoja-orden .etiqueta {
+    display: block;
+    font-size: 7pt;
+    text-transform: uppercase;
+    letter-spacing: 0.2mm;
+    color: #444;
+  }
+
+  .hoja-orden .valor {
+    font-size: 10pt;
+  }
+
+  .hoja-orden .importes {
+    width: 70mm;
+    margin: 4mm 0 0 auto;
+    border-collapse: collapse;
+  }
+
+  .hoja-orden .importes th,
+  .hoja-orden .importes td {
+    border: none;
+    border-bottom: 0.2mm solid #ccc;
+    padding: 1mm 2mm;
+    font-size: 9pt;
+  }
+
+  .hoja-orden .importes td {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .hoja-orden .importes .total th,
+  .hoja-orden .importes .total td {
+    font-weight: 700;
+    font-size: 11pt;
+    border-bottom-width: 0.4mm;
+  }
+
+  .hoja-orden .observaciones {
+    margin-top: 4mm;
+    font-size: 9pt;
+  }
+
+  .hoja-orden .observaciones p {
+    margin: 0;
+  }
+
+  /* Las firmas, empujadas hacia abajo pero sin forzar una segunda hoja. */
+  .hoja-orden .firmas {
+    display: flex;
+    gap: 20mm;
+    margin-top: 20mm;
+    font-size: 8pt;
+    text-align: center;
+  }
+
+  .hoja-orden .firmas > div {
+    flex: 1;
+  }
+
+  .hoja-orden .firmas .linea {
+    display: block;
+    border-top: 0.2mm solid #000;
+    margin-bottom: 1mm;
+  }
+
+  .hoja-orden .pie {
+    margin-top: 8mm;
+    border-top: 0.2mm solid #ccc;
+    padding-top: 2mm;
+    font-size: 8pt;
+  }
+
+  .hoja-orden .pie p {
+    margin: 0;
+  }
+
+  .hoja-orden .pie .chico {
+    color: #555;
+    font-size: 7pt;
+  }
+
+  .no-imprimir {
+    display: none !important;
+  }
+
+  @page {
+    size: A4;
+    margin: 12mm 10mm;
+  }
+}
+
+/* Los tokens propios de LibraClub para los estados de la grilla se sacaron el
+   2026-08-20, el mismo dia que entraron: estaban declarados y **nadie los
+   usaba** — la grilla de la agenda pinta con clases fijas de Tailwind. Un
+   bloque que dice "esta es la paleta de los estados" mientras los estados usan
+   otra cosa es peor que no tenerlo: el proximo que lo lea va a creerle.
+
+   Si alguna vez la grilla se pinta con tokens, van aca y se verifica en el CSS
+   generado que la utilidad exista — Tailwind v4 solo emite lo que se usa. */

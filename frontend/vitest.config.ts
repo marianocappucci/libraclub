@@ -14,6 +14,12 @@ import viteConfig from './vite.config'
 export default mergeConfig(
   viteConfig,
   defineConfig({
+    // 🔴 `@vitejs/plugin-react` no toca node_modules, asi que los .tsx de
+    // `libra-ui` los transpila esbuild — y por default usa el runtime CLASICO,
+    // que emite `React.createElement` sin que React este importado: "React is
+    // not defined" al primer render. Con `automatic` usa el mismo runtime que
+    // el resto de la app.
+    esbuild: { jsx: 'automatic' },
     test: {
       environment: 'jsdom',
       globals: true,
