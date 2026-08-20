@@ -55,6 +55,62 @@ def api(engine, sesion, monkeypatch):
     AuthBase.metadata.drop_all(engine)
 
 
+@pytest.fixture
+def api_staff(engine, sesion, monkeypatch):
+    """Un cliente logueado como **encargado**, no como admin.
+
+    Es el rol de quien atiende el mostrador, y la mitad de las reglas de acceso
+    de este producto sólo se pueden probar desde acá: con todo hecho como admin,
+    un endpoint que quedó abierto de más se ve igual que uno bien cerrado.
+    """
+    monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
+    monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
+    AuthBase.metadata.drop_all(engine)
+    AuthBase.metadata.create_all(engine)
+    app = crear_app(_config())
+    app.state.users.create(
+        username="encargado", name="Encargado", password=CLAVE, role="staff"
+    )
+    cliente = TestClient(app, base_url="https://testserver")
+    respuesta = cliente.post(
+        "/auth/login", json={"username": "encargado", "password": CLAVE}
+    )
+    assert respuesta.status_code == 200, respuesta.text
+    yield cliente
+    AuthBase.metadata.drop_all(engine)
+
+
+def test_el_encargado_puede_dar_de_alta_un_cliente(api_staff):
+    """Es lo que hace posible tomar una reserva de alguien que llama por primera
+    vez. Si pidiera admin, el encargado cargaría todo bajo un cliente genérico."""
+    respuesta = api_staff.post("/api/clientes", json={"nombre": "Nuevo del teléfono"})
+    assert respuesta.status_code == 201, respuesta.text
+
+
+def test_el_encargado_no_puede_tocar_tarifas_ni_sucursales(api_staff):
+    """El control que hace que el test de arriba signifique algo.
+
+    Sin esto, bajar el rol de escritura de `clientes` podría haberlo bajado
+    **para los cinco maestros** sin que nada lo delatara: el alta de cliente
+    pasaría igual, y la tarifa también.
+    """
+    tarifa = api_staff.post(
+        "/api/tarifas",
+        json={
+            "sucursal_id": 1,
+            "nombre": "Trucha",
+            "hora_desde": "00:00:00",
+            "hora_hasta": "23:00:00",
+            "precio": "1.00",
+        },
+    )
+    assert tarifa.status_code == 403, tarifa.text
+    sucursal = api_staff.post("/api/sucursales", json={"nombre": "Trucha"})
+    assert sucursal.status_code == 403, sucursal.text
+    # Y leer sí puede: el encargado necesita ver la grilla y los precios.
+    assert api_staff.get("/api/tarifas").status_code == 200
+
+
 def test_salud_falla_cerrado_contra_la_base(api):
     """La sonda consulta la base: no dice `ok` sin haberla tocado."""
     for ruta in ("/salud", "/health"):

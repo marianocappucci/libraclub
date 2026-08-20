@@ -3,6 +3,8 @@ import { agenda, canchas as apiCanchas } from '@/lib/api'
 import type { Cancha, Semana, Turno } from '@/lib/api'
 import { hora, lunesDeLaSemana, nombreDelDia, pesos } from '@/lib/fechas'
 import { useSucursal } from '@/context/SucursalContext'
+import { DialogoDeReserva } from '@/components/DialogoDeReserva'
+import { DetalleDeReserva } from '@/components/DetalleDeReserva'
 
 /** Los colores por estado. Un solo lugar, para que la leyenda y la grilla no
  *  puedan decir cosas distintas. */
@@ -14,6 +16,11 @@ const COLOR: Record<string, string> = {
   bloqueo: 'bg-slate-300 text-slate-800 border-slate-400',
 }
 
+interface Seleccion {
+  cancha: Cancha
+  turno: Turno
+}
+
 export function Agenda() {
   const { actual, cargando: cargandoSucursal } = useSucursal()
   const [desde, setDesde] = useState(() => lunesDeLaSemana())
@@ -21,6 +28,8 @@ export function Agenda() {
   const [canchas, setCanchas] = useState<Cancha[]>([])
   const [error, setError] = useState<string | null>(null)
   const [cargando, setCargando] = useState(false)
+  const [nueva, setNueva] = useState<Seleccion | null>(null)
+  const [detalle, setDetalle] = useState<Seleccion | null>(null)
 
   const recargar = useCallback(() => {
     if (actual === null) return
@@ -45,7 +54,15 @@ export function Agenda() {
       </p>
     )
 
-  const dias = semana ? Object.keys(semana.canchas[String(canchas[0]?.id)] ?? {}) : []
+  // Los siete días se derivan de `semana.desde` y no de las claves de la
+  // primera cancha: con la primera cancha sin turnos —un feriado cerrado, por
+  // ejemplo— la grilla entera se quedaba sin columnas.
+  const dias = semana ? Array.from({ length: 7 }, (_, i) => correr(semana.desde, i)) : []
+
+  function elegir(cancha: Cancha, turno: Turno) {
+    if (turno.libre) setNueva({ cancha, turno })
+    else setDetalle({ cancha, turno })
+  }
 
   return (
     <div className="space-y-4">
@@ -72,7 +89,10 @@ export function Agenda() {
       </div>
 
       {error && (
-        <p className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <p
+          role="alert"
+          className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
+        >
           {error}
         </p>
       )}
@@ -105,7 +125,11 @@ export function Agenda() {
                   </p>
                   <div className="space-y-1">
                     {(semana?.canchas[String(cancha.id)]?.[dia] ?? []).map((t) => (
-                      <Casillero key={t.comienza_at} turno={t} />
+                      <Casillero
+                        key={t.comienza_at}
+                        turno={t}
+                        onElegir={() => elegir(cancha, t)}
+                      />
                     ))}
                     {(semana?.canchas[String(cancha.id)]?.[dia] ?? []).length === 0 && (
                       <p className="text-xs text-slate-400">Cerrado</p>
@@ -117,29 +141,65 @@ export function Agenda() {
           </div>
         </section>
       ))}
+
+      <DialogoDeReserva
+        abierto={nueva !== null}
+        cancha={nueva?.cancha ?? null}
+        turno={nueva?.turno ?? null}
+        onCerrar={() => setNueva(null)}
+        onCreada={() => {
+          setNueva(null)
+          recargar()
+        }}
+      />
+
+      <DetalleDeReserva
+        abierto={detalle !== null}
+        cancha={detalle?.cancha ?? null}
+        turno={detalle?.turno ?? null}
+        onCerrar={() => setDetalle(null)}
+        onCambiada={() => {
+          setDetalle(null)
+          recargar()
+        }}
+      />
     </div>
   )
 }
 
-function Casillero({ turno }: { turno: Turno }) {
+function Casillero({ turno, onElegir }: { turno: Turno; onElegir: () => void }) {
+  const etiqueta = turno.libre
+    ? `Reservar ${hora(turno.comienza_at)}`
+    : `Ver la reserva de ${hora(turno.comienza_at)}`
+
   if (turno.libre) {
     return (
-      <div className="rounded-md border border-dashed border-slate-300 px-2 py-1 text-xs text-slate-600">
+      <button
+        type="button"
+        onClick={onElegir}
+        aria-label={etiqueta}
+        className="w-full rounded-md border border-dashed border-slate-300 px-2 py-1 text-left text-xs text-slate-600 hover:border-slate-500 hover:bg-slate-50"
+      >
         <div className="font-medium">{hora(turno.comienza_at)}</div>
         {/* Un turno sin precio se muestra igual, diciendo que falta la tarifa.
             Esconderlo dejaría invisible la franja sin precio cargado. */}
         <div className={turno.precio ? 'text-slate-500' : 'text-amber-700'}>
           {turno.precio ? pesos(turno.precio) : 'sin tarifa'}
         </div>
-      </div>
+      </button>
     )
   }
   const color = COLOR[turno.estado ?? ''] ?? 'bg-slate-100 border-slate-300'
   return (
-    <div className={`rounded-md border px-2 py-1 text-xs ${color}`}>
+    <button
+      type="button"
+      onClick={onElegir}
+      aria-label={etiqueta}
+      className={`w-full rounded-md border px-2 py-1 text-left text-xs hover:brightness-95 ${color}`}
+    >
       <div className="font-medium">{hora(turno.comienza_at)}</div>
       <div className="truncate">{turno.cliente ?? turno.motivo ?? 'Ocupado'}</div>
-    </div>
+    </button>
   )
 }
 

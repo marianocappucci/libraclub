@@ -22,6 +22,7 @@ export default mergeConfig(
       // Argentina eso ya es mañana. Se pone la zona real de los usuarios, que
       // además es la única en la que corre este producto.
       env: { TZ: 'America/Argentina/Buenos_Aires' },
+      setupFiles: ['./src/test/setup.ts'],
       include: ['src/**/*.test.{ts,tsx}'],
     },
   }),

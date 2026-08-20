@@ -71,8 +71,20 @@ def construir_abm(
     entrada: type[BaseModel],
     salida: type[BaseModel],
     orden: Sequence,
+    rol_escritura=require_admin,
 ) -> APIRouter:
-    """Un ABM completo: listar, obtener, crear, editar y borrar."""
+    """Un ABM completo: listar, obtener, crear, editar y borrar.
+
+    `rol_escritura` es `require_admin` por defecto y se baja a `require_staff`
+    sólo donde el alta es **trabajo de mostrador**. Hoy es el caso de
+    `clientes`: si crear un cliente pidiera admin, el encargado no podría tomarle
+    la reserva a alguien que llama por primera vez — y lo que haría en la
+    práctica es cargarlo todo bajo un cliente genérico, que es peor que no
+    tenerlo.
+
+    Lo que **no** se baja: sucursales, canchas, tarifas y feriados. Ahí el alta
+    define plata y configuración, no operación.
+    """
     router = APIRouter(prefix=f"/api/{prefijo}", tags=[etiqueta])
 
     @router.get("", response_model=list[salida])
@@ -97,7 +109,7 @@ def construir_abm(
     def crear(
         datos: entrada,
         sesion: Session = Depends(obtener_sesion),
-        _: object = Depends(require_admin),
+        _: object = Depends(rol_escritura),
     ):
         item = modelo(**datos.model_dump())
         sesion.add(item)
@@ -114,7 +126,7 @@ def construir_abm(
         item_id: int,
         datos: entrada,
         sesion: Session = Depends(obtener_sesion),
-        _: object = Depends(require_admin),
+        _: object = Depends(rol_escritura),
     ):
         item = sesion.get(modelo, item_id)
         if item is None:
@@ -133,7 +145,7 @@ def construir_abm(
     def borrar(
         item_id: int,
         sesion: Session = Depends(obtener_sesion),
-        _: object = Depends(require_admin),
+        _: object = Depends(rol_escritura),
     ):
         item = sesion.get(modelo, item_id)
         if item is None:
@@ -173,6 +185,9 @@ clientes = construir_abm(
     prefijo="clientes", etiqueta="clientes",
     modelo=Cliente, entrada=ClienteEntrada, salida=ClienteSalida,
     orden=(Cliente.nombre,),
+    # El único maestro que un encargado puede dar de alta: es lo que hace posible
+    # tomarle la reserva a alguien que llama por primera vez. Ver `construir_abm`.
+    rol_escritura=require_staff,
 )
 
 feriados = construir_abm(
