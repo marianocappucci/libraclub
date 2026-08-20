@@ -12,3 +12,26 @@ frontend/node_modules/
 frontend/dist/
 *.tsbuildinfo
 gate.xml
+
+# El compose del backoffice de la suite (`admin.libraclub.com.ar`). Vive en el
+# checkout del VPS y **no se versiona**, igual que en los otros seis productos:
+# monta `/var/run/docker.sock` y la ruta del checkout del host, así que es
+# configuración de ESA máquina y no del producto. Sus secretos van aparte, en
+# `/etc/libraclub-admin.env`.
+#
+# Está declarado acá y no sólo en la cabeza de alguien porque un archivo sin
+# trackear adentro del árbol le complica el `git pull` del próximo deploy — y
+# hoy ya pasó una vez, con el script de siembra.
+admin/
+
+# Credenciales de la API de Nginx Proxy Manager, que usa el alta de un cliente
+# para crearle su dominio. Lo genera `scripts/npm_setup.py` en el servidor.
+#
+# 🔴 Su ausencia NO es ruidosa: `libracore.provisioning.client_from_config()`
+# hace `import npm_api` y devuelve `None` en silencio, así que un alta sin este
+# archivo termina sin crear el dominio y sin decir por qué.
+scripts/.npm_config.json
+
+# Las instancias de cliente que provisiona el backoffice. Son datos del
+# servidor, no del producto.
+clientes/

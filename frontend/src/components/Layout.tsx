@@ -8,6 +8,7 @@ const SECCIONES = [
   { a: '/canchas', texto: 'Canchas' },
   { a: '/tarifas', texto: 'Tarifas' },
   { a: '/sucursales', texto: 'Sucursales' },
+  { a: '/usuarios', texto: 'Usuarios' },
 ]
 
 export function Layout() {

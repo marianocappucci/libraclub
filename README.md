@@ -86,6 +86,31 @@ Cuatro cosas que no se pueden saltear, cada una porque ya falló en la familia:
    *después* de guardar, así que `ssl_forced` y `http2_support` quedan apagados
    aunque el alta los haya mandado en `true`.
 
+## El backoffice de la suite
+
+`admin.libraclub.com.ar` es una instancia de **`libra-backoffice`**, la misma
+imagen que corre para los otros productos: administra las instancias de cliente,
+los usuarios de cada una y su salud. **No es parte de este repo** — su compose
+vive en `admin/` dentro del checkout del VPS y está gitignoreado, porque monta
+`/var/run/docker.sock` y la ruta del checkout del host: es configuración de esa
+máquina, no del producto.
+
+Lo que **sí** es de este repo es lo que el panel consume:
+
+| Qué | Dónde | Cómo entra el panel |
+|---|---|---|
+| Usuarios | `/api/usuarios` | `X-Internal-Auth` contra `LIBRA_SERVICE_TOKEN` |
+| Salud | `/health` | sin credenciales |
+
+El token tiene que ser **el mismo** en `/root/libraclub/.env` (la instancia) y en
+`/etc/libraclub-admin.env` (el panel). Si difieren, la pestaña de usuarios
+contesta 403 y el resto del panel anda igual — así que conviene medirlo, no
+suponerlo.
+
+> `FEATURES` va sin `smtp` ni `demos`: este producto todavía no tiene pantalla
+> de correo saliente ni instancia de demo pública. Declararlos sin que existan
+> del otro lado da pestañas que contestan 404.
+
 ## Tests
 
 Corren **contra PostgreSQL real**, nunca contra SQLite: una suite verde sobre
