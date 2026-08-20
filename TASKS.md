@@ -31,8 +31,10 @@ Trabajo concreto vigente. Lo estratégico está en `ROADMAP.md`.
       Verificado en un navegador real, no sólo con tests.
 - [x] Detalle de una reserva ocupada, con las acciones que su estado permite:
       confirmar, marcar jugada, no vino y cancelar (con motivo obligatorio).
-- [ ] ABM (alta/edición/baja) de canchas y tarifas desde la UI. La API los
-      soporta enteros; las pantallas todavía sólo listan.
+- [x] **ABM de canchas y tarifas desde la UI**: alta, edición y baja, con los
+      botones de escritura escondidos para quien no es admin. Verificado en un
+      navegador real, incluida la baja que da 409 por tener reservas y su
+      control positivo (una que sí se puede borrar).
 - [ ] **Integrar `libra-ui`.** El estándar de la familia es
       Tailwind + shadcn/ui + `libra-ui`; hoy hay Tailwind y componentes propios,
       para que el arranque no dependiera de resolver el kit compartido.
@@ -60,6 +62,14 @@ Trabajo concreto vigente. Lo estratégico está en `ROADMAP.md`.
   > el caso normal, decide el tarifario y la seña sale sola.
 - **Cancelar exige motivo.** Sin él, una discusión con un cliente dentro de un
   mes no se puede reconstruir.
+- **Los formularios de edición mandan la fila entera.** Los endpoints son `PUT`
+  y reemplazan: lo que no viaje vuelve al default del schema, y una cancha
+  techada dejaría de serlo sin que nadie la haya tocado.
+- **Cambiar el alcance de una tarifa limpia o completa `dia_semana` en el mismo
+  paso.** `feriado` con día cargado lo rechaza un CHECK de la base, y el 422
+  hablaría de un campo que el operador ya no ve en pantalla.
+- **La UI esconde los botones que el servidor va a rechazar**, pero no decide el
+  permiso: un POST directo salteando la pantalla sigue dando 403.
 - La tabla de transiciones del detalle es un **espejo** de la máquina de estados
   del backend, no la fuente: el servidor sigue rechazando con 409 lo que no
   corresponda. Lo que hace la UI es no ofrecer un botón que va a fallar.
