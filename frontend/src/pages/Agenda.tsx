@@ -5,9 +5,24 @@ import { hora, lunesDeLaSemana, nombreDelDia, pesos } from '@/lib/fechas'
 import { useSucursal } from '@/context/SucursalContext'
 import { DialogoDeReserva } from '@/components/DialogoDeReserva'
 import { DetalleDeReserva } from '@/components/DetalleDeReserva'
+import { buttonVariants } from '@/components/ui/button'
+import { AvisoDeError } from '@/components/listado'
 
 /** Los colores por estado. Un solo lugar, para que la leyenda y la grilla no
- *  puedan decir cosas distintas. */
+ *  puedan decir cosas distintas.
+ *
+ *  🔑 **Estos NO se migran a tokens del tema, y es a propósito.** Es una paleta
+ *  de dominio —ámbar lo que falta cerrar, esmeralda lo confirmado, gris lo que
+ *  ya pasó—, no cromo de la interfaz. El resto del producto sí usa tokens desde
+ *  el 2026-08-20; acá no se puede: `--muted`, `--accent` y `--secondary` son
+ *  **los tres `oklch(0.97 0 0)`** en este tema, así que mapear `jugada` y
+ *  `bloqueo` a dos de ellos los dejaría del mismo color y el operador perdería
+ *  la distinción entre un turno jugado y uno bloqueado.
+ *
+ *  Si alguna vez hace falta que la grilla siga al tema, el camino es declarar
+ *  tokens propios en `index.css` **y verificar en el CSS generado que las
+ *  utilidades existan** — ver la nota al pie de ese archivo, que explica por qué
+ *  los tres tokens que hubo ahí se sacaron. */
 const COLOR: Record<string, string> = {
   provisoria: 'bg-amber-100 text-amber-900 border-amber-300',
   pendiente_pago: 'bg-amber-200 text-amber-950 border-amber-400',
@@ -46,10 +61,10 @@ export function Agenda() {
 
   useEffect(recargar, [recargar])
 
-  if (cargandoSucursal) return <p className="text-slate-500">Cargando…</p>
+  if (cargandoSucursal) return <p className="text-muted-foreground">Cargando…</p>
   if (actual === null)
     return (
-      <p className="text-slate-500">
+      <p className="text-muted-foreground">
         No hay ninguna sucursal activa. Creá una antes de usar la agenda.
       </p>
     )
@@ -68,34 +83,27 @@ export function Agenda() {
     <div className="space-y-4">
       <div className="flex items-center gap-2">
         <button
-          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-100"
+          className={buttonVariants({ variant: 'outline', size: 'sm' })}
           onClick={() => setDesde(correr(desde, -7))}
         >
           ← Semana anterior
         </button>
         <button
-          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-100"
+          className={buttonVariants({ variant: 'outline', size: 'sm' })}
           onClick={() => setDesde(lunesDeLaSemana())}
         >
           Esta semana
         </button>
         <button
-          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-100"
+          className={buttonVariants({ variant: 'outline', size: 'sm' })}
           onClick={() => setDesde(correr(desde, 7))}
         >
           Semana siguiente →
         </button>
-        {cargando && <span className="text-sm text-slate-400">actualizando…</span>}
+        {cargando && <span className="text-sm text-muted-foreground">actualizando…</span>}
       </div>
 
-      {error && (
-        <p
-          role="alert"
-          className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
-        >
-          {error}
-        </p>
-      )}
+      <AvisoDeError mensaje={error} />
 
       {/*
         🔴 Se distingue "no hay canchas" de "no hay turnos". Una pantalla vacía
@@ -103,16 +111,16 @@ export function Agenda() {
         cancha cargada.
       */}
       {canchas.length === 0 && !cargando && (
-        <p className="text-slate-500">
+        <p className="text-muted-foreground">
           Esta sucursal todavía no tiene canchas cargadas.
         </p>
       )}
 
       {canchas.map((cancha) => (
-        <section key={cancha.id} className="rounded-lg border border-slate-200 bg-white">
-          <h2 className="border-b border-slate-200 px-4 py-2 font-medium">
+        <section key={cancha.id} className="rounded-lg border bg-card">
+          <h2 className="border-b px-4 py-2 font-medium">
             {cancha.nombre}
-            <span className="ml-2 text-sm font-normal text-slate-500">
+            <span className="ml-2 text-sm font-normal text-muted-foreground">
               {cancha.deporte} · turnos de {cancha.duracion_turno_min} min
             </span>
           </h2>
@@ -120,7 +128,7 @@ export function Agenda() {
             <div className="flex min-w-max gap-3 p-3">
               {dias.map((dia) => (
                 <div key={dia} className="w-40 shrink-0">
-                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+                  <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     {nombreDelDia(dia)} {dia.slice(8, 10)}/{dia.slice(5, 7)}
                   </p>
                   <div className="space-y-1">
@@ -132,7 +140,7 @@ export function Agenda() {
                       />
                     ))}
                     {(semana?.canchas[String(cancha.id)]?.[dia] ?? []).length === 0 && (
-                      <p className="text-xs text-slate-400">Cerrado</p>
+                      <p className="text-xs text-muted-foreground">Cerrado</p>
                     )}
                   </div>
                 </div>
@@ -178,18 +186,18 @@ function Casillero({ turno, onElegir }: { turno: Turno; onElegir: () => void }) 
         type="button"
         onClick={onElegir}
         aria-label={etiqueta}
-        className="w-full rounded-md border border-dashed border-slate-300 px-2 py-1 text-left text-xs text-slate-600 hover:border-slate-500 hover:bg-slate-50"
+        className="w-full rounded-md border border-dashed px-2 py-1 text-left text-xs text-muted-foreground hover:border-ring hover:bg-accent hover:text-accent-foreground"
       >
         <div className="font-medium">{hora(turno.comienza_at)}</div>
         {/* Un turno sin precio se muestra igual, diciendo que falta la tarifa.
             Esconderlo dejaría invisible la franja sin precio cargado. */}
-        <div className={turno.precio ? 'text-slate-500' : 'text-amber-700'}>
+        <div className={turno.precio ? 'text-muted-foreground' : 'text-amber-700'}>
           {turno.precio ? pesos(turno.precio) : 'sin tarifa'}
         </div>
       </button>
     )
   }
-  const color = COLOR[turno.estado ?? ''] ?? 'bg-slate-100 border-slate-300'
+  const color = COLOR[turno.estado ?? ''] ?? 'bg-muted border-border'
   return (
     <button
       type="button"

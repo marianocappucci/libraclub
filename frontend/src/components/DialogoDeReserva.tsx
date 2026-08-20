@@ -5,6 +5,9 @@ import {
 import { agenda, clientes as apiClientes, ErrorDeApi } from '@/lib/api'
 import type { Cancha, Cliente, Turno } from '@/lib/api'
 import { fecha, hora, pesos } from '@/lib/fechas'
+import { Input } from '@/components/ui/input'
+import { buttonVariants } from '@/components/ui/button'
+import { AvisoDeError } from '@/components/listado'
 
 const ORIGENES = [
   { valor: 'mostrador', texto: 'Mostrador' },
@@ -153,14 +156,14 @@ export function DialogoDeReserva({
           <DialogTitle>Nueva reserva</DialogTitle>
         </DialogHeader>
         <form onSubmit={enviar} className="space-y-4">
-          <div className="rounded-md bg-slate-100 px-3 py-2 text-sm">
+          <div className="rounded-md bg-muted px-3 py-2 text-sm">
             <div className="font-medium">{cancha.nombre}</div>
-            <div className="text-slate-600">
+            <div className="text-muted-foreground">
               {fecha(turno.comienza_at)} · desde las {hora(turno.comienza_at)}
               {' · '}
               {minutos} min
             </div>
-            <div className={total ? 'text-slate-900' : 'text-amber-700'}>
+            <div className={total ? 'text-foreground' : 'text-amber-700'}>
               {total ? (
                 <>
                   {pesos(total)}
@@ -168,7 +171,7 @@ export function DialogoDeReserva({
                     // Un solo nodo de texto a propósito: partido en varios, la
                     // cuenta queda ilegible para un lector de pantalla y para
                     // cualquier test que la busque como frase.
-                    <span className="text-slate-500">{` (${turnos} × ${pesos(turno.precio)})`}</span>
+                    <span className="text-muted-foreground">{` (${turnos} × ${pesos(turno.precio)})`}</span>
                   )}
                 </>
               ) : (
@@ -183,9 +186,9 @@ export function DialogoDeReserva({
                   nombre accesible del select y el lector de pantalla anuncia
                   "Cliente … Cliente nuevo" como si fuera una sola cosa. */}
               <label className="block space-y-1">
-                <span className="text-sm text-slate-600">Cliente</span>
+                <span className="text-sm font-medium">Cliente</span>
                 <select
-                  className="w-full rounded-md border border-slate-300 px-3 py-2"
+                  className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
                   value={clienteId}
                   onChange={(e) => setClienteId(e.target.value)}
                 >
@@ -199,7 +202,7 @@ export function DialogoDeReserva({
               </label>
               <button
                 type="button"
-                className="text-sm text-slate-600 underline"
+                className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
                 onClick={() => setNuevo(true)}
               >
                 Cliente nuevo
@@ -208,17 +211,17 @@ export function DialogoDeReserva({
           ) : (
             <div className="space-y-2">
               <label className="block space-y-1">
-                <span className="text-sm text-slate-600">Nombre del cliente</span>
-                <input
-                  className="w-full rounded-md border border-slate-300 px-3 py-2"
+                <span className="text-sm font-medium">Nombre del cliente</span>
+                <Input
+                  
                   value={nombreNuevo}
                   onChange={(e) => setNombreNuevo(e.target.value)}
                 />
               </label>
               <label className="block space-y-1">
-                <span className="text-sm text-slate-600">Teléfono</span>
-                <input
-                  className="w-full rounded-md border border-slate-300 px-3 py-2"
+                <span className="text-sm font-medium">Teléfono</span>
+                <Input
+                  
                   value={telefonoNuevo}
                   onChange={(e) => setTelefonoNuevo(e.target.value)}
                 />
@@ -226,7 +229,7 @@ export function DialogoDeReserva({
               {lista.length > 0 && (
                 <button
                   type="button"
-                  className="text-sm text-slate-600 underline"
+                  className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
                   onClick={() => setNuevo(false)}
                 >
                   Elegir uno existente
@@ -237,9 +240,9 @@ export function DialogoDeReserva({
 
           <div className="grid grid-cols-3 gap-2">
             <label className="space-y-1">
-              <span className="text-sm text-slate-600">Turnos</span>
+              <span className="text-sm font-medium">Turnos</span>
               <select
-                className="w-full rounded-md border border-slate-300 px-2 py-2"
+                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
                 value={turnos}
                 onChange={(e) => setTurnos(Number(e.target.value))}
               >
@@ -251,9 +254,9 @@ export function DialogoDeReserva({
               </select>
             </label>
             <label className="space-y-1">
-              <span className="text-sm text-slate-600">Origen</span>
+              <span className="text-sm font-medium">Origen</span>
               <select
-                className="w-full rounded-md border border-slate-300 px-2 py-2"
+                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
                 value={origen}
                 onChange={(e) => setOrigen(e.target.value)}
               >
@@ -265,9 +268,9 @@ export function DialogoDeReserva({
               </select>
             </label>
             <label className="space-y-1">
-              <span className="text-sm text-slate-600">Estado</span>
+              <span className="text-sm font-medium">Estado</span>
               <select
-                className="w-full rounded-md border border-slate-300 px-2 py-2"
+                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
                 value={estado}
                 onChange={(e) => setEstado(e.target.value)}
               >
@@ -281,35 +284,28 @@ export function DialogoDeReserva({
           </div>
 
           <label className="block space-y-1">
-            <span className="text-sm text-slate-600">Observaciones</span>
-            <input
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
+            <span className="text-sm font-medium">Observaciones</span>
+            <Input
+              
               value={observaciones}
               onChange={(e) => setObservaciones(e.target.value)}
             />
           </label>
 
-          {error && (
-            <p
-              role="alert"
-              className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
-            >
-              {error}
-            </p>
-          )}
+          <AvisoDeError mensaje={error} />
 
           <div className="flex justify-end gap-2">
             <button
               type="button"
               onClick={onCerrar}
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100"
+              className={buttonVariants({ variant: 'outline' })}
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={enviando}
-              className="rounded-md bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+              className={buttonVariants()}
             >
               {enviando ? 'Reservando…' : 'Reservar'}
             </button>
