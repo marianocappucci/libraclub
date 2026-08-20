@@ -75,11 +75,26 @@ jobs:
       # 🔑 El gate de F1 tiene que haber corrido de verdad, no haberse salteado.
       # Un `pytest` verde con cero tests de concurrencia se ve idéntico a uno con
       # los nueve — y la diferencia es toda la garantía del producto.
-      - name: El gate de concurrencia corrio
+      #
+      # 🔴 Se cuenta sobre el **JUnit XML** y no sobre la salida de texto de
+      # pytest. La primera versión de este paso hacía
+      # `--collect-only -q | tail -1 | grep 'N tests collected'`, y **habría
+      # puesto el CI en rojo en el primer PR**: pytest 9 imprime un resumen
+      # compacto (`tests/test_concurrencia.py: 9`) y una línea vacía al final,
+      # así que el grep nunca matchea. El XML es formato estable y no cambia de
+      # forma entre versiones.
+      #
+      # Se exige además `skipped="0"`: un módulo que se saltea entero —por una
+      # dependencia que falta en el runner— deja el job igual de verde que uno
+      # que corrió todo.
+      - name: El gate de concurrencia corrio de verdad
         run: |
-          pytest tests/test_concurrencia.py -q --collect-only \
-            | tail -1 | grep -qE '[0-9]+ tests? collected'
-          pytest tests/test_concurrencia.py -q
+          pytest tests/test_concurrencia.py -q --junit-xml=gate.xml
+          CORRIDOS=$(grep -o 'tests="[0-9]*"' gate.xml | head -1 | tr -dc '0-9')
+          SALTEADOS=$(grep -o 'skipped="[0-9]*"' gate.xml | head -1 | tr -dc '0-9')
+          echo "gate de concurrencia: $CORRIDOS corridos, $SALTEADOS salteados"
+          test "$CORRIDOS" -ge 5
+          test "$SALTEADOS" = "0"
 
   frontend:
     runs-on: ubuntu-latest
