@@ -11,3 +11,4 @@ datos/
 frontend/node_modules/
 frontend/dist/
 *.tsbuildinfo
+gate.xml
