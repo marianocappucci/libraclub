@@ -18,7 +18,10 @@ Trabajo concreto vigente. Lo estratégico está en `ROADMAP.md`.
 - [ ] Auditoría de quién tocó qué (patrón de LibraCargo). Los campos
       `created_by`/`updated_by` **existen en el modelo y nadie los llena**:
       hoy son cuatro columnas que se ven como trazabilidad y no lo son.
-- [ ] Router de usuarios (backoffice de la suite)
+- [x] **Router de usuarios** (`/api/usuarios`), el camino por el que el
+      backoffice de la suite administra esta instancia. Rol admin **o** token de
+      servicio; con `LIBRA_SERVICE_TOKEN` sin definir se comporta igual que
+      `require_admin`, así que no ponerlo no abre nada.
 
 ### Frontend
 
