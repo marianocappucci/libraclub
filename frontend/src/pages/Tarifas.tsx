@@ -1,10 +1,17 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { ColumnDef } from '@tanstack/react-table'
+import { DataTable, sortableHeader } from 'libra-ui/data-table'
+import { EncabezadoDePantalla } from 'libra-ui/acciones'
+import { Plus } from 'lucide-react'
+
 import { canchas as apiCanchas, tarifas as api } from '@/lib/api'
 import type { Cancha, Tarifa } from '@/lib/api'
 import { pesos } from '@/lib/fechas'
 import { useSucursal } from '@/context/SucursalContext'
 import { useAuth } from '@/context/AuthContext'
 import { FormularioDeTarifa } from '@/components/FormularioDeTarifa'
+import { AvisoDeError, columnaDeAcciones, filaInactiva } from '@/components/listado'
+import { Button } from '@/components/ui/button'
 
 const DIAS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 
@@ -41,111 +48,118 @@ export function Tarifas() {
 
   const propias = filas.filter((t) => actual === null || t.sucursal_id === actual)
   const deLaSucursal = canchas.filter((c) => actual === null || c.sucursal_id === actual)
-  const nombreCancha = (id: number | null) =>
-    id === null ? 'Toda la sucursal' : (canchas.find((c) => c.id === id)?.nombre ?? `#${id}`)
 
-  async function borrar(tarifa: Tarifa) {
-    if (!confirm(`¿Borrar la tarifa "${tarifa.nombre}"?`)) return
-    setError(null)
-    try {
-      await api.borrar(tarifa.id)
-      recargar()
-    } catch (e) {
-      setError((e as Error).message)
-    }
-  }
+  const nombreCancha = useCallback(
+    (id: number | null) =>
+      id === null ? 'Toda la sucursal' : (canchas.find((c) => c.id === id)?.nombre ?? `#${id}`),
+    [canchas],
+  )
+
+  const borrar = useCallback(
+    async (tarifa: Tarifa) => {
+      if (!confirm(`¿Borrar la tarifa "${tarifa.nombre}"?`)) return
+      setError(null)
+      try {
+        await api.borrar(tarifa.id)
+        recargar()
+      } catch (e) {
+        setError((e as Error).message)
+      }
+    },
+    [recargar],
+  )
+
+  const columnas = useMemo<ColumnDef<Tarifa, unknown>[]>(() => {
+    const base: ColumnDef<Tarifa, unknown>[] = [
+      {
+        accessorKey: 'nombre',
+        header: sortableHeader('Nombre'),
+        cell: ({ row }) => (
+          <span className="font-medium">
+            {row.original.nombre}
+            {!row.original.activa && (
+              <span className="ml-2 text-xs text-muted-foreground">(inactiva)</span>
+            )}
+          </span>
+        ),
+      },
+      { id: 'alcance', header: 'Aplica', cell: ({ row }) => alcance(row.original) },
+      {
+        id: 'cancha',
+        header: 'Cancha',
+        cell: ({ row }) => nombreCancha(row.original.cancha_id),
+      },
+      {
+        id: 'franja',
+        header: 'Franja',
+        cell: ({ row }) =>
+          `${row.original.hora_desde.slice(0, 5)} – ${row.original.hora_hasta.slice(0, 5)}`,
+      },
+      {
+        accessorKey: 'precio',
+        header: sortableHeader('Precio'),
+        cell: ({ row }) => pesos(row.original.precio),
+      },
+      {
+        accessorKey: 'sena_porcentaje',
+        header: 'Seña',
+        cell: ({ row }) =>
+          row.original.sena_porcentaje > 0 ? `${row.original.sena_porcentaje}%` : '—',
+      },
+      { accessorKey: 'prioridad', header: sortableHeader('Prioridad') },
+    ]
+    if (!puedeEscribir) return base
+    return [
+      ...base,
+      columnaDeAcciones<Tarifa>({
+        onEditar: (t) => {
+          setEditando(t)
+          setAbierto(true)
+        },
+        onBorrar: borrar,
+        nombreDe: (t) => t.nombre,
+      }),
+    ]
+  }, [puedeEscribir, borrar, nombreCancha])
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Tarifas</h1>
+      <EncabezadoDePantalla titulo={<h1 className="text-lg font-semibold">Tarifas</h1>}>
         {puedeEscribir && actual !== null && (
-          <button
+          <Button
             onClick={() => {
               setEditando(null)
               setAbierto(true)
             }}
-            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white"
           >
+            <Plus className="size-4" />
             Nueva tarifa
-          </button>
+          </Button>
         )}
-      </div>
+      </EncabezadoDePantalla>
 
-      <p className="text-sm text-slate-500">
+      <p className="text-sm text-muted-foreground">
         Gana la de mayor prioridad; con la misma prioridad, la más específica:
         feriado antes que día de semana, y una cancha antes que toda la sucursal.
       </p>
 
-      {error && (
-        <p
-          role="alert"
-          className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
-        >
-          {error}
-        </p>
-      )}
+      <AvisoDeError mensaje={error} />
 
-      <table className="w-full overflow-hidden rounded-lg border border-slate-200 bg-white text-sm">
-        <thead className="bg-slate-100 text-left text-slate-600">
-          <tr>
-            <th className="px-3 py-2">Nombre</th>
-            <th className="px-3 py-2">Aplica</th>
-            <th className="px-3 py-2">Cancha</th>
-            <th className="px-3 py-2">Franja</th>
-            <th className="px-3 py-2">Precio</th>
-            <th className="px-3 py-2">Seña</th>
-            <th className="px-3 py-2">Prioridad</th>
-            {puedeEscribir && <th className="px-3 py-2" />}
-          </tr>
-        </thead>
-        <tbody>
-          {propias.map((t) => (
-            <tr key={t.id} className={`border-t border-slate-100 ${t.activa ? '' : 'text-slate-400'}`}>
-              <td className="px-3 py-2 font-medium">
-                {t.nombre}
-                {!t.activa && <span className="ml-2 text-xs">(inactiva)</span>}
-              </td>
-              <td className="px-3 py-2">{alcance(t)}</td>
-              <td className="px-3 py-2">{nombreCancha(t.cancha_id)}</td>
-              <td className="px-3 py-2">
-                {t.hora_desde.slice(0, 5)} – {t.hora_hasta.slice(0, 5)}
-              </td>
-              <td className="px-3 py-2">{pesos(t.precio)}</td>
-              <td className="px-3 py-2">
-                {t.sena_porcentaje > 0 ? `${t.sena_porcentaje}%` : '—'}
-              </td>
-              <td className="px-3 py-2">{t.prioridad}</td>
-              {puedeEscribir && (
-                <td className="px-3 py-2 text-right whitespace-nowrap">
-                  <button
-                    onClick={() => {
-                      setEditando(t)
-                      setAbierto(true)
-                    }}
-                    className="rounded-md border border-slate-300 px-2 py-1 hover:bg-slate-100"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    onClick={() => borrar(t)}
-                    className="ml-2 rounded-md border border-red-300 px-2 py-1 text-red-800 hover:bg-red-50"
-                  >
-                    Borrar
-                  </button>
-                </td>
-              )}
-            </tr>
-          ))}
-          {propias.length === 0 && (
-            <tr>
-              <td colSpan={8} className="px-3 py-4 text-slate-500">
-                Sin tarifas cargadas. Una franja sin tarifa no se puede reservar.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+      <DataTable
+        columns={columnas}
+        data={propias}
+        getRowClassName={(t) => filaInactiva(t.activa)}
+        emptyMessage="Sin tarifas cargadas. Una franja sin tarifa no se puede reservar."
+        // 🔑 Se busca sobre lo que se VE, no sobre el dato crudo: la columna
+        // Cancha guarda `cancha_id: 3` y muestra "Cancha 1", y quien busca
+        // escribe lo segundo. Por eso van `alcance(t)` y `nombreCancha(...)`
+        // y no los campos de los que salen.
+        search={{
+          campos: (t) => [t.nombre, alcance(t), nombreCancha(t.cancha_id)],
+          placeholder: 'Buscar por nombre, día o cancha',
+          ariaLabel: 'Buscar tarifa',
+        }}
+      />
 
       {actual !== null && (
         <FormularioDeTarifa

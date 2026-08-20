@@ -1,9 +1,16 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { ColumnDef } from '@tanstack/react-table'
+import { DataTable, sortableHeader } from 'libra-ui/data-table'
+import { EncabezadoDePantalla } from 'libra-ui/acciones'
+import { Plus } from 'lucide-react'
+
 import { canchas as api } from '@/lib/api'
 import type { Cancha } from '@/lib/api'
 import { useSucursal } from '@/context/SucursalContext'
 import { useAuth } from '@/context/AuthContext'
 import { FormularioDeCancha } from '@/components/FormularioDeCancha'
+import { AvisoDeError, columnaDeAcciones, filaInactiva } from '@/components/listado'
+import { Button } from '@/components/ui/button'
 
 export function Canchas() {
   const { actual } = useSucursal()
@@ -28,95 +35,97 @@ export function Canchas() {
 
   const propias = filas.filter((c) => actual === null || c.sucursal_id === actual)
 
-  async function borrar(cancha: Cancha) {
-    if (!confirm(`¿Borrar ${cancha.nombre}? Si tiene reservas no se va a poder.`)) return
-    setError(null)
-    try {
-      await api.borrar(cancha.id)
-      recargar()
-    } catch (e) {
-      // El 409 del backend ya explica qué hacer —darla de baja en vez de
-      // borrarla— porque la FK de reservas es RESTRICT y no CASCADE. Se muestra
-      // tal cual viene.
-      setError((e as Error).message)
-    }
-  }
+  const borrar = useCallback(
+    async (cancha: Cancha) => {
+      if (!confirm(`¿Borrar ${cancha.nombre}? Si tiene reservas no se va a poder.`)) return
+      setError(null)
+      try {
+        await api.borrar(cancha.id)
+        recargar()
+      } catch (e) {
+        // El 409 del backend ya explica qué hacer —darla de baja en vez de
+        // borrarla— porque la FK de reservas es RESTRICT y no CASCADE. Se
+        // muestra tal cual viene.
+        setError((e as Error).message)
+      }
+    },
+    [recargar],
+  )
+
+  const columnas = useMemo<ColumnDef<Cancha, unknown>[]>(() => {
+    const base: ColumnDef<Cancha, unknown>[] = [
+      {
+        accessorKey: 'nombre',
+        header: sortableHeader('Nombre'),
+        cell: ({ row }) => (
+          <span className="font-medium">
+            {row.original.nombre}
+            {!row.original.activa && (
+              <span className="ml-2 text-xs text-muted-foreground">(de baja)</span>
+            )}
+          </span>
+        ),
+      },
+      { accessorKey: 'deporte', header: sortableHeader('Deporte') },
+      {
+        accessorKey: 'duracion_turno_min',
+        header: sortableHeader('Turno'),
+        cell: ({ row }) => `${row.original.duracion_turno_min} min`,
+      },
+      {
+        accessorKey: 'techada',
+        header: 'Techada',
+        cell: ({ row }) => (row.original.techada ? 'Sí' : 'No'),
+      },
+      {
+        accessorKey: 'activa',
+        header: 'Estado',
+        cell: ({ row }) => (row.original.activa ? 'Activa' : 'De baja'),
+      },
+    ]
+    if (!puedeEscribir) return base
+    return [
+      ...base,
+      columnaDeAcciones<Cancha>({
+        onEditar: (c) => {
+          setEditando(c)
+          setAbierto(true)
+        },
+        onBorrar: borrar,
+        nombreDe: (c) => c.nombre,
+      }),
+    ]
+  }, [puedeEscribir, borrar])
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Canchas</h1>
+      <EncabezadoDePantalla titulo={<h1 className="text-lg font-semibold">Canchas</h1>}>
         {puedeEscribir && actual !== null && (
-          <button
+          <Button
             onClick={() => {
               setEditando(null)
               setAbierto(true)
             }}
-            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white"
           >
+            <Plus className="size-4" />
             Nueva cancha
-          </button>
+          </Button>
         )}
-      </div>
+      </EncabezadoDePantalla>
 
-      {error && (
-        <p
-          role="alert"
-          className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
-        >
-          {error}
-        </p>
-      )}
+      <AvisoDeError mensaje={error} />
 
-      <table className="w-full overflow-hidden rounded-lg border border-slate-200 bg-white text-sm">
-        <thead className="bg-slate-100 text-left text-slate-600">
-          <tr>
-            <th className="px-3 py-2">Nombre</th>
-            <th className="px-3 py-2">Deporte</th>
-            <th className="px-3 py-2">Turno</th>
-            <th className="px-3 py-2">Techada</th>
-            <th className="px-3 py-2">Estado</th>
-            {puedeEscribir && <th className="px-3 py-2" />}
-          </tr>
-        </thead>
-        <tbody>
-          {propias.map((c) => (
-            <tr key={c.id} className="border-t border-slate-100">
-              <td className="px-3 py-2 font-medium">{c.nombre}</td>
-              <td className="px-3 py-2">{c.deporte}</td>
-              <td className="px-3 py-2">{c.duracion_turno_min} min</td>
-              <td className="px-3 py-2">{c.techada ? 'Sí' : 'No'}</td>
-              <td className="px-3 py-2">{c.activa ? 'Activa' : 'De baja'}</td>
-              {puedeEscribir && (
-                <td className="px-3 py-2 text-right whitespace-nowrap">
-                  <button
-                    onClick={() => {
-                      setEditando(c)
-                      setAbierto(true)
-                    }}
-                    className="rounded-md border border-slate-300 px-2 py-1 hover:bg-slate-100"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    onClick={() => borrar(c)}
-                    className="ml-2 rounded-md border border-red-300 px-2 py-1 text-red-800 hover:bg-red-50"
-                  >
-                    Borrar
-                  </button>
-                </td>
-              )}
-            </tr>
-          ))}
-          {propias.length === 0 && (
-            <tr>
-              <td colSpan={6} className="px-3 py-4 text-slate-500">
-                Esta sucursal todavía no tiene canchas.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+      <DataTable
+        columns={columnas}
+        data={propias}
+        getRowClassName={(c) => filaInactiva(c.activa)}
+        emptyMessage="Esta sucursal todavía no tiene canchas."
+        search={{
+          campos: (c) => [c.nombre, c.deporte, c.superficie],
+          placeholder: 'Buscar por nombre, deporte o superficie',
+          ariaLabel: 'Buscar cancha',
+        }}
+      />
 
       {actual !== null && (
         <FormularioDeCancha
