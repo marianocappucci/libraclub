@@ -15,7 +15,7 @@ export function Usuarios() {
   return (
     <div className="space-y-3">
       <h1 className="text-lg font-semibold">Usuarios</h1>
-      <p className="text-sm text-slate-500">
+      <p className="text-sm text-muted-foreground">
         Los usuarios de esta instancia. El mismo alta la puede hacer el
         backoffice de la suite, que entra por esta misma API con un token de
         servicio en vez de una sesión.
