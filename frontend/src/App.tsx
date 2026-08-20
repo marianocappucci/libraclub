@@ -6,6 +6,7 @@ import { Clientes } from '@/pages/Clientes'
 import { Login } from '@/pages/Login'
 import { Sucursales } from '@/pages/Sucursales'
 import { Tarifas } from '@/pages/Tarifas'
+import { Usuarios } from '@/pages/Usuarios'
 import { AuthProvider, useAuth } from '@/context/AuthContext'
 import { SucursalProvider } from '@/context/SucursalContext'
 
@@ -26,6 +27,7 @@ function Ruteo() {
           <Route path="/tarifas" element={<Tarifas />} />
           <Route path="/clientes" element={<Clientes />} />
           <Route path="/sucursales" element={<Sucursales />} />
+          <Route path="/usuarios" element={<Usuarios />} />
           {/* Las rutas no llevan guarda de rol: el permiso lo decide el
               servidor, y una ruta escondida que igual carga datos no protege
               nada. Lo que las pantallas hacen es no ofrecer botones que van a
