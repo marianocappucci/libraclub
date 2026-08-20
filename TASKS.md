@@ -35,6 +35,10 @@ Trabajo concreto vigente. Lo estratégico está en `ROADMAP.md`.
       botones de escritura escondidos para quien no es admin. Verificado en un
       navegador real, incluida la baja que da 409 por tener reservas y su
       control positivo (una que sí se puede borrar).
+- [x] **ABM de sucursales y clientes desde la UI**, con sus pantallas y su
+      entrada en el menú. Sucursales es de admin; clientes lo puede escribir un
+      encargado. Clientes tiene buscador por nombre, teléfono o documento, y un
+      filtro para ver los dados de baja.
 - [ ] **Integrar `libra-ui`.** El estándar de la familia es
       Tailwind + shadcn/ui + `libra-ui`; hoy hay Tailwind y componentes propios,
       para que el arranque no dependiera de resolver el kit compartido.
@@ -70,6 +74,16 @@ Trabajo concreto vigente. Lo estratégico está en `ROADMAP.md`.
   hablaría de un campo que el operador ya no ve en pantalla.
 - **La UI esconde los botones que el servidor va a rechazar**, pero no decide el
   permiso: un POST directo salteando la pantalla sigue dando 403.
+- **Los campos de texto vacíos viajan como `null`, no como cadena vacía.** Con
+  `""` la fila queda con una cadena y la tabla muestra un hueco donde tendría
+  que decir "no tiene". Y un `punto_venta_arca` vacío tiene que ser `null` y no
+  `0`: `Number('')` es `0`, el schema pide `ge=1`, y `null` es además lo único
+  que el índice único parcial deja repetir entre sucursales que todavía no
+  facturan.
+- **La pantalla de Sucursales lista también las dadas de baja; el selector del
+  encabezado, no.** Son dos listas a propósito. Encontrado usándolo: con una
+  sola lista filtrada a las activas, dar de baja una sucursal la hacía
+  desaparecer de la pantalla y **no había forma de volver a activarla**.
 - La tabla de transiciones del detalle es un **espejo** de la máquina de estados
   del backend, no la fuente: el servidor sigue rechazando con 409 lo que no
   corresponda. Lo que hace la UI es no ofrecer un botón que va a fallar.
