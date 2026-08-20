@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Modal } from '@/components/Modal'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
 import { sucursales as api } from '@/lib/api'
 import type { Sucursal, SucursalEntrada } from '@/lib/api'
 
@@ -85,124 +87,130 @@ export function FormularioDeSucursal({
     }
   }
 
+  // `onOpenChange` recibe el estado NUEVO. Se llama a `onCerrar` sólo cuando
+  // llega `false`: el padre es quien tiene el estado y quien decide. Hoy nunca
+  // llega `true` —ninguno de estos diálogos tiene `DialogTrigger`, los abre el
+  // padre—, así que el `if` es defensivo. Ver la nota en `dialogos.test.tsx`
+  // sobre por qué no se puede cubrir con un test.
   return (
-    <Modal
-      abierto={abierto}
-      titulo={sucursal ? `Editar ${sucursal.nombre}` : 'Nueva sucursal'}
-      onCerrar={onCerrar}
-    >
-      <form onSubmit={enviar} className="space-y-3">
-        <label className="block space-y-1">
-          <span className="text-sm text-slate-600">Nombre</span>
-          <input
-            className="w-full rounded-md border border-slate-300 px-3 py-2"
-            value={datos.nombre}
-            onChange={(e) => set('nombre', e.target.value)}
-          />
-        </label>
-
-        <div className="grid grid-cols-2 gap-2">
-          <label className="space-y-1">
-            <span className="text-sm text-slate-600">Dirección</span>
+    <Dialog open={abierto} onOpenChange={(o) => { if (!o) onCerrar() }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{sucursal ? `Editar ${sucursal.nombre}` : 'Nueva sucursal'}</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={enviar} className="space-y-3">
+          <label className="block space-y-1">
+            <span className="text-sm text-slate-600">Nombre</span>
             <input
               className="w-full rounded-md border border-slate-300 px-3 py-2"
-              value={datos.direccion ?? ''}
-              onChange={(e) => set('direccion', e.target.value)}
+              value={datos.nombre}
+              onChange={(e) => set('nombre', e.target.value)}
             />
           </label>
-          <label className="space-y-1">
-            <span className="text-sm text-slate-600">Localidad</span>
+
+          <div className="grid grid-cols-2 gap-2">
+            <label className="space-y-1">
+              <span className="text-sm text-slate-600">Dirección</span>
+              <input
+                className="w-full rounded-md border border-slate-300 px-3 py-2"
+                value={datos.direccion ?? ''}
+                onChange={(e) => set('direccion', e.target.value)}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm text-slate-600">Localidad</span>
+              <input
+                className="w-full rounded-md border border-slate-300 px-3 py-2"
+                value={datos.localidad ?? ''}
+                onChange={(e) => set('localidad', e.target.value)}
+              />
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <label className="space-y-1">
+              <span className="text-sm text-slate-600">Teléfono</span>
+              <input
+                className="w-full rounded-md border border-slate-300 px-3 py-2"
+                value={datos.telefono ?? ''}
+                onChange={(e) => set('telefono', e.target.value)}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm text-slate-600">Email</span>
+              <input
+                className="w-full rounded-md border border-slate-300 px-3 py-2"
+                value={datos.email ?? ''}
+                onChange={(e) => set('email', e.target.value)}
+              />
+            </label>
+          </div>
+
+          <label className="block space-y-1">
+            <span className="text-sm text-slate-600">Punto de venta de ARCA</span>
             <input
+              type="number"
+              min={1}
+              max={99999}
               className="w-full rounded-md border border-slate-300 px-3 py-2"
-              value={datos.localidad ?? ''}
-              onChange={(e) => set('localidad', e.target.value)}
+              value={datos.punto_venta_arca ?? ''}
+              onChange={(e) =>
+                set('punto_venta_arca', e.target.value ? Number(e.target.value) : null)
+              }
             />
           </label>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2">
-          <label className="space-y-1">
-            <span className="text-sm text-slate-600">Teléfono</span>
-            <input
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-              value={datos.telefono ?? ''}
-              onChange={(e) => set('telefono', e.target.value)}
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="text-sm text-slate-600">Email</span>
-            <input
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-              value={datos.email ?? ''}
-              onChange={(e) => set('email', e.target.value)}
-            />
-          </label>
-        </div>
-
-        <label className="block space-y-1">
-          <span className="text-sm text-slate-600">Punto de venta de ARCA</span>
-          <input
-            type="number"
-            min={1}
-            max={99999}
-            className="w-full rounded-md border border-slate-300 px-3 py-2"
-            value={datos.punto_venta_arca ?? ''}
-            onChange={(e) =>
-              set('punto_venta_arca', e.target.value ? Number(e.target.value) : null)
-            }
-          />
-        </label>
-        <p className="text-xs text-slate-500">
-          Propio de cada sucursal. La numeración de comprobantes es por
-          (tipo, punto de venta) y no lleva CUIT: dos sucursales con el mismo
-          número se pisan la numeración entre ellas. Se puede dejar vacío hasta
-          que la sucursal facture.
-        </p>
-
-        <label className="block space-y-1">
-          <span className="text-sm text-slate-600">Observaciones</span>
-          <input
-            className="w-full rounded-md border border-slate-300 px-3 py-2"
-            value={datos.observaciones ?? ''}
-            onChange={(e) => set('observaciones', e.target.value)}
-          />
-        </label>
-
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={datos.activa}
-            onChange={(e) => set('activa', e.target.checked)}
-          />
-          Activa
-        </label>
-
-        {error && (
-          <p
-            role="alert"
-            className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
-          >
-            {error}
+          <p className="text-xs text-slate-500">
+            Propio de cada sucursal. La numeración de comprobantes es por
+            (tipo, punto de venta) y no lleva CUIT: dos sucursales con el mismo
+            número se pisan la numeración entre ellas. Se puede dejar vacío hasta
+            que la sucursal facture.
           </p>
-        )}
 
-        <div className="flex justify-end gap-2 pt-1">
-          <button
-            type="button"
-            onClick={onCerrar}
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100"
-          >
-            Cancelar
-          </button>
-          <button
-            type="submit"
-            disabled={enviando}
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
-          >
-            {enviando ? 'Guardando…' : 'Guardar'}
-          </button>
-        </div>
-      </form>
-    </Modal>
+          <label className="block space-y-1">
+            <span className="text-sm text-slate-600">Observaciones</span>
+            <input
+              className="w-full rounded-md border border-slate-300 px-3 py-2"
+              value={datos.observaciones ?? ''}
+              onChange={(e) => set('observaciones', e.target.value)}
+            />
+          </label>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={datos.activa}
+              onChange={(e) => set('activa', e.target.checked)}
+            />
+            Activa
+          </label>
+
+          {error && (
+            <p
+              role="alert"
+              className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
+            >
+              {error}
+            </p>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onCerrar}
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={enviando}
+              className="rounded-md bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+            >
+              {enviando ? 'Guardando…' : 'Guardar'}
+            </button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }

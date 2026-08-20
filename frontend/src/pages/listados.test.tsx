@@ -77,10 +77,14 @@ beforeEach(() => {
 describe('tarifas', () => {
   it('muestra el nombre de la cancha, no su id', async () => {
     render(<Tarifas />)
-    // Acotado a la tabla a proposito: "Cancha Techada" tambien aparece en el
-    // <option> del formulario de alta, que vive en el DOM aunque este cerrado.
-    // Sin acotar, la query encuentra dos y falla por ambiguedad, no por el
-    // defecto que se quiere detectar.
+    // Acotado a la tabla: lo que se afirma es que el nombre esta en la CELDA,
+    // no en cualquier lado de la pantalla.
+    //
+    // Hasta el 2026-08-20 acotarlo era ademas obligatorio: "Cancha Techada"
+    // aparecia tambien en el <option> del formulario de alta, que el `<dialog>`
+    // nativo dejaba en el DOM aunque estuviera cerrado, y la query fallaba por
+    // ambiguedad. Con el `Dialog` de shadcn el contenido cerrado se desmonta y
+    // esa segunda aparicion ya no existe — ver `dialogos.test.tsx`.
     const tabla = await screen.findByRole('table')
     expect(await within(tabla).findByText('Cancha Techada')).toBeInTheDocument()
     // La que no tiene cancha aplica a la sucursal entera.
