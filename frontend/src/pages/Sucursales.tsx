@@ -14,13 +14,13 @@ export function Sucursales() {
   // UI. El `recargar` del contexto se sigue llamando, para que el selector se
   // entere de los cambios.
   const { actual, recargar: recargarSelector } = useSucursal()
-  const { usuario } = useAuth()
+  const { user } = useAuth()
   const [filas, setFilas] = useState<Sucursal[]>([])
   const [error, setError] = useState<string | null>(null)
   const [editando, setEditando] = useState<Sucursal | null>(null)
   const [abierto, setAbierto] = useState(false)
 
-  const puedeEscribir = usuario?.role === 'admin'
+  const puedeEscribir = user?.role === 'admin'
 
   const recargar = useCallback(() => {
     api.listar().then(setFilas).catch((e: Error) => setError(e.message))

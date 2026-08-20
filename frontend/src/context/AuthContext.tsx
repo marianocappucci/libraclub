@@ -1,55 +1,19 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
-import type { ReactNode } from 'react'
-import { sesion } from '@/lib/api'
-
-interface Usuario {
-  username: string
-  role?: string
-}
-
-interface Contexto {
-  usuario: Usuario | null
-  cargando: boolean
-  entrar: (username: string, password: string) => Promise<void>
-  salir: () => Promise<void>
-}
-
-const AuthContext = createContext<Contexto | null>(null)
-
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [usuario, setUsuario] = useState<Usuario | null>(null)
-  // 🔴 Arranca en `true`, no en `false`. Con `false`, la primera pintada ocurre
-  // antes de saber si hay sesión y manda al login a alguien que ya estaba
-  // logueado — un parpadeo al login en cada recarga.
-  const [cargando, setCargando] = useState(true)
-
-  useEffect(() => {
-    sesion
-      .yo()
-      .then(setUsuario)
-      .catch(() => setUsuario(null))
-      .finally(() => setCargando(false))
-  }, [])
-
-  const entrar = useCallback(async (username: string, password: string) => {
-    await sesion.login(username, password)
-    setUsuario(await sesion.yo())
-  }, [])
-
-  const salir = useCallback(async () => {
-    await sesion.logout()
-    setUsuario(null)
-  }, [])
-
-  return (
-    <AuthContext.Provider value={{ usuario, cargando, entrar, salir }}>
-      {children}
-    </AuthContext.Provider>
-  )
-}
-
-export function useAuth(): Contexto {
-  const contexto = useContext(AuthContext)
-  if (!contexto) throw new Error('useAuth fuera de AuthProvider')
-  return contexto
-}
+// Shim sobre libra-ui/AuthContext (mismo patrón que el resto de la familia).
+//
+// La instancia pre-configurada del kit apunta a `/auth/me`, `/auth/login` y
+// `/auth/logout`, que son **exactamente** las tres rutas que monta
+// `build_json_api_auth_router()` en `app/routers/auth.py`. Por eso alcanza con
+// re-exportar: no hace falta `createAuthContext` con rutas propias, como sí lo
+// necesitan Contalibra y Restolibra.
+//
+// 🔴 Los nombres pasan a ser los del kit —`user`, `loading`, `login`,
+// `logout`— y no los de antes en español (`usuario`, `cargando`, `entrar`,
+// `salir`). Se migran los call sites en vez de envolver el hook para
+// traducirlos: una capa de traducción haría que este producto se lea distinto
+// de sus cinco hermanos justo en el archivo donde uno va a buscar la sesión, y
+// esa divergencia no compra nada.
+//
+// El `User` que devuelve el kit es el contrato completo de `_UserOut` de
+// libraauth (`id`, `username`, `name`, `role`, `active`) — más de lo que
+// declaraba el contexto propio, que sólo tipaba `username` y `role`.
+export { AuthProvider, useAuth } from 'libra-ui/AuthContext'

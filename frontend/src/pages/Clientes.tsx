@@ -5,7 +5,7 @@ import { useAuth } from '@/context/AuthContext'
 import { FormularioDeCliente } from '@/components/FormularioDeCliente'
 
 export function Clientes() {
-  const { usuario } = useAuth()
+  const { user } = useAuth()
   const [filas, setFilas] = useState<Cliente[]>([])
   const [error, setError] = useState<string | null>(null)
   const [editando, setEditando] = useState<Cliente | null>(null)
@@ -16,7 +16,7 @@ export function Clientes() {
   // 🔑 Clientes es el ÚNICO maestro que un encargado puede escribir. El backend
   // lo gatea con `require_staff` y no con `require_admin`: si pidiera admin, no
   // se le podría tomar la reserva a alguien que llama por primera vez.
-  const puedeEscribir = usuario?.role === 'admin' || usuario?.role === 'staff'
+  const puedeEscribir = user?.role === 'admin' || user?.role === 'staff'
 
   const recargar = useCallback(() => {
     api.listar().then(setFilas).catch((e: Error) => setError(e.message))

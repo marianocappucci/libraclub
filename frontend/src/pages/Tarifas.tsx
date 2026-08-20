@@ -17,7 +17,7 @@ function alcance(t: Tarifa): string {
 
 export function Tarifas() {
   const { actual } = useSucursal()
-  const { usuario } = useAuth()
+  const { user } = useAuth()
   const [filas, setFilas] = useState<Tarifa[]>([])
   const [canchas, setCanchas] = useState<Cancha[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -26,7 +26,7 @@ export function Tarifas() {
 
   // Igual que en Canchas: el backend gatea con `require_admin` y la UI no
   // ofrece botones que van a dar 403. El permiso lo decide el servidor.
-  const puedeEscribir = usuario?.role === 'admin'
+  const puedeEscribir = user?.role === 'admin'
 
   const recargar = useCallback(() => {
     Promise.all([api.listar(), apiCanchas.listar()])

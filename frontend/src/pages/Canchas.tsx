@@ -7,7 +7,7 @@ import { FormularioDeCancha } from '@/components/FormularioDeCancha'
 
 export function Canchas() {
   const { actual } = useSucursal()
-  const { usuario } = useAuth()
+  const { user } = useAuth()
   const [filas, setFilas] = useState<Cancha[]>([])
   const [error, setError] = useState<string | null>(null)
   const [editando, setEditando] = useState<Cancha | null>(null)
@@ -18,7 +18,7 @@ export function Canchas() {
   // dejar que fallen con 403 — un botón que siempre da error es peor que no
   // tenerlo. Lo que la UI **no** hace es decidir el permiso: si esta condición
   // se equivocara, el servidor sigue rechazando igual.
-  const puedeEscribir = usuario?.role === 'admin'
+  const puedeEscribir = user?.role === 'admin'
 
   const recargar = useCallback(() => {
     api.listar().then(setFilas).catch((e: Error) => setError(e.message))
