@@ -12,3 +12,14 @@ frontend/node_modules/
 frontend/dist/
 *.tsbuildinfo
 gate.xml
+
+# El compose del backoffice de la suite (`admin.libraclub.com.ar`). Vive en el
+# checkout del VPS y **no se versiona**, igual que en los otros seis productos:
+# monta `/var/run/docker.sock` y la ruta del checkout del host, así que es
+# configuración de ESA máquina y no del producto. Sus secretos van aparte, en
+# `/etc/libraclub-admin.env`.
+#
+# Está declarado acá y no sólo en la cabeza de alguien porque un archivo sin
+# trackear adentro del árbol le complica el `git pull` del próximo deploy — y
+# hoy ya pasó una vez, con el script de siembra.
+admin/
