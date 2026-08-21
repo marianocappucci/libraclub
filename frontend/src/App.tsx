@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { Layout } from '@/components/Layout'
 import { Agenda } from '@/pages/Agenda'
+import { Buffet } from '@/pages/Buffet'
 import { Caja } from '@/pages/Caja'
 import { CuentaCorriente } from '@/pages/CuentaCorriente'
 import { Horarios } from '@/pages/Horarios'
@@ -35,6 +36,7 @@ function Ruteo() {
           <Route path="/sucursales" element={<Sucursales />} />
           <Route path="/usuarios" element={<Usuarios />} />
           <Route path="/caja" element={<Caja />} />
+          <Route path="/buffet" element={<Buffet />} />
           <Route path="/cuenta-corriente" element={<CuentaCorriente />} />
           <Route path="/configuracion" element={<Configuracion />} />
           <Route path="/logs" element={<Logs />} />

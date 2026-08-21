@@ -414,3 +414,60 @@ export const horarios = {
     api.put<Franja>(`/api/horarios/${id}`, cuerpo),
   borrar: (id: number) => api.del(`/api/horarios/${id}`),
 }
+
+// ── Buffet ───────────────────────────────────────────────────────────────
+
+export interface ProductoDeBuffet {
+  item_id: number
+  nombre: string
+  precio: number
+  activo: boolean
+  stock: number
+  stock_minimo: number
+  bajo_minimo: boolean
+}
+
+export interface ProductoEntrada {
+  nombre: string
+  precio: string
+  costo: string
+  stock_minimo: string
+  activo: boolean
+}
+
+export interface LineaDeConsumo {
+  descripcion: string
+  cantidad: number
+  precio_unitario: number
+  importe: number
+}
+
+export const buffet = {
+  productos: (sucursalId: number) =>
+    api.get<ProductoDeBuffet[]>(`/api/buffet/productos?sucursal_id=${sucursalId}`),
+  crearProducto: (sucursalId: number, cuerpo: ProductoEntrada) =>
+    api.post<ProductoDeBuffet>(`/api/buffet/productos?sucursal_id=${sucursalId}`, cuerpo),
+  editarProducto: (sucursalId: number, itemId: number, cuerpo: ProductoEntrada) =>
+    api.put<ProductoDeBuffet>(
+      `/api/buffet/productos/${itemId}?sucursal_id=${sucursalId}`, cuerpo,
+    ),
+  /** `cantidad` positiva repone, negativa descuenta (rotura, vencido). */
+  ajustar: (sucursalId: number, cuerpo: { item_id: number; cantidad: string; motivo: string }) =>
+    api.post<ProductoDeBuffet>(`/api/buffet/ajustes?sucursal_id=${sucursalId}`, cuerpo),
+  /** Con `reserva_id` se carga a la cancha y NO se cobra: se cobra con el turno. */
+  consumir: (
+    sucursalId: number,
+    cuerpo: {
+      lineas: { item_id: number; cantidad: string }[]
+      reserva_id?: number | null
+      medio_pago?: string | null
+    },
+  ) =>
+    api.post<{ id: number; numero: string; total: number; reserva_id: number | null }>(
+      `/api/buffet/consumos?sucursal_id=${sucursalId}`, cuerpo,
+    ),
+  consumosDe: (reservaId: number) =>
+    api.get<{ total: number; lineas: LineaDeConsumo[] }>(
+      `/api/buffet/reservas/${reservaId}/consumos`,
+    ),
+}
