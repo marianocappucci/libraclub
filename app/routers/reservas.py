@@ -9,13 +9,14 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin, require_staff
 from app.db import obtener_sesion
 from app.models.enums import ESTADOS_QUE_OCUPAN, EstadoReserva
-from app.models.maestros import Cancha
+from app.models.maestros import Cancha, Cliente
 from app.models.reservas import Reserva, Serie
 from app.schemas.reservas import (
     BloqueoEntrada,
@@ -27,6 +28,7 @@ from app.schemas.reservas import (
     SerieSalida,
 )
 from app.servicios import disponibilidad, tarifario
+from app.servicios import facturacion as servicio_facturacion
 from app.servicios import reservas as servicio
 from app.tiempo import TZ, ahora
 
@@ -158,6 +160,75 @@ def vencer(
     cuantas = servicio.vencer_provisorias(sesion)
     sesion.commit()
     return {"canceladas": cuantas}
+
+
+class FacturaSalida(BaseModel):
+    id: int
+    tipo: int
+    punto_venta: int
+    numero: int
+    fecha: str
+    total: float
+    #: Vacío mientras ARCA no lo haya dado. **No es un error**: la factura
+    #: existe y lo que falta es el CAE, que se reintenta.
+    cae: str = ""
+    cae_vto: str = ""
+
+
+@router.post("/{reserva_id}/facturar", response_model=FacturaSalida, status_code=201)
+async def facturar(
+    reserva_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    _: object = Depends(require_admin),
+):
+    """Emite el comprobante de una reserva.
+
+    🔑 **Admin y no staff.** El encargado de mostrador toma reservas y cobra; qué
+    se le factura a quién es del dueño. Es la misma línea que separa el alta de
+    canchas del alta de clientes en este producto.
+    """
+    reserva = sesion.get(Reserva, reserva_id)
+    if reserva is None:
+        raise HTTPException(404, "no existe esa reserva")
+    cliente = sesion.get(Cliente, reserva.cliente_id) if reserva.cliente_id else None
+    try:
+        factura = await servicio_facturacion.facturar_reserva(reserva, cliente)
+    except servicio_facturacion.FacturacionNoConfigurada as e:
+        raise HTTPException(503, str(e)) from e
+    except servicio_facturacion.ReservaYaFacturada as e:
+        # 409 y no 400: el pedido está bien formado, lo que pasa es que el
+        # estado del recurso no lo admite.
+        raise HTTPException(409, str(e)) from e
+    except servicio_facturacion.SinPrecio as e:
+        raise HTTPException(422, str(e)) from e
+    sesion.commit()
+    return FacturaSalida(
+        id=factura["id"], tipo=factura["tipo"], punto_venta=factura["punto_venta"],
+        numero=factura["numero"], fecha=str(factura["fecha"]),
+        total=float(factura["total"]), cae=factura.get("cae") or "",
+        cae_vto=factura.get("cae_vto") or "",
+    )
+
+
+@router.get("/{reserva_id}/factura", response_model=FacturaSalida | None)
+def ver_factura(
+    reserva_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    _: object = Depends(require_staff),
+):
+    """El comprobante de una reserva, o `null`. Lo puede ver el mostrador."""
+    reserva = sesion.get(Reserva, reserva_id)
+    if reserva is None:
+        raise HTTPException(404, "no existe esa reserva")
+    factura = servicio_facturacion.factura_de_reserva(reserva)
+    if factura is None:
+        return None
+    return FacturaSalida(
+        id=factura["id"], tipo=factura["tipo"], punto_venta=factura["punto_venta"],
+        numero=factura["numero"], fecha=str(factura["fecha"]),
+        total=float(factura["total"]), cae=factura.get("cae") or "",
+        cae_vto=factura.get("cae_vto") or "",
+    )
 
 
 @router.post("/series", response_model=SerieCreada, status_code=201)

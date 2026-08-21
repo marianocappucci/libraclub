@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
-import { agenda } from '@/lib/api'
-import type { Cancha, Turno } from '@/lib/api'
+import { agenda, facturacion, TIPO_DE_FACTURA } from '@/lib/api'
+import type { Cancha, Factura, Turno } from '@/lib/api'
+import { useAuth } from '@/context/AuthContext'
 import { fecha, hora } from '@/lib/fechas'
 import { Input } from '@/components/ui/input'
 import { AvisoDeError } from '@/components/listado'
+import { buttonVariants } from '@/components/ui/button'
 
 /**
  * Las transiciones que se ofrecen según el estado actual.
@@ -118,6 +120,8 @@ export function DetalleDeReserva({
             </div>
           </div>
 
+          <SeccionDeFactura reservaId={turno.reserva_id} abierto={abierto} />
+
           {acciones.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               Una reserva {NOMBRE[estado]?.toLowerCase()} ya no se puede cambiar.
@@ -159,5 +163,88 @@ export function DetalleDeReserva({
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+
+/** La factura de la reserva: la muestra si existe, y si no ofrece emitirla.
+ *
+ * 🔑 **Se pide al abrir el diálogo y no al montar la grilla.** La agenda dibuja
+ * cientos de turnos por semana; pedir el comprobante de cada uno serían cientos
+ * de requests para un dato que casi nadie mira.
+ *
+ * ⚠️ Una factura **sin CAE no es un error**: existe, tiene número, y lo que
+ * falta es que ARCA lo autorice. Sin certificado cargado en la instancia pasa
+ * siempre — por eso se dice "pendiente de CAE" y no se muestra un error rojo,
+ * que mandaría a buscar un problema que no está.
+ */
+function SeccionDeFactura(
+  { reservaId, abierto }: { reservaId: number | null; abierto: boolean },
+) {
+  const { user } = useAuth()
+  const [factura, setFactura] = useState<Factura | null>(null)
+  const [cargando, setCargando] = useState(false)
+  const [emitiendo, setEmitiendo] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!abierto || reservaId === null) return
+    setError(null)
+    setCargando(true)
+    facturacion
+      .ver(reservaId)
+      .then(setFactura)
+      // Una instancia sin facturación configurada contesta 503. No es un error
+      // que mostrar: es que este complejo no factura, y la sección no aparece.
+      .catch(() => setFactura(null))
+      .finally(() => setCargando(false))
+  }, [abierto, reservaId])
+
+  if (reservaId === null || cargando) return null
+
+  if (factura) {
+    const tipo = TIPO_DE_FACTURA[factura.tipo] ?? factura.tipo
+    const numero = `${String(factura.punto_venta).padStart(4, '0')}-${String(factura.numero).padStart(8, '0')}`
+    return (
+      <div className="rounded-md border px-3 py-2 text-sm">
+        <div className="font-medium">Factura {tipo} {numero}</div>
+        <div className="text-muted-foreground">
+          {factura.cae
+            ? `CAE ${factura.cae}`
+            : 'Pendiente de CAE — la instancia todavía no tiene certificado de ARCA'}
+        </div>
+      </div>
+    )
+  }
+
+  // 🔑 El botón sólo para admin: el backend lo gatea igual con 403, y ofrecerlo
+  // a un encargado sería un botón que siempre falla.
+  if (user?.role !== 'admin') return null
+
+  async function emitir() {
+    if (reservaId === null) return
+    setError(null)
+    setEmitiendo(true)
+    try {
+      setFactura(await facturacion.emitir(reservaId))
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setEmitiendo(false)
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <AvisoDeError mensaje={error} />
+      <button
+        type="button"
+        disabled={emitiendo}
+        onClick={emitir}
+        className={buttonVariants({ variant: 'outline' })}
+      >
+        {emitiendo ? 'Emitiendo…' : 'Facturar esta reserva'}
+      </button>
+    </div>
   )
 }

@@ -23,15 +23,70 @@ que la separación es al revés — pero la conclusión es la misma: dos bases.
 
 from __future__ import annotations
 
+from datetime import date
+from decimal import ROUND_HALF_UP, Decimal
+
+from libracore import arca_facturacion, config_manager
 from libracore.db import arca_config as db_arca_config
 from libracore.db import caja as db_caja
 from libracore.db import core as libracore_core
+from libracore.db import facturas as db_facturas
 from libracore.db.schema import init_core_schema
 
 #: Una sola "empresa" ARCA: LibraClub es de instancia única por cliente
 #: (arquitectura silo), así que no hay lista de empresas para elegir. Es una
 #: constante y no una tabla, igual que en los tres verticales de la familia.
 EMPRESA = "complejo"
+
+#: Códigos de tipo de comprobante de ARCA.
+FACTURA_A = 1
+FACTURA_B = 6
+FACTURA_C = 11
+
+#: Códigos de condición de IVA del receptor que exige ARCA.
+IVA_CODES = {
+    "Responsable Inscripto": 1,
+    "Monotributista": 6,
+    "IVA Exento": 4,
+    "Consumidor Final": 5,
+}
+
+_IVA = Decimal("0.21")
+
+
+def tipo_de_comprobante(condicion_emisor: str | None) -> int:
+    """Qué comprobante emite este complejo, según SU condición frente al IVA.
+
+    🔴 **Un monotributista emite C, no B.** La lógica que la familia tiene hoy
+    (`_tipo_comprobante` de Gestiolibra) sólo mapea A y B: devuelve **B** para
+    todo lo que no sea Responsable Inscripto. Copiada tal cual acá, un complejo
+    monotributista —que es el caso más probable, y el default de la config—
+    emitiría el comprobante equivocado. No es un bug de pantalla: es fiscal.
+
+    Decidido con el humano el 2026-08-21: se deriva del emisor.
+
+    > ⚠️ **La A no se emite todavía, y falta un dato para poder hacerlo.** Un
+    > Responsable Inscripto le emite A a otro RI y B al resto — y `Cliente` de
+    > este producto **no tiene condición frente al IVA**, sólo CUIT. Sin ese
+    > campo no se puede distinguir, así que un emisor RI emite siempre B. Emitir
+    > B donde iba A le niega el crédito fiscal al cliente; agregar el campo es el
+    > próximo paso si aparece un complejo RI.
+    """
+    return FACTURA_C if (condicion_emisor or "") != "Responsable Inscripto" else FACTURA_B
+
+
+def importes(total: Decimal, tipo: int) -> tuple[Decimal, Decimal]:
+    """Devuelve `(neto, iva)` para el total final.
+
+    🔑 **Una Factura C no discrimina IVA**: el monotributista no lo cobra, así
+    que el neto ES el total y el IVA va en cero. `_split_iva` de la familia parte
+    siempre al 21% — correcto para A y B, y **mal para C**, donde inventaría un
+    IVA que nadie pagó y dejaría el neto 21% por debajo del total.
+    """
+    if tipo == FACTURA_C:
+        return total, Decimal("0.00")
+    neto = (total / (Decimal("1") + _IVA)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return neto, total - neto
 
 
 class FacturacionNoConfigurada(RuntimeError):
@@ -137,3 +192,80 @@ def guardar_config_arca(
             ambiente=ambiente,
         )
     return obtener_config_arca()
+
+
+class ReservaYaFacturada(RuntimeError):
+    """Esa reserva ya tiene comprobante.
+
+    🔑 Se corta acá y no se deja emitir de nuevo: dos comprobantes por la misma
+    reserva son dos veces el mismo ingreso ante ARCA, y no hay forma de anular
+    uno sin nota de crédito. El reintento tras un error de ARCA es otro caso —
+    ahí la factura existe **sin CAE** y lo que hay que reintentar es el CAE, no
+    la emisión.
+    """
+
+
+class SinPrecio(RuntimeError):
+    """La reserva no tiene precio: no hay nada que facturar."""
+
+
+async def facturar_reserva(reserva, cliente) -> dict:
+    """Emite el comprobante de una reserva y devuelve la factura.
+
+    Una factura por reserva, emitida **cuando alguien la pide** — no por cada
+    pago. Es el mismo diseño que MedLibra y Gestiolibra: si hubo seña, la seña y
+    el saldo son dos movimientos de caja contra la MISMA factura, y la seña
+    nunca genera comprobante propio.
+
+    ⚠️ **No registra movimiento de caja todavía.** La caja por turno es el
+    siguiente tramo de F3 y es la que define apertura y cierre; anotar
+    movimientos antes de que exista un turno al que colgarlos los dejaría fuera
+    de todo arqueo, que es justo lo que una caja viene a evitar. Cuando entre,
+    se agrega acá.
+    """
+    if not hay_base():
+        raise FacturacionNoConfigurada(
+            "Falta LIBRACLUB_LIBRACORE_DATABASE_URL en esta instancia."
+        )
+    if reserva.precio is None or Decimal(str(reserva.precio)) <= 0:
+        raise SinPrecio("La reserva no tiene precio cargado.")
+    if reserva.factura_id is not None:
+        raise ReservaYaFacturada(f"La reserva {reserva.id} ya tiene comprobante.")
+
+    total = Decimal(str(reserva.precio))
+    empresa = config_manager.load()
+    tipo = tipo_de_comprobante(empresa.get("empresa_iva_condition"))
+    neto, iva = importes(total, tipo)
+
+    arca = obtener_config_arca()
+    punto_venta = arca["punto_venta"] if arca else 1
+
+    numero, ta, arca_usado = await arca_facturacion.get_next_numero_with_arca(
+        punto_venta, tipo
+    )
+    factura_id = db_facturas.create_factura(
+        tipo, punto_venta, numero, date.today().isoformat(),
+        (cliente.cuit or "") if cliente else "",
+        (cliente.nombre if cliente else "Consumidor Final"),
+        # Sin campo de condición frente al IVA en `Cliente`, el receptor es
+        # Consumidor Final. Ver la nota en `tipo_de_comprobante`.
+        IVA_CODES["Consumidor Final"],
+        [], float(neto), float(iva), float(total),
+    )
+    factura = db_facturas.get_factura(factura_id)
+    factura = await arca_facturacion.solicitar_cae(factura_id, factura, ta, arca_usado)
+
+    # 🔑 El vínculo se escribe DESPUÉS de emitir y lo commitea el caller. Si ARCA
+    # falla, la factura queda creada sin CAE y la reserva **sin** `factura_id`:
+    # el próximo intento la vuelve a emitir. Es preferible a dejarla marcada
+    # apuntando a un comprobante sin CAE, que se vería como "ya facturada" y no
+    # habría forma de reintentar desde la pantalla.
+    reserva.factura_id = factura_id
+    return factura
+
+
+def factura_de_reserva(reserva) -> dict | None:
+    """El comprobante de una reserva, o `None` si todavía no se facturó."""
+    if not hay_base() or reserva.factura_id is None:
+        return None
+    return db_facturas.get_factura(reserva.factura_id)

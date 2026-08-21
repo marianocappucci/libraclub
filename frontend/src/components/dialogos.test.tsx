@@ -24,6 +24,24 @@ import { DetalleDeReserva } from './DetalleDeReserva'
  * shadcn y los dejaba en el DOM con el `<dialog>`; abierto da 3.
  */
 
+// `DetalleDeReserva` pasó a mostrar la factura de la reserva, y para eso mira el
+// rol con `useAuth`. En la aplicación siempre hay `AuthProvider` —el diálogo
+// cuelga del Layout— pero acá el componente se monta solo, así que se mockea el
+// hook en vez de armar el provider entero: lo que estos tests miden es el
+// diálogo, no la sesión.
+vi.mock('@/context/AuthContext', () => ({
+  useAuth: () => ({ user: { username: 'admin', name: 'Admin', role: 'admin' }, loading: false }),
+}))
+
+// Y el pedido de la factura, que si no sale por `fetch` de verdad.
+vi.mock('libra-ui/api-client', async (original) => {
+  const real = await original<Record<string, unknown>>()
+  return {
+    ...real,
+    api: { get: vi.fn().mockResolvedValue(null), post: vi.fn(), put: vi.fn(), del: vi.fn() },
+  }
+})
+
 const TURNO = {
   comienza_at: '2026-08-20T18:00:00-03:00',
   termina_at: '2026-08-20T19:30:00-03:00',
