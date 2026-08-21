@@ -5,12 +5,10 @@
 // el ojito de `PasswordInput`, el `aria-label` que lo acompaña y el manejo de
 // `ApiError` que ya está probado en el kit.
 //
-// **Sin `forgotPasswordPath` ni `demoPath`, a propósito.** Los dos son opt-in en
-// `createLogin` y acá no hay nada del otro lado: `app/routers/auth.py` monta el
-// router **sin** `incluir_password_reset` (necesita SMTP configurado) y **sin**
-// `incluir_demo` (LibraClub todavía no tiene instancia demo). Un enlace de
-// recuperación acá sería un link a un 404, y el botón de demo no aparecería
-// igual porque el kit lo condiciona a la sonda en runtime.
+// **Sin `forgotPasswordPath`, a propósito**: es opt-in en `createLogin` y acá
+// no hay nada del otro lado — `app/routers/auth.py` monta el router **sin**
+// `incluir_password_reset`, que necesita SMTP configurado. Un enlace de
+// recuperación sería un link a un 404.
 import { createLogin } from 'libra-ui/Login'
 
 import { LOGO } from '@/branding'
@@ -26,4 +24,18 @@ export const Login = createLogin({
   // A la agenda y no a la raíz: es la pantalla con la que se trabaja todo el
   // día, y `App.tsx` manda cualquier ruta desconocida ahí mismo.
   redirectTo: '/agenda',
+  // Botón "Entrar a la demo" — va de la mano con `incluir_demo=True` en
+  // `app/routers/auth.py`.
+  //
+  // 🔴 Declararlo acá NO alcanza para que aparezca, y esa es la mitad que ya
+  // se pagó una vez: `libra-ui` consulta `GET /auth/demo` al montar y sólo
+  // pinta el botón si la instancia contesta —con JSON— que es una demo. En la
+  // instancia de un complejo no aparece nada.
+  //
+  // Al revés importa igual: sin esta línea, `demo.libraclub.com.ar` mostraría
+  // el login normal pidiéndole credenciales a un visitante que no tiene
+  // ninguna, con el endpoint contestando perfecto del otro lado. Es lo que les
+  // pasó a las seis SPA de la familia el 2026-08-06 — el `POST /auth/demo` en
+  // verde, y nadie podía entrar.
+  demoPath: '/auth/demo',
 })
