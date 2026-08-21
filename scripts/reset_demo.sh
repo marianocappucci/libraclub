@@ -141,6 +141,32 @@ filas_del_dominio() {
 ANTES=$(filas_del_dominio)
 log "filas del dominio + LibraCore antes del reset: $ANTES"
 
+# --- 1b. Los codigos de acceso, que SI sobreviven al reset -----------------
+# 🔴 En este producto `usuarios` --y con el las tablas satelite de libraauth,
+# entre ellas `demo_codigos`-- vive en la MISMA base que el dominio. O sea que
+# el `DROP SCHEMA` de abajo **se lleva los codigos emitidos**.
+#
+# En Gestiolibra/MedLibra/VentaLibra eso no pasa porque ahi esa tabla esta en
+# otra base, que el reset no toca. Sin este paso, este producto se comportaria
+# distinto del resto de la familia: un codigo emitido a un cliente potencial
+# --que el sistema declara valido por 7 dias y 10 usos-- dejaria de servir en
+# el reset de esa misma noche, sin que nadie lo haya revocado.
+CODIGOS_DUMP=/tmp/demo-codigos-$CONTENEDOR.sql
+rm -f "$CODIGOS_DUMP"
+if docker exec "$SIDECAR" sh -c '
+     psql -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB"        -c "SELECT 1 FROM information_schema.tables WHERE table_name = '"'"'demo_codigos'"'"'"
+   ' 2>/dev/null | grep -q 1; then
+  docker exec "$SIDECAR" sh -c '
+    pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --data-only --table=demo_codigos
+  ' > "$CODIGOS_DUMP" 2>/dev/null || true
+  VIVOS=$(docker exec "$SIDECAR" sh -c '
+    psql -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT COUNT(*) FROM demo_codigos"
+  ' 2>/dev/null || echo 0)
+  log "codigos de acceso a preservar: ${VIVOS:-0}"
+else
+  log "todavia no existe demo_codigos: nada que preservar"
+fi
+
 # --- 2. Base de cero ------------------------------------------------------
 # Se para la app ANTES de tocar el schema. Con el contenedor arriba, sus
 # conexiones abiertas dejan el `DROP SCHEMA` esperando un lock: no falla, se
@@ -230,6 +256,25 @@ if [ "$DESPUES" != "0" ]; then
 fi
 if [ "$ANTES" = "0" ]; then
   log "OJO: antes tambien habia 0 filas -- el chequeo no probo nada esta vez."
+fi
+
+
+# --- 4b. Devolver los codigos de acceso -----------------------------------
+# Ver el 🔴 del paso 1b. La tabla ya existe: la crea `libraauth` al arrancar.
+if [ -s "$CODIGOS_DUMP" ]; then
+  if docker exec -i "$SIDECAR" sh -c '
+       psql -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+     ' < "$CODIGOS_DUMP" >/dev/null 2>&1; then
+    DEVUELTOS=$(docker exec "$SIDECAR" sh -c '
+      psql -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT COUNT(*) FROM demo_codigos"
+    ' 2>/dev/null || echo 0)
+    log "codigos de acceso devueltos: ${DEVUELTOS:-0}"
+  else
+    # No aborta: la demo ya quedo usable y sin codigos se puede emitir otro.
+    # Pero se dice fuerte, porque el sintoma seria "a nadie le anda el codigo".
+    log "OJO: no se pudieron devolver los codigos de acceso. Hay que emitir uno nuevo."
+  fi
+  rm -f "$CODIGOS_DUMP"
 fi
 
 # --- 5. Sembrar -----------------------------------------------------------
