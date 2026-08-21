@@ -13,6 +13,7 @@ import { ForgotPassword, ResetPassword } from '@/pages/PasswordReset'
 import { Logs } from '@/pages/Logs'
 import { Sucursales } from '@/pages/Sucursales'
 import { Tarifas } from '@/pages/Tarifas'
+import { TurnosFijos } from '@/pages/TurnosFijos'
 import { Usuarios } from '@/pages/Usuarios'
 import { AuthProvider, useAuth } from '@/context/AuthContext'
 import { SucursalProvider } from '@/context/SucursalContext'
@@ -52,6 +53,7 @@ export function Ruteo() {
           <Route path="/agenda" element={<Agenda />} />
           <Route path="/canchas" element={<Canchas />} />
           <Route path="/tarifas" element={<Tarifas />} />
+          <Route path="/turnos-fijos" element={<TurnosFijos />} />
           <Route path="/horarios" element={<Horarios />} />
           <Route path="/clientes" element={<Clientes />} />
           <Route path="/sucursales" element={<Sucursales />} />
