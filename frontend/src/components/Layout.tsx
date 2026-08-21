@@ -13,8 +13,7 @@
 import { Outlet } from 'react-router-dom'
 import { createLayout } from 'libra-ui/Layout'
 import {
-  CalendarDays, Clock, CupSoda, LayoutGrid, MapPin, NotebookText, ScrollText,
-  Settings, Tags, UserCog, Users, Wallet,
+  CalendarDays, Clock, CupSoda, LayoutGrid, MapPin, NotebookText, Repeat, ScrollText, Settings, Tags, UserCog, Users, Wallet,
 } from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
@@ -80,6 +79,9 @@ const Cascaron = createLayout<Usuario>({
     {
       items: [
         { to: '/agenda', label: 'Agenda', icon: CalendarDays },
+        // Junto a la Agenda: una cancha fija ES agenda, y el encargado la
+        // toca cuando el grupo pide o deja el turno — no cuando configura.
+        { to: '/turnos-fijos', label: 'Turnos fijos', icon: Repeat },
         { to: '/caja', label: 'Caja', icon: Wallet },
         // Con la caja y la cuenta corriente: es lo que se toca durante el
         // turno, no cuando se configura el complejo.

@@ -471,3 +471,65 @@ export const buffet = {
       `/api/buffet/reservas/${reservaId}/consumos`,
     ),
 }
+
+// ── Turnos fijos (canchas fijas / series) ────────────────────────────────
+
+export interface SerieEntrada {
+  cancha_id: number
+  cliente_id: number
+  /** 0 = lunes … 6 = domingo. */
+  dia_semana: number
+  /** `HH:MM`. */
+  hora: string
+  duracion_min: number
+  desde: string
+  /** `null` = sin fin, que es el caso normal de una cancha fija. */
+  hasta: string | null
+  observaciones?: string | null
+}
+
+export interface Serie extends SerieEntrada {
+  id: number
+  activa: boolean
+  cliente: string
+  cancha: string
+  /** 🔑 Hasta cuándo hay reservas generadas. `null` = **ninguna**, o sea que la
+   *  serie existe y no está funcionando. Es lo que evita que una cancha fija se
+   *  apague sola al agotarse la ventana de 90 días. */
+  materializada_hasta: string | null
+  /** Reservas futuras vivas. Es lo que se cancela al dar de baja. */
+  proximas: number
+}
+
+/** Una fecha de la serie que no se pudo crear, **con el motivo**. */
+export interface Salteada {
+  comienza_at: string
+  /** `sin_tarifa` | `ocupada` | `fuera_de_horario`. */
+  motivo: string
+  detalle: string
+}
+
+export interface SerieCreada {
+  serie: Serie
+  creadas: Reserva[]
+  salteadas: Salteada[]
+}
+
+export const series = {
+  listar: () => api.get<Serie[]>('/api/reservas/series/listado'),
+  /** `hasta` acota hasta dónde generar; sin él, la ventana por defecto (90 días). */
+  crear: (cuerpo: SerieEntrada, hasta?: string) =>
+    api.post<SerieCreada>(
+      `/api/reservas/series${hasta ? `?hasta=${hasta}` : ''}`, cuerpo,
+    ),
+  /** Genera las ocurrencias que faltan de una serie ya creada. */
+  extender: (id: number, hasta?: string) =>
+    api.post<SerieCreada>(
+      `/api/reservas/series/${id}/extender${hasta ? `?hasta=${hasta}` : ''}`, {},
+    ),
+  /** Corta la cancha fija. Devuelve cuántas reservas futuras se cancelaron. */
+  darDeBaja: (id: number, cuerpo: { cancelar_futuras: boolean; motivo?: string }) =>
+    api.post<{ serie_id: number; canceladas: number }>(
+      `/api/reservas/series/${id}/baja`, cuerpo,
+    ),
+}
