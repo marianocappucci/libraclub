@@ -36,6 +36,26 @@ SECRETO_DE_PRUEBA = "libraclub-suite-no-es-un-secreto-real"
 
 
 @pytest.fixture(autouse=True)
+def _config_de_libracore_aislada(tmp_path, monkeypatch):
+    """`config_manager` de LibraCore escribe un JSON **en el cwd**, y persiste.
+
+    🔴 Lo encontró el test del buffet, y es un falso verde de manual:
+    `_DATA_DIR = os.environ.get("DATA_DIR", os.getcwd())` se resuelve **al
+    importar**, así que `CONFIG_PATH` termina siendo `<raíz del repo>/config.json`.
+    Un test que hace `save({"empresa_iva_condition": "Responsable Inscripto"})`
+    deja ese archivo escrito **para siempre**: la corrida siguiente arranca con
+    un emisor distinto, y los tests que dependen del tipo de comprobante pasan a
+    probar otra cosa. Dentro de una corrida no se nota —el orden los salva— y
+    aparece recién en la segunda.
+
+    Con esto cada test arranca con la config en su default (Monotributista).
+    """
+    from libracore import config_manager
+
+    monkeypatch.setattr(config_manager, "CONFIG_PATH", str(tmp_path / "config.json"))
+
+
+@pytest.fixture(autouse=True)
 def _secreto_de_sesion(monkeypatch):
     """`SessionAuth` no se construye sin `SECRET_KEY` (salvo `ENV=development`).
 

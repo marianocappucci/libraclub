@@ -39,6 +39,7 @@ from app.auth import UserRepository, construir_session_auth, require_admin
 from app.config import Config
 from app.routers import admin, disponibilidad, maestros, reservas, salud
 from app.routers import auth as auth_router
+from app.routers import buffet as buffet_router
 from app.routers import caja as caja_router
 from app.routers import cuenta_corriente as cuenta_corriente_router
 from app.routers import facturacion as facturacion_router
@@ -247,6 +248,10 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # La cuenta corriente. Mismo criterio que la caja: el mostrador fía y cobra
     # —es quien está frente al cliente—, y la lista de deudores es de admin.
     app.include_router(cuenta_corriente_router.router)
+
+    # El buffet. Sin `dependencies`: el catálogo y el alta de producto son de
+    # admin —definen precio—, y vender y reponer son de mostrador.
+    app.include_router(buffet_router.router)
 
     app.include_router(build_empresa_router(), dependencies=[Depends(require_admin)])
     app.include_router(build_empresa_admin_router(), dependencies=[Depends(require_admin)])

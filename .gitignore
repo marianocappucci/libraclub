@@ -35,3 +35,8 @@ scripts/.npm_config.json
 # Las instancias de cliente que provisiona el backoffice. Son datos del
 # servidor, no del producto.
 clientes/
+
+# `config_manager` de LibraCore lo escribe en el cwd si `DATA_DIR` no está
+# puesto. En los tests eso es la raíz del repo; el fixture lo aísla, pero un
+# script corrido a mano lo deja igual.
+config.json

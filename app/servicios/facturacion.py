@@ -26,12 +26,16 @@ from __future__ import annotations
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
+from libracommerce.db.schema import init_schema as init_commerce_schema
 from libracore import arca_facturacion, config_manager
 from libracore.db import arca_config as db_arca_config
 from libracore.db import caja as db_caja
 from libracore.db import core as libracore_core
 from libracore.db import facturas as db_facturas
 from libracore.db.schema import init_core_schema
+
+from app.servicios import buffet
+from app.tiempo import a_local
 
 #: Una sola "empresa" ARCA: LibraClub es de instancia única por cliente
 #: (arquitectura silo), así que no hay lista de empresas para elegir. Es una
@@ -115,6 +119,17 @@ def configurar(database_url: str | None) -> bool:
     conexion = libracore_core.get_connection()
     try:
         init_core_schema(conexion)
+        # 🔑 **El schema del buffet vive en LA MISMA base que LibraCore**, y no
+        # en una tercera. Se verificó que **no colisiona ni una tabla**: las de
+        # LibraCore están en castellano (`ventas`, `facturas`, `clients`) y las
+        # de LibraCommerce en inglés (`sales`, `catalog_items`, `parties`).
+        #
+        # Van juntas porque las dos hablan el mismo dialecto —el API estilo
+        # `sqlite3` que `libracore.db.core` traduce a PostgreSQL— y porque el
+        # buffet **le cobra a la misma caja y le factura al mismo comprobante**
+        # que la cancha. Separarlas obligaría a una transacción distribuida para
+        # que una venta descuente stock y entre al turno a la vez.
+        init_commerce_schema(conexion)
         conexion.commit()
     finally:
         conexion.close()
@@ -209,19 +224,75 @@ class SinPrecio(RuntimeError):
     """La reserva no tiene precio: no hay nada que facturar."""
 
 
-async def facturar_reserva(reserva, cliente) -> dict:
-    """Emite el comprobante de una reserva y devuelve la factura.
+def _linea(descripcion: str, cantidad: Decimal, importe: Decimal, tipo: int) -> dict:
+    """Una línea del comprobante, en la forma que espera el PDF de LibraCore.
+
+    🔑 **`unit_price` y `subtotal` van en NETO, no en el precio de mostrador.**
+    `_draw_items_table` recibe `iva_incluido` y le vuelve a sumar el IVA a cada
+    línea cuando el receptor no discrimina. Poner el precio final acá lo
+    duplicaría en el papel. En una C el neto ES el total, así que no se nota —
+    y ése es justamente el motivo por el que hay que escribirlo: el día que un
+    complejo emita B, el error aparecería en el comprobante y no en un test.
+    """
+    neto_total, _ = importes(importe, tipo)
+    unitario = (neto_total / cantidad).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return {
+        "description": descripcion,
+        "qty": float(cantidad),
+        "unit_price": float(unitario),
+        "subtotal": float(neto_total),
+        "iva_pct": 0 if tipo == FACTURA_C else float(_IVA * 100),
+    }
+
+
+def lineas_de_la_reserva(reserva, cancha_nombre: str, tipo: int) -> list[dict]:
+    """La cancha y lo consumido en el buffet, como líneas del comprobante.
+
+    🔑 **Ésta es la razón de ser de F4: UNA factura con las dos cosas.** El grupo
+    juega y toma tres gaseosas; sale un comprobante con el alquiler y el consumo
+    detallados por separado, que es lo que el cliente espera ver y lo que hace
+    que el buffet no necesite su propia numeración fiscal.
+
+    El detalle importa: una factura de $11.300 sin líneas obliga al cliente a
+    creer en el número. Con líneas, lo puede verificar.
+    """
+    duracion = int((reserva.termina_at - reserva.comienza_at).total_seconds() // 60)
+    lineas = [
+        _linea(
+            f"Alquiler de {cancha_nombre} — {a_local(reserva.comienza_at):%d-%m-%Y %H:%M}"
+            f" ({duracion} min)",
+            Decimal("1"),
+            Decimal(str(reserva.precio)),
+            tipo,
+        )
+    ]
+    for consumo in buffet.lineas_para_factura(reserva.id):
+        lineas.append(
+            _linea(
+                consumo.description_snapshot,
+                Decimal(consumo.quantity),
+                Decimal(consumo.quantity) * Decimal(consumo.unit_price),
+                tipo,
+            )
+        )
+    return lineas
+
+
+async def facturar_reserva(reserva, cliente, cancha_nombre: str = "cancha") -> dict:
+    """Emite el comprobante de una reserva **con su consumo de buffet** adentro.
 
     Una factura por reserva, emitida **cuando alguien la pide** — no por cada
     pago. Es el mismo diseño que MedLibra y Gestiolibra: si hubo seña, la seña y
-    el saldo son dos movimientos de caja contra la MISMA factura, y la seña
-    nunca genera comprobante propio.
+    el saldo son dos movimientos de caja contra la MISMA factura, y la seña nunca
+    genera comprobante propio.
 
-    ⚠️ **No registra movimiento de caja todavía.** La caja por turno es el
-    siguiente tramo de F3 y es la que define apertura y cierre; anotar
-    movimientos antes de que exista un turno al que colgarlos los dejaría fuera
-    de todo arqueo, que es justo lo que una caja viene a evitar. Cuando entre,
-    se agrega acá.
+    🔑 **El total incluye el buffet.** Lo que se consumió durante el turno se
+    carga a la reserva (`servicios/buffet.py`) y sale como líneas de este mismo
+    comprobante. Facturarlos por separado obligaría a dos comprobantes por un
+    solo cobro, y a que el buffet queme numeración fiscal por cada gaseosa.
+
+    ⚠️ **No registra movimiento de caja.** El cobro se registra en la caja del
+    turno, que es donde el arqueo lo va a contar — ver `servicios/caja.py`.
     """
     if not hay_base():
         raise FacturacionNoConfigurada(
@@ -232,9 +303,15 @@ async def facturar_reserva(reserva, cliente) -> dict:
     if reserva.factura_id is not None:
         raise ReservaYaFacturada(f"La reserva {reserva.id} ya tiene comprobante.")
 
-    total = Decimal(str(reserva.precio))
     empresa = config_manager.load()
     tipo = tipo_de_comprobante(empresa.get("empresa_iva_condition"))
+    lineas = lineas_de_la_reserva(reserva, cancha_nombre, tipo)
+    # 🔴 **El total se suma DESDE las líneas, no desde `reserva.precio`.** Es la
+    # diferencia entre un comprobante que cierra y uno que no: si el total
+    # saliera del precio de la cancha, el buffet aparecería detallado en el
+    # cuerpo y ausente del importe, y ARCA autorizaría un CAE por menos plata de
+    # la que se cobró.
+    total = Decimal(str(reserva.precio)) + buffet.total_consumido(reserva.id)
     neto, iva = importes(total, tipo)
 
     arca = obtener_config_arca()
@@ -250,7 +327,7 @@ async def facturar_reserva(reserva, cliente) -> dict:
         # Sin campo de condición frente al IVA en `Cliente`, el receptor es
         # Consumidor Final. Ver la nota en `tipo_de_comprobante`.
         IVA_CODES["Consumidor Final"],
-        [], float(neto), float(iva), float(total),
+        lineas, float(neto), float(iva), float(total),
     )
     factura = db_facturas.get_factura(factura_id)
     factura = await arca_facturacion.solicitar_cae(factura_id, factura, ta, arca_usado)

@@ -197,8 +197,14 @@ async def facturar(
     if reserva is None:
         raise HTTPException(404, "no existe esa reserva")
     cliente = sesion.get(Cliente, reserva.cliente_id) if reserva.cliente_id else None
+    # El nombre de la cancha va a la línea del comprobante. Se resuelve acá y no
+    # dentro del servicio para que `servicios/facturacion.py` no dependa del
+    # modelo del dominio: ya depende de dos bases, alcanza.
+    cancha = sesion.get(Cancha, reserva.cancha_id)
     try:
-        factura = await servicio_facturacion.facturar_reserva(reserva, cliente)
+        factura = await servicio_facturacion.facturar_reserva(
+            reserva, cliente, cancha.nombre if cancha else "cancha"
+        )
     except servicio_facturacion.FacturacionNoConfigurada as e:
         raise HTTPException(503, str(e)) from e
     except servicio_facturacion.ReservaYaFacturada as e:

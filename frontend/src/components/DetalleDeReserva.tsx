@@ -1,14 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
-import { agenda, cuentaCorriente, facturacion, TIPO_DE_FACTURA } from '@/lib/api'
-import type { Cancha, Factura, Turno } from '@/lib/api'
+import { agenda, buffet, cuentaCorriente, facturacion, TIPO_DE_FACTURA } from '@/lib/api'
+import type { Cancha, Factura, LineaDeConsumo, Turno } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
 import { fecha, hora, pesos } from '@/lib/fechas'
 import { Input } from '@/components/ui/input'
 import { AvisoDeError } from '@/components/listado'
 import { buttonVariants } from '@/components/ui/button'
+import { DialogoDeConsumo } from '@/components/DialogoDeConsumo'
 
 /**
  * Las transiciones que se ofrecen según el estado actual.
@@ -120,6 +121,12 @@ export function DetalleDeReserva({
             </div>
           </div>
 
+          <SeccionDeConsumo
+            turno={turno}
+            cancha={cancha}
+            abierto={abierto}
+            onCambio={onCambiada}
+          />
           <SeccionDeFactura reservaId={turno.reserva_id} abierto={abierto} />
           <SeccionDeCuentaCorriente turno={turno} abierto={abierto} />
 
@@ -315,6 +322,113 @@ function SeccionDeCuentaCorriente(
       >
         {enviando ? 'Cargando…' : 'Cargar a la cuenta'}
       </button>
+    </div>
+  )
+}
+
+
+/** Lo consumido en el buffet durante ese turno, y el botón para cargar más.
+ *
+ * 🔑 **Va junto a la factura, y arriba de ella**: el consumo entra en ese
+ * comprobante, así que el orden en la pantalla es el orden en que se hacen las
+ * cosas — primero se carga lo que tomaron, después se factura todo junto.
+ *
+ * Una vez facturada la reserva **no se carga más**: no entraría en ese
+ * comprobante y quedaría cobrado sin respaldo. El backend lo corta con 409 y
+ * acá directamente no se ofrece.
+ */
+function SeccionDeConsumo({ turno, cancha, abierto, onCambio }: {
+  turno: Turno
+  cancha: Cancha
+  abierto: boolean
+  onCambio: () => void
+}) {
+  // 🔴 **La sucursal sale de la CANCHA, no del selector de arriba.** El stock es
+  // por sucursal: descontar del depósito de la sucursal "activa" mandaría el
+  // consumo al lugar equivocado en cuanto alguien mire una cancha de otra sede.
+  // Además ataba este componente a `SucursalProvider`, que es lo que rompió el
+  // test del diálogo — el defecto de diseño se manifestó ahí primero.
+  const sucursalId = cancha.sucursal_id
+  const [datos, setDatos] = useState<{ total: number; lineas: LineaDeConsumo[] } | null>(null)
+  const [cargando, setCargando] = useState(false)
+  const [facturada, setFacturada] = useState(false)
+  const [agregando, setAgregando] = useState(false)
+
+  const recargar = useCallback(() => {
+    if (turno.reserva_id === null) return
+    setCargando(true)
+    buffet
+      .consumosDe(turno.reserva_id)
+      // Una instancia sin buffet configurado contesta 503: no es un error que
+      // mostrar, es que este complejo no tiene buffet y la sección no aparece.
+      .then(setDatos)
+      .catch(() => setDatos(null))
+      .finally(() => setCargando(false))
+  }, [turno.reserva_id])
+
+  useEffect(() => {
+    if (!abierto || turno.reserva_id === null) return
+    recargar()
+    facturacion
+      .ver(turno.reserva_id)
+      .then((f) => setFacturada(f !== null))
+      .catch(() => setFacturada(false))
+  }, [abierto, turno.reserva_id, recargar])
+
+  if (turno.reserva_id === null || turno.cliente === null || cargando || datos === null) {
+    return null
+  }
+
+  return (
+    <div className="space-y-2">
+      {datos.lineas.length > 0 && (
+        <div className="rounded-md border px-3 py-2 text-sm">
+          <div className="font-medium">Consumido en el buffet</div>
+          {datos.lineas.map((l, i) => (
+            <div key={`${l.descripcion}-${i}`} className="flex justify-between text-muted-foreground">
+              <span>
+                {l.cantidad} × {l.descripcion}
+              </span>
+              <span>{pesos(String(l.importe))}</span>
+            </div>
+          ))}
+          <div className="flex justify-between border-t pt-1 font-medium">
+            <span>Total del buffet</span>
+            <span>{pesos(String(datos.total))}</span>
+          </div>
+          {turno.precio !== null && (
+            // El total con la cancha: es el número que se le dice al cliente, y
+            // el que va a salir en la factura.
+            <div className="flex justify-between text-muted-foreground">
+              <span>Con la cancha</span>
+              <span>{pesos(String(Number(turno.precio) + datos.total))}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!facturada && (
+        <>
+          <button
+            type="button"
+            onClick={() => setAgregando(true)}
+            className={buttonVariants({ variant: 'outline' })}
+          >
+            Cargar consumo
+          </button>
+          <DialogoDeConsumo
+            abierto={agregando}
+            sucursalId={sucursalId}
+            reservaId={turno.reserva_id}
+            onCerrar={() => setAgregando(false)}
+            onCargado={() => {
+              setAgregando(false)
+              recargar()
+              onCambio()
+            }}
+          />
+        </>
+      )}
     </div>
   )
 }
