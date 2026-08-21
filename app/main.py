@@ -39,6 +39,7 @@ from app.auth import UserRepository, construir_session_auth, require_admin
 from app.config import Config
 from app.routers import admin, disponibilidad, maestros, reservas, salud
 from app.routers import auth as auth_router
+from app.routers import caja as caja_router
 from app.routers import facturacion as facturacion_router
 
 # Con alias: más abajo hay una variable local `usuarios` con el repositorio, y
@@ -231,6 +232,12 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # `GET`/`PUT /config/arca`, la pestaña de ARCA de la pantalla compartida.
     # Sin `/api` a propósito: es el prefijo que consume el kit — ver el módulo.
     app.include_router(facturacion_router.router, dependencies=[Depends(require_admin)])
+
+    # La caja por turno. Sin `dependencies` acá: cada endpoint declara su rol —
+    # el mostrador abre y cobra en su propia caja, el historial es de admin, y
+    # cerrar depende del turno, no sólo de quién pide.
+
+    app.include_router(caja_router.router)
 
     app.include_router(build_empresa_router(), dependencies=[Depends(require_admin)])
     app.include_router(build_empresa_admin_router(), dependencies=[Depends(require_admin)])
