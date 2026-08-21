@@ -65,6 +65,10 @@ AUDITABLES = {
     "Cliente": "cliente",
     "Tarifa": "tarifa",
     "Feriado": "feriado",
+    # Cambiar el horario de atención cambia qué turnos se pueden vender. Es la
+    # clase de dato que alguien toca una vez y después nadie recuerda haber
+    # tocado, así que queda con nombre y fecha.
+    "FranjaDeAtencion": "horario de atención",
     # 🔑 El que motivó todo esto: *"quién movió el turno de las 20:00 a las
     # 21:00 sin avisar"* es una discusión con un cliente, no un bug.
     "Reserva": "reserva",

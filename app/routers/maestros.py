@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_admin, require_staff
 from app.db import obtener_sesion
-from app.models.maestros import Cancha, Cliente, Feriado, Sucursal
+from app.models.maestros import Cancha, Cliente, Feriado, FranjaDeAtencion, Sucursal
 from app.models.tarifas import Tarifa
 from app.schemas.maestros import (
     CanchaEntrada,
@@ -35,6 +35,8 @@ from app.schemas.maestros import (
     ClienteSalida,
     FeriadoEntrada,
     FeriadoSalida,
+    FranjaEntrada,
+    FranjaSalida,
     SucursalEntrada,
     SucursalSalida,
     TarifaEntrada,
@@ -202,4 +204,16 @@ tarifas = construir_abm(
     orden=(Tarifa.sucursal_id, Tarifa.hora_desde),
 )
 
-TODOS = (sucursales, canchas, clientes, feriados, tarifas)
+# 🔑 **De admin, como las tarifas.** El horario de atención decide qué turnos se
+# pueden vender: no es operación de mostrador, es configuración del negocio.
+franjas = construir_abm(
+    prefijo="horarios", etiqueta="horario de atención",
+    modelo=FranjaDeAtencion, entrada=FranjaEntrada, salida=FranjaSalida,
+    orden=(
+        FranjaDeAtencion.sucursal_id,
+        FranjaDeAtencion.dia_semana,
+        FranjaDeAtencion.abre,
+    ),
+)
+
+TODOS = (sucursales, canchas, clientes, feriados, tarifas, franjas)

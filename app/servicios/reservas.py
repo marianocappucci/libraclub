@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from app.models.enums import ESTADOS_QUE_OCUPAN, EstadoReserva, OrigenReserva
 from app.models.maestros import Cancha
 from app.models.reservas import Reserva, Serie
-from app.servicios import tarifario
+from app.servicios import horarios, tarifario
 from app.tiempo import TZ, a_local, ahora
 
 #: Cuánto vive una reserva provisoria sin confirmarse. Entra en juego de verdad
@@ -34,6 +34,15 @@ HORIZONTE_SERIE = timedelta(days=90)
 
 class ReservaInvalida(ValueError):
     """El pedido está mal formado: termina antes de empezar, cancha inactiva."""
+
+
+class FueraDelHorario(ValueError):
+    """La reserva cae fuera del horario de atención de la cancha.
+
+    Hereda de `ValueError` igual que `ReservaInvalida` —es un pedido que el
+    modelo rechaza, no un choque con otra reserva—, pero es su propia clase
+    porque el router la traduce a un 422 con un mensaje que nombra el horario.
+    """
 
 
 class Superpuesta(Exception):
@@ -134,6 +143,32 @@ def _guardar(sesion: Session, reserva: Reserva) -> Reserva:
     return reserva
 
 
+def _verificar_dentro_del_horario(
+    sesion: Session, cancha: Cancha, comienza_at: datetime, termina_at: datetime
+) -> None:
+    """Una reserva fuera del horario de atención no entra.
+
+    🔴 **Que la grilla no lo ofrezca no alcanza.** La pantalla dibuja sólo los
+    casilleros de las franjas abiertas, pero la API sigue tomando cualquier
+    `comienza_at`: sin esta guarda, una reserva de las 4 de la mañana entra por
+    `POST /api/reservas` y después aparece en la grilla como turno huérfano.
+
+    El mensaje dice **qué horario rige ese día**, no sólo que está mal: el
+    encargado que se equivocó de día necesita saber a qué hora sí puede.
+
+    Los **bloqueos no pasan por acá** a propósito: son del complejo, no de un
+    cliente, y el mantenimiento de las 6 de la mañana es justamente lo que se
+    hace con el lugar cerrado.
+    """
+    if horarios.esta_abierto(sesion, cancha, comienza_at, termina_at):
+        return
+    dia = a_local(comienza_at).date()
+    raise FueraDelHorario(
+        f"{cancha.nombre} no atiende en ese horario: el "
+        f"{dia:%d-%m-%Y} abre {horarios.texto_del_horario(sesion, cancha, dia)}."
+    )
+
+
 def crear(
     sesion: Session,
     *,
@@ -159,6 +194,7 @@ def crear(
         raise ReservaInvalida("La duración tiene que ser positiva.")
     termina_at = comienza_at + timedelta(minutes=minutos)
 
+    _verificar_dentro_del_horario(sesion, cancha, comienza_at, termina_at)
     _verificar_libre(sesion, cancha_id, comienza_at, termina_at)
 
     if precio is None:

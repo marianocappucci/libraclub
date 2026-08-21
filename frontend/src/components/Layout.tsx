@@ -13,8 +13,8 @@
 import { Outlet } from 'react-router-dom'
 import { createLayout } from 'libra-ui/Layout'
 import {
-  CalendarDays, LayoutGrid, MapPin, NotebookText, ScrollText, Settings, Tags,
-  UserCog, Users, Wallet,
+  CalendarDays, Clock, LayoutGrid, MapPin, NotebookText, ScrollText, Settings,
+  Tags, UserCog, Users, Wallet,
 } from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
@@ -86,6 +86,10 @@ const Cascaron = createLayout<Usuario>({
         { to: '/clientes', label: 'Clientes', icon: Users },
         { to: '/canchas', label: 'Canchas', icon: LayoutGrid },
         { to: '/tarifas', label: 'Tarifas', icon: Tags },
+        // Junto a Tarifas y no en Configuración: las dos definen qué se
+        // vende y a cuánto, y se cargan en la misma sesión al abrir el
+        // complejo. El horario decide qué turnos existen; la tarifa, su precio.
+        { to: '/horarios', label: 'Horario de atención', icon: Clock },
       ],
     },
     {

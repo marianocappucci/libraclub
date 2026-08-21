@@ -3,6 +3,7 @@ import { Layout } from '@/components/Layout'
 import { Agenda } from '@/pages/Agenda'
 import { Caja } from '@/pages/Caja'
 import { CuentaCorriente } from '@/pages/CuentaCorriente'
+import { Horarios } from '@/pages/Horarios'
 import { Canchas } from '@/pages/Canchas'
 import { Configuracion } from '@/pages/Configuracion'
 import { Clientes } from '@/pages/Clientes'
@@ -29,6 +30,7 @@ function Ruteo() {
           <Route path="/agenda" element={<Agenda />} />
           <Route path="/canchas" element={<Canchas />} />
           <Route path="/tarifas" element={<Tarifas />} />
+          <Route path="/horarios" element={<Horarios />} />
           <Route path="/clientes" element={<Clientes />} />
           <Route path="/sucursales" element={<Sucursales />} />
           <Route path="/usuarios" element={<Usuarios />} />
