@@ -81,7 +81,14 @@ export function Agenda() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
+      {/* 🔴 `flex-wrap`: los botones de `buttonVariants` traen `whitespace-nowrap`
+          y `shrink-0`, así que la fila NO se puede encoger. Sin envolver, en un
+          teléfono de 375px se sale 61px y arrastra al `<body>` con ella.
+          Medido, y **lo introdujo la migración de colores del 2026-08-20**: los
+          botones escritos a mano de antes no traían esas dos clases y el texto
+          les envolvía adentro. Mismo criterio que `EncabezadoDePantalla` de
+          `libra-ui`, que envuelve por esta misma razón. */}
+      <div className="flex flex-wrap items-center gap-2">
         <button
           className={buttonVariants({ variant: 'outline', size: 'sm' })}
           onClick={() => setDesde(correr(desde, -7))}
