@@ -44,6 +44,7 @@ from app.routers import buffet as buffet_router
 from app.routers import caja as caja_router
 from app.routers import cuenta_corriente as cuenta_corriente_router
 from app.routers import facturacion as facturacion_router
+from app.routers import portal as portal_router
 from app.routers import resumen as resumen_router
 
 # Con alias: más abajo hay una variable local `usuarios` con el repositorio, y
@@ -262,6 +263,20 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # Puede venir `None`: sin base de LibraCore no hay núcleo que contestar, y
     # entonces **no se monta**. Un 404 dice "esta instancia no informa"; un
     # endpoint que contesta ceros diría "informa que no vendió nada".
+    # El portal público: `/api/portal`. **El único router sin sesión de staff
+    # detrás**, así que las reglas de qué se devuelve viven en
+    # `servicios/portal.py` y no en el handler.
+    app.include_router(portal_router.router)
+
+    # 🔴 El simulador de pago **no se monta en producción**. Confirma una
+    # reserva sin que nadie haya pagado: en la instancia de un complejo,
+    # cualquiera con la URL se lleva los viernes a la noche gratis. Devuelve
+    # `None` según el entorno, y por eso el `if` está acá y no adentro del
+    # handler — un `if` mal escrito adentro deja el endpoint existiendo.
+    simulador = portal_router.construir_router_de_simulacion(config.entorno)
+    if simulador is not None:
+        app.include_router(simulador)
+
     resumen = resumen_router.construir_router()
     if resumen is not None:
         app.include_router(resumen)

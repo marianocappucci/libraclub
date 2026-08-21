@@ -231,3 +231,51 @@ class FranjaDeAtencion(Base, Auditable):
         Index("ix_franjas_sucursal", "sucursal_id"),
         Index("ix_franjas_cancha", "cancha_id"),
     )
+
+
+class CuentaDeJugador(Base, Auditable):
+    """La cuenta con la que un jugador entra al portal público.
+
+    🔴 **Tabla propia y no columnas en `Cliente`, y no `usuarios` de libraauth.**
+    Son tres cosas distintas que se parecen:
+
+    - `usuarios` (libraauth) son **operadores**: entran al sistema de gestión,
+      tienen rol `admin`/`staff` y los da de alta el complejo. Un jugador con una
+      fila ahí podría entrar a la agenda de todos.
+    - `Cliente` es **el dato de negocio**: a quién se le factura y a quién se le
+      cobra la cuenta corriente. Lo carga el mostrador, puede ser una empresa, y
+      existe sin que nadie se registre.
+    - Esto es **quién se logueó desde internet**. Un cliente puede no tener
+      cuenta —la mayoría— y una cuenta siempre apunta a un cliente.
+
+    Mezclarlas es lo que convierte un portal público en una puerta al backoffice.
+
+    🔑 **`cliente_id` no es único a propósito.** Dos personas del mismo grupo
+    pueden tener cuenta y reservar para «Los Martes»; lo que no puede repetirse
+    es el email, que es con lo que se entra.
+    """
+
+    __tablename__ = "cuentas_de_jugador"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cliente_id: Mapped[int] = mapped_column(
+        ForeignKey("clientes.id", ondelete="RESTRICT"), nullable=False
+    )
+    #: Con lo que se entra. Se guarda en minúsculas —lo normaliza el servicio—
+    #: porque nadie recuerda si se registró con mayúscula.
+    email: Mapped[str] = mapped_column(String(120), nullable=False)
+    #: El mismo formato que `libraauth`: se hashea con su `hash_password` para
+    #: no tener dos esquemas de contraseña en el mismo producto.
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    telefono: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    activa: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    cliente: Mapped[Cliente] = relationship()
+
+    __table_args__ = (
+        # Citext no: se normaliza a minúsculas al escribir. Un UNIQUE sobre
+        # texto crudo dejaría entrar `Juan@x.com` y `juan@x.com` como dos
+        # cuentas, y la segunda no podría entrar nunca.
+        UniqueConstraint("email", name="uq_cuentas_jugador_email"),
+        Index("ix_cuentas_jugador_cliente", "cliente_id"),
+    )

@@ -533,3 +533,83 @@ export const series = {
       `/api/reservas/series/${id}/baja`, cuerpo,
     ),
 }
+
+// ── Portal público ───────────────────────────────────────────────────────
+//
+// 🔴 **Todo esto sale a internet sin sesión de staff.** Las respuestas traen
+// menos campos que las del backoffice a propósito: la disponibilidad pública no
+// dice quién ocupa los turnos, y las canchas no traen `punto_venta_arca`. Si
+// algún día un tipo de acá crece de golpe, mirar el servidor antes que la
+// pantalla.
+
+export interface Jugador {
+  id: number
+  nombre: string
+  email: string
+}
+
+export interface CanchaPublica {
+  id: number
+  nombre: string
+  deporte: string
+  techada: boolean
+  iluminacion: boolean
+  duracion_turno_min: number
+}
+
+export interface TurnoLibre {
+  comienza_at: string
+  termina_at: string
+  precio: number
+}
+
+export interface ReservaDelJugador {
+  id: number
+  cancha: string
+  comienza_at: string
+  termina_at: string
+  estado: string
+  precio: number | null
+  /** `pendiente` | `aprobado` | `rechazado` | `vencido` | `null`. */
+  pago: string | null
+  /** Hasta cuándo se retiene el turno esperando el pago. */
+  vence_at: string | null
+}
+
+export interface ReservaCreada {
+  reserva_id: number
+  pago_id: number
+  referencia: string
+  monto: number
+  vence_at: string
+  /** `null` mientras la instancia no tenga credenciales de MercadoPago. */
+  url_de_pago: string | null
+}
+
+export const portal = {
+  registro: (cuerpo: {
+    email: string; password: string; nombre: string; telefono?: string
+  }) => api.post<Jugador>('/api/portal/registro', cuerpo),
+  login: (cuerpo: { email: string; password: string }) =>
+    api.post<Jugador>('/api/portal/login', cuerpo),
+  logout: () => api.post<void>('/api/portal/logout', {}),
+  yo: () => api.get<Jugador | null>('/api/portal/yo'),
+
+  canchas: (sucursalId: number) =>
+    api.get<CanchaPublica[]>(`/api/portal/canchas?sucursal_id=${sucursalId}`),
+  disponibilidad: (canchaId: number, dia: string) =>
+    api.get<TurnoLibre[]>(`/api/portal/disponibilidad?cancha_id=${canchaId}&dia=${dia}`),
+
+  reservar: (cuerpo: { cancha_id: number; comienza_at: string }) =>
+    api.post<ReservaCreada>('/api/portal/reservas', cuerpo),
+  misReservas: () => api.get<ReservaDelJugador[]>('/api/portal/reservas'),
+  cancelar: (id: number) =>
+    api.post<{ id: number; estado: string }>(`/api/portal/reservas/${id}/cancelar`, {}),
+
+  /** 🔴 Sólo existe fuera de producción. La pantalla lo ofrece únicamente
+   *  cuando el endpoint contesta; en la instancia de un complejo da 404. */
+  simularPago: (pagoId: number, aprobado = true) =>
+    api.post<{ pago: string; reserva: string; simulado: boolean }>(
+      `/api/portal/pagos/${pagoId}/simular?aprobado=${aprobado}`, {},
+    ),
+}
