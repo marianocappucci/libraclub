@@ -386,3 +386,31 @@ export const cuentaCorriente = {
   /** La pantalla de cobranza. De admin. */
   deudores: () => api.get<SaldoDeCuenta[]>('/api/cuenta-corriente/deudores'),
 }
+
+// ── Horario de atención ──────────────────────────────────────────────────
+
+export interface FranjaEntrada {
+  sucursal_id: number
+  cancha_id: number | null
+  alcance_dia: 'todos' | 'dia_semana' | 'feriado'
+  dia_semana: number | null
+  /** `HH:MM` desde el formulario; el backend devuelve `HH:MM:SS`. */
+  abre: string
+  /** 🔑 Menor o igual que `abre` significa **que cierra al día siguiente**: es
+   *  el complejo que abre a las 16 y cierra a las 02, que en pádel es lo
+   *  normal. Igual = 24 horas. */
+  cierra: string
+  activa: boolean
+}
+
+export interface Franja extends FranjaEntrada {
+  id: number
+}
+
+export const horarios = {
+  listar: () => api.get<Franja[]>('/api/horarios'),
+  crear: (cuerpo: FranjaEntrada) => api.post<Franja>('/api/horarios', cuerpo),
+  editar: (id: number, cuerpo: FranjaEntrada) =>
+    api.put<Franja>(`/api/horarios/${id}`, cuerpo),
+  borrar: (id: number) => api.del(`/api/horarios/${id}`),
+}

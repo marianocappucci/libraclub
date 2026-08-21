@@ -45,6 +45,12 @@ def _traducir(fn):
             raise HTTPException(409, str(exc)) from exc
         except servicio.TransicionInvalida as exc:
             raise HTTPException(409, str(exc)) from exc
+        except servicio.FueraDelHorario as exc:
+            # 422 y no 400: el pedido está bien formado y el dato es corregible
+            # —otra hora, u otro horario de atención cargado—, igual que
+            # `SinTarifa`. Un 400 lo leería como "el cliente mandó cualquier
+            # cosa", que manda a mirar el request y no la configuración.
+            raise HTTPException(422, str(exc)) from exc
         except tarifario.SinTarifa as exc:
             # 422 y no 500: falta un dato que el operador tiene que cargar, no
             # se rompió nada.

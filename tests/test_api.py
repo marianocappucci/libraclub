@@ -215,7 +215,12 @@ def test_una_franja_sin_tarifa_da_422_y_no_500(api):
         json={
             "cancha_id": cancha_id,
             "cliente_id": cliente_id,
-            "comienza_at": "2026-09-01T07:00:00-03:00",
+            # ⚠️ **Dentro del horario de atención, a propósito.** Esto decía
+            # 07:00, y desde que existe la validación de horario esa hora cae
+            # fuera del default (8:00–00:00): el 422 seguía dando verde pero por
+            # el motivo equivocado, y el caso de la tarifa faltante dejaba de
+            # probarse. Se asierta el mensaje justamente para que se note.
+            "comienza_at": "2026-09-01T10:00:00-03:00",
         },
     )
     assert respuesta.status_code == 422, respuesta.text

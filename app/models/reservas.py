@@ -182,6 +182,20 @@ class Reserva(Base, Auditable, Anotable):
         CheckConstraint(
             "sena IS NULL OR precio IS NULL OR sena <= precio", name="ck_reservas_sena"
         ),
+        # Una factura pertenece a UNA reserva. Parcial porque `factura_id` es
+        # nulo mientras no se facturó, y en PostgreSQL los nulos no colisionan
+        # en un UNIQUE — pero el índice parcial lo deja explícito.
+        #
+        # ⚠️ Se declara acá porque **la migración `0002` lo crea y el modelo no
+        # lo declaraba**: `alembic check` venía rojo desde entonces, proponiendo
+        # borrarlo. Un check que falla por deriva vieja deja de servir para
+        # detectar la deriva nueva.
+        Index(
+            "uq_reservas_factura",
+            "factura_id",
+            unique=True,
+            postgresql_where="factura_id IS NOT NULL",
+        ),
         # 🔑 **La garantía del producto.**
         #
         # `cancha_id WITH =` necesita la extensión `btree_gist`: un índice GiST
