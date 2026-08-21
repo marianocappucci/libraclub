@@ -44,6 +44,7 @@ from app.routers import buffet as buffet_router
 from app.routers import caja as caja_router
 from app.routers import cuenta_corriente as cuenta_corriente_router
 from app.routers import facturacion as facturacion_router
+from app.routers import resumen as resumen_router
 
 # Con alias: más abajo hay una variable local `usuarios` con el repositorio, y
 # sin el alias el import queda pisado.
@@ -253,6 +254,17 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # El buffet. Sin `dependencies`: el catálogo y el alta de producto son de
     # admin —definen precio—, y vender y reponer son de mostrador.
     app.include_router(buffet_router.router)
+
+    # `GET /api/resumen`, lo que esta sucursal le contesta al panel del dueño.
+    # Gateado por `LIBRA_PANEL_TOKEN` adentro de la factory, no por sesión: el
+    # que pregunta es otra máquina.
+    #
+    # Puede venir `None`: sin base de LibraCore no hay núcleo que contestar, y
+    # entonces **no se monta**. Un 404 dice "esta instancia no informa"; un
+    # endpoint que contesta ceros diría "informa que no vendió nada".
+    resumen = resumen_router.construir_router()
+    if resumen is not None:
+        app.include_router(resumen)
 
     app.include_router(build_empresa_router(), dependencies=[Depends(require_admin)])
     app.include_router(build_empresa_admin_router(), dependencies=[Depends(require_admin)])
