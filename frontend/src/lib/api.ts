@@ -273,6 +273,37 @@ export const agenda = {
     api.post(`/api/reservas/${id}/estado`, { estado, motivo }),
 }
 
+/** El comprobante de una reserva. Los importes viajan como número porque los
+ *  arma el motor de facturación, no este producto. */
+export interface Factura {
+  id: number
+  tipo: number
+  punto_venta: number
+  numero: number
+  fecha: string
+  total: number
+  /** Vacío mientras ARCA no lo haya dado. **No es un error**: la factura existe
+   *  y lo que falta es el CAE. Sin certificado cargado siempre viene vacío. */
+  cae: string
+  cae_vto: string
+}
+
+/** Cómo se nombra un tipo de comprobante de ARCA. */
+export const TIPO_DE_FACTURA: Record<number, string> = {
+  1: 'A',
+  6: 'B',
+  11: 'C',
+}
+
+export const facturacion = {
+  /** `null` si todavía no se facturó. Lo puede ver el mostrador. */
+  ver: (reservaId: number) => api.get<Factura | null>(`/api/reservas/${reservaId}/factura`),
+  // 🔑 Emitir es de admin: el mostrador toma reservas y cobra, pero qué se le
+  // factura a quién es del dueño. Si el rol no alcanza, el backend contesta 403
+  // — la pantalla esconde el botón para no ofrecer lo que va a fallar.
+  emitir: (reservaId: number) => api.post<Factura>(`/api/reservas/${reservaId}/facturar`, {}),
+}
+
 export const sesion = {
   login: (username: string, password: string) =>
     api.post<{ username: string }>('/auth/login', { username, password }),

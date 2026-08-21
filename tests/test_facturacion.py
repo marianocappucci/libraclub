@@ -155,3 +155,126 @@ def test_una_url_que_no_es_postgres_no_se_acepta(monkeypatch):
     monkeypatch.setenv("LIBRACLUB_LIBRACORE_DATABASE_URL", "sqlite:///core.db")
     with pytest.raises(RuntimeError, match="PostgreSQL"):
         Config.desde_entorno()
+
+
+# ── Emisión ───────────────────────────────────────────────────────────────
+#
+# ⚠️ **Nada de esto llega a ARCA.** Sin certificado cargado, `libracore` numera
+# localmente y la factura queda **sin CAE** — que es exactamente lo que va a
+# pasar en una instancia recién configurada. Lo que se prueba acá es el circuito
+# del producto: qué comprobante se elige, cómo se parten los importes, y que no
+# se pueda facturar dos veces. **El CAE real queda sin verificar** hasta que haya
+# un certificado de homologación.
+
+from decimal import Decimal  # noqa: E402
+
+from app.servicios import facturacion as servicio  # noqa: E402
+
+
+def test_un_monotributista_emite_C_y_no_B():
+    """🔴 El caso que la lógica de la familia se equivoca.
+
+    `_tipo_comprobante` de Gestiolibra devuelve **B** para todo lo que no sea
+    Responsable Inscripto — o sea que un complejo monotributista, que es el
+    default de la config y el caso más probable, emitiría el comprobante
+    equivocado. No es un bug de pantalla: es fiscal.
+    """
+    assert servicio.tipo_de_comprobante("Monotributista") == servicio.FACTURA_C
+    # Y sin condición cargada tampoco puede caer en B: el default de la config es
+    # Monotributista, así que lo conservador es C.
+    assert servicio.tipo_de_comprobante(None) == servicio.FACTURA_C
+    assert servicio.tipo_de_comprobante("Responsable Inscripto") == servicio.FACTURA_B
+
+
+def test_la_factura_C_NO_discrimina_iva():
+    """🔑 El monotributista no cobra IVA: el neto ES el total.
+
+    `_split_iva` de la familia parte siempre al 21%. Aplicado a una C,
+    inventaría un IVA que nadie pagó y dejaría el neto 21% por debajo del total.
+    """
+    neto, iva = servicio.importes(Decimal("14000.00"), servicio.FACTURA_C)
+    assert neto == Decimal("14000.00")
+    assert iva == Decimal("0.00")
+
+
+def test_la_factura_B_si_lo_separa():
+    """Control de la de arriba: si B tampoco separara, el test anterior pasaría
+    con la función devolviendo siempre `(total, 0)` y no probaría nada."""
+    neto, iva = servicio.importes(Decimal("121.00"), servicio.FACTURA_B)
+    assert neto == Decimal("100.00")
+    assert iva == Decimal("21.00")
+    assert neto + iva == Decimal("121.00"), "los importes tienen que cerrar contra el total"
+
+
+def _reserva_facturable(api, cancha, cliente, tarifa_base):
+    """Una reserva con precio, creada por la API."""
+    r = api.post(
+        "/api/reservas",
+        json={"cancha_id": cancha.id, "cliente_id": cliente.id,
+              "comienza_at": "2026-09-01T20:00:00-03:00", "duracion_min": 90},
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_facturar_una_reserva_emite_y_la_deja_vinculada(api, cancha, cliente, tarifa_base):
+    reserva = _reserva_facturable(api, cancha, cliente, tarifa_base)
+    assert api.get(f"/api/reservas/{reserva['id']}/factura").json() is None
+
+    emitida = api.post(f"/api/reservas/{reserva['id']}/facturar")
+    assert emitida.status_code == 201, emitida.text
+    factura = emitida.json()
+    # Monotributista por default -> Factura C.
+    assert factura["tipo"] == servicio.FACTURA_C
+    assert factura["total"] > 0
+
+    # Se relee por el otro endpoint: lo que se prueba es que quedó VINCULADA,
+    # no que el POST devolvió algo.
+    vista = api.get(f"/api/reservas/{reserva['id']}/factura").json()
+    assert vista is not None
+    assert vista["id"] == factura["id"]
+
+
+def test_no_se_puede_facturar_dos_veces(api, cancha, cliente, tarifa_base):
+    """🔑 Dos comprobantes por la misma reserva son dos veces el mismo ingreso
+    ante ARCA, y no se arregla borrando: hace falta una nota de crédito."""
+    reserva = _reserva_facturable(api, cancha, cliente, tarifa_base)
+    assert api.post(f"/api/reservas/{reserva['id']}/facturar").status_code == 201
+    segunda = api.post(f"/api/reservas/{reserva['id']}/facturar")
+    assert segunda.status_code == 409, segunda.text
+
+
+def test_algo_sin_precio_no_se_factura(api, cancha):
+    """422 y no un total en cero: una factura de $0 con CAE es un comprobante
+    fiscal que no debería existir.
+
+    Se usa un **bloqueo**, que es el caso real sin precio: mantenimiento, lluvia
+    o un torneo ocupan la cancha y no se le cobran a nadie. Una reserva común no
+    sirve para este test — la API la rechaza antes, porque sin tarifa vigente no
+    la deja crear.
+    """
+    b = api.post(
+        "/api/reservas/bloqueos",
+        json={"cancha_id": cancha.id,
+              "comienza_at": "2026-09-02T20:00:00-03:00",
+              "termina_at": "2026-09-02T21:30:00-03:00",
+              "motivo": "Mantenimiento"},
+    )
+    assert b.status_code == 201, b.text
+    assert api.post(f"/api/reservas/{b.json()['id']}/facturar").status_code == 422
+
+
+def test_facturar_es_de_admin(api, cancha, cliente, tarifa_base, engine):
+    """El mostrador toma reservas y cobra; qué se factura es del dueño."""
+    reserva = _reserva_facturable(api, cancha, cliente, tarifa_base)
+    api.post("/api/usuarios", json={
+        "username": "mostrador", "name": "Mostrador", "password": "clave-mostrador",
+        "role": "staff",
+    })
+    staff = TestClient(crear_app(_config(_url_core())), base_url="https://testserver")
+    assert staff.post(
+        "/auth/login", json={"username": "mostrador", "password": "clave-mostrador"}
+    ).status_code == 200
+    assert staff.post(f"/api/reservas/{reserva['id']}/facturar").status_code == 403
+    # Control: ver la factura sí puede.
+    assert staff.get(f"/api/reservas/{reserva['id']}/factura").status_code == 200
