@@ -471,3 +471,47 @@ export const buffet = {
       `/api/buffet/reservas/${reservaId}/consumos`,
     ),
 }
+
+// ── Turnos fijos (series) ────────────────────────────────────────────────
+
+export interface SerieEntrada {
+  cancha_id: number
+  cliente_id: number
+  /** 0 = lunes … 6 = domingo. */
+  dia_semana: number
+  /** `HH:MM`. */
+  hora: string
+  duracion_min: number
+  desde: string
+  /** `null` = sin fin, que es el caso normal de una cancha fija. */
+  hasta: string | null
+  observaciones?: string | null
+}
+
+export interface Serie extends SerieEntrada {
+  id: number
+  activa: boolean
+}
+
+/** Una fecha de la serie que no se pudo crear, **con el motivo**. */
+export interface Salteada {
+  comienza_at: string
+  /** `sin_tarifa` | `ocupada` | `fuera_de_horario`. */
+  motivo: string
+  detalle: string
+}
+
+export interface SerieCreada {
+  serie: Serie
+  creadas: Reserva[]
+  salteadas: Salteada[]
+}
+
+export const series = {
+  listar: () => api.get<Serie[]>('/api/reservas/series/listado'),
+  /** `hasta` acota hasta dónde generar; sin él, el horizonte por defecto. */
+  crear: (cuerpo: SerieEntrada, hasta?: string) =>
+    api.post<SerieCreada>(
+      `/api/reservas/series${hasta ? `?hasta=${hasta}` : ''}`, cuerpo,
+    ),
+}

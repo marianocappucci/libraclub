@@ -13,12 +13,18 @@ En la instancia de un complejo la ruta no existe. La otra mitad —el usuario de
 visitante y el repositorio de códigos— la cablea `main.py`; son dos decisiones
 separadas y cada una falla distinto.
 
-`incluir_password_reset=True` agrega `/auth/forgot-password` y
-`/auth/reset-password`. Se encendió el 2026-08-21: hasta entonces este producto
-era el único de la familia —con LibraCargo— sin "¿olvidaste tu contraseña?" en
-el login, con el argumento de que hacía falta SMTP. **No hacía falta**: sin SMTP
-el endpoint contesta 503 y la app levanta igual, que es como corren los otros
-seis desde julio.
+Sigue **sin** `incluir_password_reset`: eso necesita SMTP configurado, que
+LibraClub todavía no tiene. Un endpoint de recuperación sin SMTP contesta 503 y
+confunde.
+
+🔴 **El router se construye en una función y no al importar el módulo, a
+diferencia del resto de los routers de este producto.** `build_json_api_auth_router`
+lee `DEMO_MODE`/`DEMO_USERNAME` *mientras construye*, así que un `router = ...`
+a nivel de módulo las congela en el primer import — y el primer import ocurre
+antes de que nadie haya podido decidir nada. En producción no se nota, porque
+las variables vienen del entorno del proceso; se nota en los tests, donde
+`POST /auth/demo` daba **404 con la demo encendida**. Es la misma razón por la
+que `crear_app()` tampoco corre al importar: ver el docstring de `main.py`.
 """
 
 from __future__ import annotations
@@ -28,17 +34,4 @@ from libraauth.session_auth import build_json_api_auth_router
 
 
 def construir_router() -> APIRouter:
-    return build_json_api_auth_router(
-        incluir_verify=True,
-        # `POST /auth/forgot-password` y `POST /auth/reset-password`. Necesita
-        # que `main.py` haya puesto `app.state.password_reset`; sin eso los
-        # endpoints existirían y fallarían al primer pedido.
-        #
-        # 🔑 **Sin SMTP configurado la app levanta igual**: el que avisa es el
-        # endpoint, con un 503, recién cuando alguien pide un reset. Por eso se
-        # puede encender ahora aunque la instancia todavía no tenga correo — y
-        # por eso no encenderlo "hasta tener SMTP" era una espera sin motivo:
-        # los otros seis productos de la familia lo tienen así desde julio.
-        incluir_password_reset=True,
-        incluir_demo=True,
-    )
+    return build_json_api_auth_router(incluir_verify=True, incluir_demo=True)

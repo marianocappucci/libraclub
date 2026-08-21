@@ -9,7 +9,6 @@ import { Canchas } from '@/pages/Canchas'
 import { Configuracion } from '@/pages/Configuracion'
 import { Clientes } from '@/pages/Clientes'
 import { Login } from '@/pages/Login'
-import { ForgotPassword, ResetPassword } from '@/pages/PasswordReset'
 import { Logs } from '@/pages/Logs'
 import { Sucursales } from '@/pages/Sucursales'
 import { Tarifas } from '@/pages/Tarifas'
@@ -17,33 +16,13 @@ import { Usuarios } from '@/pages/Usuarios'
 import { AuthProvider, useAuth } from '@/context/AuthContext'
 import { SucursalProvider } from '@/context/SucursalContext'
 
-// Exportado para el test de ruteo: lo que hay que poder montar es ESTO —con
-// un `MemoryRouter` alrededor y sin sesión— para verificar que
-// `/forgot-password` no cae en el login. `App` trae su propio
-// `AuthProvider`, que en el test se mockea.
-export function Ruteo() {
+function Ruteo() {
   const { user, loading } = useAuth()
 
   // Mientras no se sepa si hay sesión no se decide nada: con un `if (!user)`
   // directo, cada recarga mandaría al login a alguien que ya estaba adentro.
   if (loading) return <p className="p-6 text-muted-foreground">Cargando…</p>
-
-  // 🔴 **Las dos pantallas de recuperación van ANTES del `if (!user)`.** Este
-  // producto no rutea el login: sin sesión devuelve `<Login />` para cualquier
-  // URL. Con las rutas puestas más abajo, el enlace "¿Olvidaste tu contraseña?"
-  // llevaría de nuevo al login —la URL cambiaría y la pantalla no— y el correo
-  // con el enlace de reset abriría el login pidiendo la contraseña que la
-  // persona justamente no tiene. Quien las usa es exactamente quien no puede
-  // entrar, así que no pueden estar del lado autenticado.
-  if (!user) {
-    return (
-      <Routes>
-        <Route path="/forgot-password" element={<ForgotPassword />} />
-        <Route path="/reset-password" element={<ResetPassword />} />
-        <Route path="*" element={<Login />} />
-      </Routes>
-    )
-  }
+  if (!user) return <Login />
 
   return (
     <SucursalProvider>

@@ -98,13 +98,6 @@ services:
       # abre nada; lo que abriría algo sería ponerle un valor adivinable, y por
       # eso no hay uno de ejemplo.
       - LIBRA_SERVICE_TOKEN=${LIBRA_SERVICE_TOKEN:-}
-      # 🔴 **Credencial propia, distinta de `LIBRA_SERVICE_TOKEN`.** Aquél es
-      # UN TOKEN POR PRODUCTO, compartido por todas sus instancias de
-      # cliente: dárselo al dueño de un complejo le daría acceso de servicio
-      # a las instancias de otros clientes del mismo producto. Éste es por
-      # instancia, y si se filtra expone la lectura de agregados de UNA
-      # sucursal. Ver wiki/analyses/panel-del-dueno-multisucursal.md, punto 7.
-      - LIBRA_PANEL_TOKEN=${LIBRA_PANEL_TOKEN:-}
       # Dónde escribe los backups. Sin esto caen en `./datos` relativo al
       # directorio de trabajo, o sea adentro del bind mount.
       - DATA_DIR=/app/datos
