@@ -5,10 +5,12 @@
 // el ojito de `PasswordInput`, el `aria-label` que lo acompaña y el manejo de
 // `ApiError` que ya está probado en el kit.
 //
-// **Sin `forgotPasswordPath`, a propósito**: es opt-in en `createLogin` y acá
-// no hay nada del otro lado — `app/routers/auth.py` monta el router **sin**
-// `incluir_password_reset`, que necesita SMTP configurado. Un enlace de
-// recuperación sería un link a un 404.
+// `forgotPasswordPath` es opt-in en `createLogin`, y hasta el 2026-08-21 no
+// estaba: el argumento era que hacía falta SMTP configurado y un enlace sería un
+// link a un 404. **Las dos mitades del argumento eran falsas** — la ruta existe
+// del lado del cliente aunque no haya correo, y sin SMTP el endpoint contesta
+// 503 con el motivo. Los otros seis productos de la familia lo tienen así desde
+// julio; éste y LibraCargo eran los dos que faltaban.
 import { createLogin } from 'libra-ui/Login'
 
 import { LOGO } from '@/branding'
@@ -24,6 +26,7 @@ export const Login = createLogin({
   // A la agenda y no a la raíz: es la pantalla con la que se trabaja todo el
   // día, y `App.tsx` manda cualquier ruta desconocida ahí mismo.
   redirectTo: '/agenda',
+  forgotPasswordPath: '/forgot-password',
   // Botón "Entrar a la demo" — va de la mano con `incluir_demo=True` en
   // `app/routers/auth.py`.
   //

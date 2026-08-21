@@ -21,12 +21,13 @@ from libraauth.auth_events import AuthEventRepository
 from libraauth.bootstrap import ensure_default_admin, ensure_demo_user
 from libraauth.demo_codigos import DemoCodigoRepository
 from libraauth.models import Base as AuthBase
+from libraauth.password_reset import PasswordResetService
 from libraauth.session_auth import (
     build_demo_codigos_router,
     build_smtp_settings_router,
     demo_username,
 )
-from libraauth.smtp_settings import SmtpSettingsRepository
+from libraauth.smtp_settings import SmtpSettingsRepository, resolver_smtp_config
 from libracore.config_router import (
     build_backup_router,
     build_empresa_admin_router,
@@ -266,6 +267,17 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # habilita es cargar el SMTP; encender la recuperación es una decisión
     # aparte, con su propia pantalla de "olvidé mi contraseña" en el login.
     app.state.smtp_settings = SmtpSettingsRepository(db.fabrica_de_sesiones())
+    app.state.password_reset = PasswordResetService(
+        db.fabrica_de_sesiones(),
+        product_name="LibraClub",
+        reset_url_base=os.environ.get(
+            "LIBRACLUB_RESET_URL_BASE", "https://dev.libraclub.com.ar/reset-password"
+        ),
+        # CALLABLE, no un valor: se resuelve en cada envío. Con un valor fijo,
+        # guardar el SMTP desde la pantalla de Configuración no tendría efecto
+        # hasta recrear el contenedor.
+        smtp_config=lambda: resolver_smtp_config(db.fabrica_de_sesiones()),
+    )
     app.include_router(build_smtp_settings_router())
 
     app.include_router(
