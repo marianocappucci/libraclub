@@ -23,6 +23,7 @@ from app.schemas.reservas import (
     CambioDeEstado,
     ReservaEntrada,
     ReservaSalida,
+    SalteadaSalida,
     SerieCreada,
     SerieEntrada,
     SerieSalida,
@@ -259,7 +260,10 @@ def crear_serie(
     return SerieCreada(
         serie=SerieSalida.model_validate(serie, from_attributes=True),
         creadas=[ReservaSalida.model_validate(r, from_attributes=True) for r in creadas],
-        salteadas=salteadas,
+        salteadas=[
+            SalteadaSalida(comienza_at=x.comienza_at, motivo=x.motivo, detalle=x.detalle)
+            for x in salteadas
+        ],
     )
 
 

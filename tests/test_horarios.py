@@ -314,3 +314,106 @@ def test_un_bloqueo_SI_puede_ir_fuera_de_horario(sesion, cancha, sucursal):
         motivo="Mantenimiento",
     )
     assert b.estado is EstadoReserva.BLOQUEO
+
+
+# ── Las series, que el horario rompió sin que nadie lo notara ────────────
+
+
+def test_una_serie_con_una_ocurrencia_fuera_de_horario_NO_aborta_entera(
+    sesion, cancha, sucursal, cliente, tarifa_base
+):
+    """🔴 El defecto que introdujo esta feature, y que la suite no vio.
+
+    `materializar_serie` saltea la ocurrencia que no se puede crear y sigue con
+    las demás — una cancha fija de los martes con un torneo el tercer martes
+    tiene que dejar las otras doce. Su `except` cubría las **dos** excepciones
+    que existían cuando se escribió (`Superpuesta` y `SinTarifa`);
+    `FueraDelHorario` nació después y esa línea no se enteró.
+
+    Resultado: con el complejo abriendo a las 09:00 y una serie de los martes a
+    las 07:00, `POST /series` devolvía 422 y **no creaba ninguna** de las trece,
+    ni siquiera las que sí entraban. Verificado contra PostgreSQL antes de
+    tocarlo: abortaba con `FueraDelHorario`.
+    """
+    from app.models.reservas import Serie
+
+    _franja(sesion, sucursal, time(9, 0), time(23, 0))
+    serie = Serie(
+        cancha_id=cancha.id, cliente_id=cliente.id, dia_semana=LUNES.weekday(),
+        hora=time(7, 0), duracion_min=60, desde=LUNES,
+    )
+    sesion.add(serie)
+    sesion.flush()
+
+    creadas, salteadas = servicio.materializar_serie(
+        sesion, serie, hasta=LUNES + timedelta(days=28)
+    )
+
+    assert creadas == [], "ninguna entra: todas caen a las 07:00"
+    assert len(salteadas) >= 4, f"tienen que estar salteadas, no abortadas: {salteadas}"
+    assert {x.motivo for x in salteadas} == {"fuera_de_horario"}
+    # El detalle nombra el horario del día, que es lo que el operador necesita
+    # para corregir: o mueve la serie o cambia el horario.
+    assert "09:00" in salteadas[0].detalle
+
+
+def test_la_serie_crea_las_que_SI_entran_y_saltea_las_otras(
+    sesion, cancha, sucursal, cliente, tarifa_base
+):
+    """Control del test de arriba: si `materializar_serie` no creara nunca nada,
+    aquél pasaría igual con la serie rota de otra forma.
+
+    Acá el horario general deja pasar la serie, y **un feriado cerrado** carga
+    una sola fecha imposible en el medio.
+    """
+    from app.models.maestros import Feriado
+    from app.models.reservas import Serie
+
+    _franja(sesion, sucursal, time(9, 0), time(23, 0))
+    serie = Serie(
+        cancha_id=cancha.id, cliente_id=cliente.id, dia_semana=LUNES.weekday(),
+        hora=time(20, 0), duracion_min=60, desde=LUNES,
+    )
+    sesion.add(serie)
+    # El segundo lunes, cerrado.
+    sesion.add(Feriado(sucursal_id=sucursal.id, dia=LUNES + timedelta(days=7),
+                       nombre="Feriado", cerrado=True))
+    sesion.flush()
+
+    creadas, salteadas = servicio.materializar_serie(
+        sesion, serie, hasta=LUNES + timedelta(days=21)
+    )
+
+    assert len(creadas) >= 3, f"las demás tienen que entrar: {len(creadas)}"
+    assert len(salteadas) == 1, f"sólo el feriado: {salteadas}"
+    assert salteadas[0].motivo == "fuera_de_horario"
+    assert salteadas[0].comienza_at.date() == LUNES + timedelta(days=7)
+
+
+def test_el_motivo_distingue_falta_de_tarifa_de_falta_de_horario(
+    sesion, cancha, sucursal, cliente
+):
+    """🔑 Los dos se arreglan en pantallas distintas.
+
+    Sin tarifa el operador va a Tarifas; fuera de horario, a Horario de
+    atención. Un "no se pudo" sin motivo lo manda a adivinar.
+
+    Sin la fixture `tarifa_base`: acá no hay ninguna tarifa cargada.
+    """
+    from app.models.reservas import Serie
+
+    _franja(sesion, sucursal, time(9, 0), time(23, 0))
+    serie = Serie(
+        cancha_id=cancha.id, cliente_id=cliente.id, dia_semana=LUNES.weekday(),
+        hora=time(20, 0), duracion_min=60, desde=LUNES,
+    )
+    sesion.add(serie)
+    sesion.flush()
+
+    _, salteadas = servicio.materializar_serie(
+        sesion, serie, hasta=LUNES + timedelta(days=14)
+    )
+    assert salteadas, "sin tarifa no se puede crear ninguna"
+    assert {x.motivo for x in salteadas} == {"sin_tarifa"}, (
+        "el motivo tiene que ser la tarifa, no el horario"
+    )
