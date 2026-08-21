@@ -40,6 +40,7 @@ vi.mock('@/lib/api', async (original) => {
 const { AuthProvider } = await import('libra-ui/AuthContext')
 const { SucursalProvider } = await import('@/context/SucursalContext')
 const { Layout } = await import('./Layout')
+const { WORDMARK } = await import('@/branding')
 
 const SUCURSAL = {
   id: 1, nombre: 'Complejo Centro', direccion: null, localidad: null,
@@ -109,6 +110,25 @@ describe('cascarón de LibraClub', () => {
     // SMTP lo exige por dentro, así que a un encargado el link le daría 403.
     expect(screen.queryByRole('link', { name: 'Configuración' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Log de actividad' })).not.toBeInTheDocument()
+  })
+
+  it('🔴 el logo y el nombre de la sidebar llevan las clases de marca', async () => {
+    // El logo es el mismo archivo que en el login, pero las dos superficies lo
+    // dibujan a tamaños distintos y NUNCA se ven juntas: si una queda con el
+    // default de `libra-ui`, no falla nada y no lo reporta nadie.
+    montar()
+    const logo = await screen.findByRole('img', { name: 'LibraClub' })
+    expect(logo.className).toContain('h-9')
+    // Sin el override, el logo de 36 px se sale de la barra de iconos, donde el
+    // ancho útil son 32. No se puede medir renderizando —el estado colapsado lo
+    // pone un atributo del provider y jsdom no aplica Tailwind—, así que se
+    // afirma que la regla condicional esté declarada.
+    expect(logo.className).toContain('group-data-[collapsible=icon]:h-8')
+    expect(logo.className).toContain('group-data-[collapsible=icon]:w-8')
+
+    const nombre = screen.getByText('LibraClub')
+    for (const clase of WORDMARK.split(' ')) expect(nombre.className).toContain(clase)
+    expect(nombre.className).toContain('text-[15px]')
   })
 
   // ⚠️ **Acá NO se prueba el selector de sucursal**, aunque el Layout se lo pase
