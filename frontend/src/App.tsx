@@ -16,13 +16,47 @@ import { Tarifas } from '@/pages/Tarifas'
 import { TurnosFijos } from '@/pages/TurnosFijos'
 import { Usuarios } from '@/pages/Usuarios'
 import { AuthProvider, useAuth } from '@/context/AuthContext'
+import { JugadorProvider } from '@/portal/JugadorContext'
+import { MisReservas } from '@/portal/MisReservas'
+import { PortalLayout } from '@/portal/PortalLayout'
+import { PortalReservar } from '@/portal/PortalReservar'
 import { SucursalProvider } from '@/context/SucursalContext'
 
 // Exportado para el test de ruteo: lo que hay que poder montar es ESTO —con
 // un `MemoryRouter` alrededor y sin sesión— para verificar que
 // `/forgot-password` no cae en el login. `App` trae su propio
 // `AuthProvider`, que en el test se mockea.
+/** El portal público, ANTES de todo lo demás.
+ *
+ * 🔴 **Fuera del `if (!user)` y también del lado autenticado.** El jugador que
+ * entra desde internet no tiene sesión de staff y nunca la va a tener; si estas
+ * rutas cayeran adentro de `Ruteo`, `/reservar` mostraría el login del
+ * backoffice. Y tampoco pueden ir sólo en la rama sin sesión: el encargado que
+ * abre el portal desde la computadora del mostrador —para mostrárselo a
+ * alguien— vería el backoffice.
+ *
+ * Tiene su propio `JugadorProvider`: la sesión del jugador es otra cosa que la
+ * del operador, con otra cookie. Ver `portal/JugadorContext.tsx`.
+ */
 export function Ruteo() {
+  return (
+    <Routes>
+      <Route
+        element={
+          <JugadorProvider>
+            <PortalLayout />
+          </JugadorProvider>
+        }
+      >
+        <Route path="/reservar" element={<PortalReservar />} />
+        <Route path="/mis-reservas" element={<MisReservas />} />
+      </Route>
+      <Route path="/*" element={<Backoffice />} />
+    </Routes>
+  )
+}
+
+function Backoffice() {
   const { user, loading } = useAuth()
 
   // Mientras no se sepa si hay sesión no se decide nada: con un `if (!user)`
