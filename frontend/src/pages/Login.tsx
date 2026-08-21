@@ -13,9 +13,16 @@
 // igual porque el kit lo condiciona a la sonda en runtime.
 import { createLogin } from 'libra-ui/Login'
 
+import { LOGO } from '@/branding'
+
 export const Login = createLogin({
   productName: 'LibraClub',
+  // `productInitial` se sigue pasando aunque haya logo: es obligatorio en la
+  // config del kit, y es lo que se dibuja si algún día el logo no carga.
   productInitial: 'C',
+  // El logo reemplaza al box con la inicial. El tamaño lo decide el producto
+  // (ver `branding.ts`); acá se deja el default de 40px del login.
+  logo: { src: LOGO, alt: 'LibraClub' },
   // A la agenda y no a la raíz: es la pantalla con la que se trabaja todo el
   // día, y `App.tsx` manda cualquier ruta desconocida ahí mismo.
   redirectTo: '/agenda',
