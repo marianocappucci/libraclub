@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { Layout } from '@/components/Layout'
 import { Agenda } from '@/pages/Agenda'
+import { Caja } from '@/pages/Caja'
 import { Canchas } from '@/pages/Canchas'
 import { Configuracion } from '@/pages/Configuracion'
 import { Clientes } from '@/pages/Clientes'
@@ -30,6 +31,7 @@ function Ruteo() {
           <Route path="/clientes" element={<Clientes />} />
           <Route path="/sucursales" element={<Sucursales />} />
           <Route path="/usuarios" element={<Usuarios />} />
+          <Route path="/caja" element={<Caja />} />
           <Route path="/configuracion" element={<Configuracion />} />
           <Route path="/logs" element={<Logs />} />
           {/* Las rutas no llevan guarda de rol: el permiso lo decide el

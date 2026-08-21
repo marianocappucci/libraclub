@@ -14,6 +14,7 @@ import { Outlet } from 'react-router-dom'
 import { createLayout } from 'libra-ui/Layout'
 import {
   CalendarDays, LayoutGrid, MapPin, ScrollText, Settings, Tags, UserCog, Users,
+  Wallet,
 } from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
@@ -68,7 +69,14 @@ const Cascaron = createLayout<Usuario>({
     // Sin label: es una sola entrada, y un encabezado arriba de un único ítem
     // es ruido. La agenda es la pantalla del día a día — el resto se toca al
     // configurar y después poco.
-    { items: [{ to: '/agenda', label: 'Agenda', icon: CalendarDays }] },
+    // La agenda y la caja son lo del día a día: el mostrador abre la caja al
+    // empezar el turno y trabaja sobre la grilla. Por eso van juntas y arriba.
+    {
+      items: [
+        { to: '/agenda', label: 'Agenda', icon: CalendarDays },
+        { to: '/caja', label: 'Caja', icon: Wallet },
+      ],
+    },
     {
       label: 'Maestros',
       items: [

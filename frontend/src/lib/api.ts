@@ -304,6 +304,49 @@ export const facturacion = {
   emitir: (reservaId: number) => api.post<Factura>(`/api/reservas/${reservaId}/facturar`, {}),
 }
 
+export interface TurnoDeCaja {
+  id: number
+  usuario_id: number
+  apertura: string
+  cierre: string | null
+  monto_inicial: number
+  monto_declarado_cierre: number | null
+  monto_esperado_cierre: number | null
+  estado: string
+  notas: string
+}
+
+export interface ResumenDeCaja {
+  movimientos: { id: number; fecha: string; concepto: string; monto: number; medio_pago: string }[]
+  pagos_por_medio: Record<string, number>
+  total_ventas: number
+  efectivo_ventas: number
+}
+
+/** Los medios que cobra un complejo. Es un subconjunto de los del motor: acá no
+ *  hay cheques ni retenciones. Tiene que coincidir con `MEDIOS_PAGO` del
+ *  backend — si se agrega uno de un lado y no del otro, el cobro da 422. */
+export const MEDIOS_DE_PAGO = [
+  { valor: 'efectivo', etiqueta: 'Efectivo' },
+  { valor: 'transferencia', etiqueta: 'Transferencia' },
+  { valor: 'mercadopago', etiqueta: 'Mercado Pago' },
+  { valor: 'tarjeta', etiqueta: 'Tarjeta' },
+] as const
+
+export const caja = {
+  /** `null` si este usuario no tiene caja abierta. */
+  actual: () => api.get<{ turno: TurnoDeCaja; resumen: ResumenDeCaja } | null>('/api/caja/turnos/actual'),
+  abrir: (monto_inicial: string, notas = '') =>
+    api.post<TurnoDeCaja>('/api/caja/turnos', { monto_inicial, notas }),
+  cobrar: (cuerpo: { monto: string; concepto: string; medio_pago: string }) =>
+    api.post<ResumenDeCaja>('/api/caja/cobros', cuerpo),
+  cerrar: (turnoId: number, monto_declarado: string, notas = '') =>
+    api.post<TurnoDeCaja & { diferencia_de_caja: number }>(
+      `/api/caja/turnos/${turnoId}/cerrar`, { monto_declarado, notas },
+    ),
+  historial: () => api.get<TurnoDeCaja[]>('/api/caja/turnos'),
+}
+
 export const sesion = {
   login: (username: string, password: string) =>
     api.post<{ username: string }>('/auth/login', { username, password }),
