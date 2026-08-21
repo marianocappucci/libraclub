@@ -4,7 +4,7 @@
 // —el login y la sidebar— y son shims distintos sobre `libra-ui`. Con la
 // definición repetida en cada uno, alcanza con tocar una para que las dos
 // pantallas dejen de coincidir, que es el tipo de divergencia que nadie reporta
-// porque nunca se ven juntas. Mismo patrón que [[libradesk]].
+// porque nunca se ven juntas. Mismo patrón que LibraDesk.
 import logoLibraClub from '@/assets/logo-libraclub.png'
 
 export const LOGO = logoLibraClub

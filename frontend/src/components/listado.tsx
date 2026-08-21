@@ -3,7 +3,7 @@
  *  Canchas, Clientes, Sucursales y Tarifas tenían las mismas tres cosas escritas
  *  a mano cuatro veces: el aviso de error, la celda con Editar/Borrar y el
  *  ancho de esa columna. No es una pantalla genérica como el `AbmMaestro` de
- *  [[libracargo]] —acá cada maestro tiene su propio formulario con reglas de
+ *  LibraCargo —acá cada maestro tiene su propio formulario con reglas de
  *  dominio propias, y meterlos en un molde común sería perderlas—: son sólo las
  *  piezas comunes.
  */
