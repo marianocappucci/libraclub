@@ -13,7 +13,7 @@
 import { Outlet } from 'react-router-dom'
 import { createLayout } from 'libra-ui/Layout'
 import {
-  CalendarDays, LayoutGrid, MapPin, Settings, Tags, UserCog, Users,
+  CalendarDays, LayoutGrid, MapPin, ScrollText, Settings, Tags, UserCog, Users,
 } from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
@@ -89,6 +89,10 @@ const Cascaron = createLayout<Usuario>({
         // link le daría 403. Un menú que ofrece lo que no se puede usar es peor
         // que no ofrecerlo.
         { to: '/usuarios', label: 'Usuarios', icon: UserCog, adminOnly: true },
+        // Junto a Usuarios y no en Configuración: se mira para responder
+        // "quién hizo esto", que es una pregunta sobre la gente y no sobre
+        // los ajustes. Mismo criterio que LibraCargo y LibraDesk.
+        { to: '/logs', label: 'Log de actividad', icon: ScrollText, adminOnly: true },
         // Configuración es de admin por los dos lados: el router de empresa
         // lleva `require_admin` y el de SMTP lo exige por dentro.
         { to: '/configuracion', label: 'Configuración', icon: Settings, adminOnly: true },

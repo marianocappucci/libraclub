@@ -10,6 +10,14 @@ from __future__ import annotations
 import os
 
 from fastapi import Depends, FastAPI
+from libraauth.auditoria import (
+    AuditoriaBase,
+    AuditoriaRepository,
+    agregar_middleware_de_usuario,
+    build_logs_router,
+    configurar_auditoria,
+)
+from libraauth.auth_events import AuthEventRepository
 from libraauth.bootstrap import ensure_default_admin
 from libraauth.models import Base as AuthBase
 from libraauth.session_auth import build_smtp_settings_router
@@ -30,6 +38,28 @@ from app.routers import auth as auth_router
 # Con alias: más abajo hay una variable local `usuarios` con el repositorio, y
 # sin el alias el import queda pisado.
 from app.routers import usuarios as usuarios_router
+
+#: Qué entra al log de actividad: `{clase del modelo: nombre legible}`.
+#:
+#: Es una lista **blanca** a propósito: una tabla nueva no entra sola, así que
+#: agregar un modelo obliga a decidir si su historial le importa a alguien.
+#:
+#: `Serie` queda AFUERA y es la única decisión discutible. Una serie es la
+#: cancha fija —el molde—, y cada reserva que genera se audita por su cuenta:
+#: auditarla además pondría el mismo hecho dos veces, que es justo lo que el
+#: motor advierte que no hay que hacer con las tablas que ya son historial de
+#: algo. Lo que se pierde: quién cambió el molde. Si esa pregunta aparece, se
+#: agrega acá.
+AUDITABLES = {
+    "Sucursal": "sucursal",
+    "Cancha": "cancha",
+    "Cliente": "cliente",
+    "Tarifa": "tarifa",
+    "Feriado": "feriado",
+    # 🔑 El que motivó todo esto: *"quién movió el turno de las 20:00 a las
+    # 21:00 sin avisar"* es una discusión con un cliente, no un bug.
+    "Reserva": "reserva",
+}
 
 
 def _instancia_a_respaldar(config: Config) -> Instancia:
@@ -59,6 +89,11 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # satélite resuelven. Las tablas propias van por Alembic; las de `libraauth`
     # no, porque su schema lo versiona él y no nosotros.
     AuthBase.metadata.create_all(motor)
+    # El log de actividad cuelga de su propio `Base`, no del de `models.py`: la
+    # tabla tiene que quedar en la base del DOMINIO, que es donde ocurren las
+    # escrituras que audita y donde vive la transacción. En LibraClub las dos
+    # son la misma base, pero se respeta igual — es el contrato del motor.
+    AuditoriaBase.metadata.create_all(motor)
 
     usuarios = UserRepository(db.fabrica_de_sesiones())
     if sembrar_admin:
@@ -77,6 +112,25 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     app.state.users = usuarios
     app.state.session_auth = construir_session_auth(usuarios)
 
+    # 🔴 **Sin esta línea se apagaban DOS cosas, no una.** `auth_events` es
+    # opt-in por ausencia: sin `app.state.auth_events`, `registrar_seguro` no
+    # anota nada —se pierde el log de accesos— y `contar_fallidos_seguro`
+    # devuelve **0**, con lo cual el corte por intentos fallidos del login
+    # nunca dispara. O sea que LibraClub venía sin freno al fuerza bruta, con
+    # la tabla `auth_log` creada y vacía. Verificado el 2026-08-20.
+    app.state.auth_events = AuthEventRepository(db.fabrica_de_sesiones())
+
+    # Log de actividad: quién creó, editó o borró qué, y qué cambió. Cuelga del
+    # `flush` de SQLAlchemy, así que una escritura que no pase por acá no
+    # existe — no hay forma de olvidarse en un servicio nuevo.
+    configurar_auditoria(db.fabrica_de_sesiones(), AUDITABLES)
+    app.state.auditoria = AuditoriaRepository(db.fabrica_de_sesiones())
+    # El middleware deja el usuario de la request al alcance del flush. Es
+    # `ContextVar` y funciona porque lo setea en el contexto **async**; el
+    # `request.state` de `app/auditoria.py` existe por lo contrario — ver el
+    # comentario largo ahí.
+    agregar_middleware_de_usuario(app)
+
     app.include_router(salud.router)
     app.include_router(auth_router.router)
     for router in maestros.TODOS:
@@ -85,6 +139,24 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     app.include_router(disponibilidad.router)
     app.include_router(usuarios_router.router)
     app.include_router(admin.router)
+
+    # Los dos logs —actividad y accesos— para la pantalla compartida. El router
+    # no se gatea a sí mismo: el vocabulario de roles es del producto.
+    #
+    # 🔴 `prefix="/api/logs"` y NO el `/logs` que trae por default. La SPA tiene
+    # su pantalla en `/logs`, y FastAPI resuelve sus rutas **antes** que el
+    # catch-all: con el default, entrar a `/logs` en el navegador devolvía el
+    # JSON crudo del endpoint en vez de la pantalla. No falla ni avisa — se ve
+    # el JSON. Medido el 2026-08-20.
+    #
+    # `spa.py` no lo salvaba: su `PREFIJOS_DE_API` decide qué NO es de la SPA,
+    # pero sólo actúa sobre lo que llega hasta él, y acá el router se lo comía
+    # antes. Con el prefijo bajo `/api` se acomoda a la convención del producto,
+    # igual que `/api/usuarios` en vez del `/users` del kit.
+    app.include_router(
+        build_logs_router(AUDITABLES, prefix="/api/logs"),
+        dependencies=[Depends(require_admin)],
+    )
 
     # "Datos / Backup": el motor de la familia, con la dependencia de rol de este
     # producto. El prefijo es `/api/config` porque es el que consume la pantalla
