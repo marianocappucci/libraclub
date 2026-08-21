@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
-import { agenda, facturacion, TIPO_DE_FACTURA } from '@/lib/api'
+import { agenda, cuentaCorriente, facturacion, TIPO_DE_FACTURA } from '@/lib/api'
 import type { Cancha, Factura, Turno } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
-import { fecha, hora } from '@/lib/fechas'
+import { fecha, hora, pesos } from '@/lib/fechas'
 import { Input } from '@/components/ui/input'
 import { AvisoDeError } from '@/components/listado'
 import { buttonVariants } from '@/components/ui/button'
@@ -121,6 +121,7 @@ export function DetalleDeReserva({
           </div>
 
           <SeccionDeFactura reservaId={turno.reserva_id} abierto={abierto} />
+          <SeccionDeCuentaCorriente turno={turno} abierto={abierto} />
 
           {acciones.length === 0 ? (
             <p className="text-sm text-muted-foreground">
@@ -244,6 +245,75 @@ function SeccionDeFactura(
         className={buttonVariants({ variant: 'outline' })}
       >
         {emitiendo ? 'Emitiendo…' : 'Facturar esta reserva'}
+      </button>
+    </div>
+  )
+}
+
+
+/** Fiar la reserva: la carga a la cuenta corriente del cliente.
+ *
+ * El caso real: *"el grupo de los martes paga a fin de mes"*. La cancha se
+ * juega igual, y la deuda queda registrada.
+ *
+ * 🔑 **No se pide nada al abrir el diálogo.** A diferencia de la factura, acá no
+ * hay estado previo que mostrar: si el cliente ya tiene la reserva cargada,
+ * volver a apretar el botón no le fía dos veces —la `referencia` lo hace
+ * idempotente en el backend—, así que no hace falta una consulta para saberlo.
+ *
+ * El botón es de mostrador: decidir que alguien paga a fin de mes es parte de
+ * atender. Un bloqueo o una reserva sin precio no se pueden fiar y el botón no
+ * aparece — el backend las rechaza con 422 igual.
+ */
+function SeccionDeCuentaCorriente(
+  { turno, abierto }: { turno: Turno; abierto: boolean },
+) {
+  const [saldo, setSaldo] = useState<number | null>(null)
+  const [enviando, setEnviando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // El diálogo se remonta por turno, pero el estado de un fiado anterior no
+  // tiene por qué sobrevivir a cerrarlo y abrirlo de nuevo.
+  useEffect(() => {
+    if (!abierto) { setSaldo(null); setError(null) }
+  }, [abierto])
+
+  if (turno.reserva_id === null || turno.cliente === null || turno.precio === null) return null
+
+  if (saldo !== null) {
+    return (
+      <div className="rounded-md border px-3 py-2 text-sm">
+        <div className="font-medium">Cargado a la cuenta de {turno.cliente}</div>
+        <div className="text-muted-foreground">
+          {saldo >= 0 ? `Debe ${pesos(String(saldo))}` : `A favor ${pesos(String(-saldo))}`}
+        </div>
+      </div>
+    )
+  }
+
+  async function cargar() {
+    if (turno.reserva_id === null) return
+    setError(null)
+    setEnviando(true)
+    try {
+      setSaldo((await cuentaCorriente.cargar(turno.reserva_id)).saldo)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <AvisoDeError mensaje={error} />
+      <button
+        type="button"
+        disabled={enviando}
+        onClick={cargar}
+        className={buttonVariants({ variant: 'outline' })}
+      >
+        {enviando ? 'Cargando…' : 'Cargar a la cuenta'}
       </button>
     </div>
   )

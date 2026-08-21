@@ -13,8 +13,8 @@
 import { Outlet } from 'react-router-dom'
 import { createLayout } from 'libra-ui/Layout'
 import {
-  CalendarDays, LayoutGrid, MapPin, ScrollText, Settings, Tags, UserCog, Users,
-  Wallet,
+  CalendarDays, LayoutGrid, MapPin, NotebookText, ScrollText, Settings, Tags,
+  UserCog, Users, Wallet,
 } from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
@@ -75,6 +75,9 @@ const Cascaron = createLayout<Usuario>({
       items: [
         { to: '/agenda', label: 'Agenda', icon: CalendarDays },
         { to: '/caja', label: 'Caja', icon: Wallet },
+        // La cobranza va con la caja y no en Maestros: se mira el mismo día que
+        // se cobra, y el pago a cuenta entra por el turno abierto.
+        { to: '/cuenta-corriente', label: 'Cuenta corriente', icon: NotebookText },
       ],
     },
     {
