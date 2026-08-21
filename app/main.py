@@ -34,10 +34,12 @@ from app.auth import UserRepository, construir_session_auth, require_admin
 from app.config import Config
 from app.routers import admin, disponibilidad, maestros, reservas, salud
 from app.routers import auth as auth_router
+from app.routers import facturacion as facturacion_router
 
 # Con alias: más abajo hay una variable local `usuarios` con el repositorio, y
 # sin el alias el import queda pisado.
 from app.routers import usuarios as usuarios_router
+from app.servicios import facturacion
 
 #: Qué entra al log de actividad: `{clase del modelo: nombre legible}`.
 #:
@@ -65,15 +67,24 @@ AUDITABLES = {
 def _instancia_a_respaldar(config: Config) -> Instancia:
     """Qué se lleva el backup.
 
-    Una sola base y ningún archivo en disco: `usuarios` vive en la misma base
-    que el dominio, y no hay logos ni adjuntos todavía. `directorios=[]` no es un
-    pendiente — es que el backup **es** exactamente el dump, y no hay forma de
-    bajarse una copia a la que le falte algo.
+    🔴 **DOS bases desde que entró la facturación, y las dos tienen que entrar.**
+    `libracore` corre contra una base propia —ver `servicios/facturacion.py`—,
+    así que un backup del dominio solo **no se puede restaurar**: o volvés las
+    reservas y te quedan las facturas de otro momento, o al revés. Y no falla:
+    da un ZIP que se descarga y pesa poco, que es la peor forma de perder datos.
 
-    Cuando entre la facturación (F3) esto cambia: el certificado de ARCA es un
-    archivo, y hay que decidir explícitamente si entra al ZIP o no.
+    En una instancia sin facturar sigue siendo una sola, y eso está bien: no hay
+    nada del otro lado que respaldar.
+
+    `directorios=[]` todavía: no hay logos ni adjuntos. **El certificado de ARCA
+    sí es un archivo**, y cuando se suba por pantalla hay que decidir
+    explícitamente si entra al ZIP — un backup con la clave privada adentro es un
+    archivo que circula por mail.
     """
-    return Instancia(nombre="libraclub", postgres_url=config.database_url)
+    extra = [config.libracore_database_url] if config.libracore_database_url else []
+    return Instancia(
+        nombre="libraclub", postgres_url=config.database_url, postgres_extra=extra,
+    )
 
 
 def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> FastAPI:
@@ -88,6 +99,10 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # dominio: `usuarios` vive en la MISMA base, así que las FK de sus tablas
     # satélite resuelven. Las tablas propias van por Alembic; las de `libraauth`
     # no, porque su schema lo versiona él y no nosotros.
+    # La base de LibraCore, si esta instancia factura. Devuelve False y no hace
+    # nada cuando no está configurada — la app levanta igual.
+    facturacion.configurar(config.libracore_database_url)
+
     AuthBase.metadata.create_all(motor)
     # El log de actividad cuelga de su propio `Base`, no del de `models.py`: la
     # tabla tiene que quedar en la base del DOMINIO, que es donde ocurren las
@@ -174,6 +189,10 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # que haya que dejar abierto — el día que la factura o el ticket necesiten
     # el nombre de la empresa desde una pantalla de staff, se abre ahí y con ese
     # motivo, no antes.
+    # `GET`/`PUT /config/arca`, la pestaña de ARCA de la pantalla compartida.
+    # Sin `/api` a propósito: es el prefijo que consume el kit — ver el módulo.
+    app.include_router(facturacion_router.router, dependencies=[Depends(require_admin)])
+
     app.include_router(build_empresa_router(), dependencies=[Depends(require_admin)])
     app.include_router(build_empresa_admin_router(), dependencies=[Depends(require_admin)])
 
