@@ -76,13 +76,13 @@ beforeEach(() => {
 })
 
 describe('cascarón de LibraClub', () => {
-  it('arma el menú con las siete pantallas del producto', async () => {
+  it('arma el menú con las ocho pantallas del producto', async () => {
     montar()
     // El contenido llega por `Outlet`: si el envoltorio de `Cascaron` se
     // rompiera, el sidebar se dibujaría igual y la pantalla quedaría vacía.
     expect(await screen.findByText('contenido de la agenda')).toBeInTheDocument()
     for (const seccion of ['Agenda', 'Clientes', 'Canchas', 'Tarifas', 'Sucursales',
-                           'Usuarios', 'Configuración']) {
+                           'Usuarios', 'Log de actividad', 'Configuración']) {
       expect(await screen.findByRole('link', { name: seccion })).toBeInTheDocument()
     }
   })
@@ -108,6 +108,7 @@ describe('cascarón de LibraClub', () => {
     // Configuración también: el router de empresa lleva `require_admin` y el de
     // SMTP lo exige por dentro, así que a un encargado el link le daría 403.
     expect(screen.queryByRole('link', { name: 'Configuración' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Log de actividad' })).not.toBeInTheDocument()
   })
 
   // ⚠️ **Acá NO se prueba el selector de sucursal**, aunque el Layout se lo pase
