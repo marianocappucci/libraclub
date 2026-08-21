@@ -5,10 +5,45 @@
    golpe, sin transición. */
 @import "tw-animate-css";
 
+/* Montserrat, la tipografía del nombre del producto en el login y en la
+   sidebar. Self-hosted vía @fontsource y NO por CDN de Google: una fuente
+   pedida a un tercero en tiempo de ejecución es una dependencia de red que la
+   instancia de un complejo no tiene por qué tener. El woff2 lo empaqueta Vite
+   con el resto del bundle.
+
+   Subset latino y un solo peso (700) a propósito: el wordmark es lo único que
+   la usa, y siempre en bold. Importar "@fontsource/montserrat" a secas traería
+   nueve pesos por cada alfabeto, y ocho no se dibujan nunca.
+
+   Va acá arriba porque un @import de CSS tiene que preceder a cualquier otra
+   regla: debajo del @source, el navegador lo descarta. Mismo cableado que los
+   otros siete productos. */
+@import "@fontsource/montserrat/latin-700.css";
+
 /* Tailwind v4 no escanea node_modules por defecto, y `libra-ui` usa clases de
    utilidad en su propio JSX: sin esto el motor no las genera y el layout de la
    familia sale sin estilos. Mismo patrón que el resto de los productos. */
 @source "../node_modules/libra-ui";
+
+/* 🔴 **Los tests NO se escanean.** Tailwind lee el fuente como texto plano, así
+   que las clases que un test usa como DATO terminan emitidas en el CSS de
+   producción. Pasó el 2026-08-20 con `sin-colores-fijos.test.ts`, que lleva
+   `text-slate-600`, `bg-gray-100`, `border-zinc-300` y `border-neutral-400`
+   como controles de su patrón: las cuatro viajaron al bundle desplegado —
+   medido sobre el CSS servido por `dev.libraclub.com.ar`—. O sea que la guarda
+   contra los colores fijos era la que los estaba metiendo.
+
+   Va como exclusión general y no arreglando ese archivo: cualquier test futuro
+   que mencione una clase tendría el mismo efecto, y nadie se acordaría. */
+@source not "./**/*.test.{ts,tsx}";
+
+/* La utilidad `font-montserrat`. Se declara una sola vez acá para que el login
+   y la sidebar pidan la misma familia: si cada shim escribiera su propio
+   `font-["Montserrat"]`, alcanzaría con que uno se escriba distinto para que
+   las dos pantallas dejen de coincidir sin que nadie lo note. */
+@theme {
+  --font-montserrat: "Montserrat", ui-sans-serif, system-ui, sans-serif;
+}
 
 @custom-variant dark (&:is(.dark *));
 

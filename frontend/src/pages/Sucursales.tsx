@@ -1,26 +1,33 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { ColumnDef } from '@tanstack/react-table'
+import { DataTable, sortableHeader } from 'libra-ui/data-table'
+import { EncabezadoDePantalla } from 'libra-ui/acciones'
+import { Plus } from 'lucide-react'
+
 import { sucursales as api } from '@/lib/api'
 import type { Sucursal } from '@/lib/api'
 import { useSucursal } from '@/context/SucursalContext'
 import { useAuth } from '@/context/AuthContext'
 import { FormularioDeSucursal } from '@/components/FormularioDeSucursal'
+import { AvisoDeError, columnaDeAcciones, filaInactiva } from '@/components/listado'
+import { Button } from '@/components/ui/button'
 
 export function Sucursales() {
   // 🔴 Esta pantalla pide su **propia** lista, completa, y no usa la del
   // contexto. La del contexto está filtrada a las activas porque alimenta el
-  // selector del encabezado — y con esa lista, una sucursal dada de baja
-  // desaparece de acá y **no hay forma de volver a activarla**. Encontrado
-  // usándolo: se dio de baja la que se estaba viendo y dejó de existir para la
-  // UI. El `recargar` del contexto se sigue llamando, para que el selector se
-  // entere de los cambios.
+  // selector del menú — y con esa lista, una sucursal dada de baja desaparece
+  // de acá y **no hay forma de volver a activarla**. Encontrado usándolo: se
+  // dio de baja la que se estaba viendo y dejó de existir para la UI. El
+  // `recargar` del contexto se sigue llamando, para que el selector se entere
+  // de los cambios.
   const { actual, recargar: recargarSelector } = useSucursal()
-  const { usuario } = useAuth()
+  const { user } = useAuth()
   const [filas, setFilas] = useState<Sucursal[]>([])
   const [error, setError] = useState<string | null>(null)
   const [editando, setEditando] = useState<Sucursal | null>(null)
   const [abierto, setAbierto] = useState(false)
 
-  const puedeEscribir = usuario?.role === 'admin'
+  const puedeEscribir = user?.role === 'admin'
 
   const recargar = useCallback(() => {
     api.listar().then(setFilas).catch((e: Error) => setError(e.message))
@@ -29,110 +36,106 @@ export function Sucursales() {
 
   useEffect(recargar, [recargar])
 
-  async function borrar(sucursal: Sucursal) {
-    if (!confirm(`¿Borrar ${sucursal.nombre}? Si tiene canchas no se va a poder.`)) return
-    setError(null)
-    try {
-      await api.borrar(sucursal.id)
-      recargar()
-    } catch (e) {
-      setError((e as Error).message)
-    }
-  }
+  const borrar = useCallback(
+    async (sucursal: Sucursal) => {
+      if (!confirm(`¿Borrar ${sucursal.nombre}? Si tiene canchas no se va a poder.`)) return
+      setError(null)
+      try {
+        await api.borrar(sucursal.id)
+        recargar()
+      } catch (e) {
+        setError((e as Error).message)
+      }
+    },
+    [recargar],
+  )
+
+  const columnas = useMemo<ColumnDef<Sucursal, unknown>[]>(() => {
+    const base: ColumnDef<Sucursal, unknown>[] = [
+      {
+        accessorKey: 'nombre',
+        header: sortableHeader('Nombre'),
+        cell: ({ row }) => (
+          <span className="font-medium">
+            {row.original.nombre}
+            {row.original.id === actual && (
+              <span className="ml-2 text-xs text-muted-foreground">(la que estás viendo)</span>
+            )}
+            {!row.original.activa && (
+              <span className="ml-2 text-xs text-muted-foreground">(de baja)</span>
+            )}
+          </span>
+        ),
+      },
+      {
+        accessorKey: 'localidad',
+        header: sortableHeader('Localidad'),
+        cell: ({ row }) => row.original.localidad ?? '—',
+      },
+      {
+        accessorKey: 'telefono',
+        header: 'Teléfono',
+        cell: ({ row }) => row.original.telefono ?? '—',
+      },
+      {
+        accessorKey: 'punto_venta_arca',
+        header: 'Punto de venta',
+        cell: ({ row }) =>
+          row.original.punto_venta_arca ?? (
+            // No es lo mismo "no tiene" que "tiene el 0": sin punto de venta la
+            // sucursal no puede facturar, y conviene que se vea.
+            <span className="text-amber-700 dark:text-amber-500">sin asignar</span>
+          ),
+      },
+    ]
+    if (!puedeEscribir) return base
+    return [
+      ...base,
+      columnaDeAcciones<Sucursal>({
+        onEditar: (s) => {
+          setEditando(s)
+          setAbierto(true)
+        },
+        onBorrar: borrar,
+        nombreDe: (s) => s.nombre,
+      }),
+    ]
+  }, [puedeEscribir, borrar, actual])
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Sucursales</h1>
+      <EncabezadoDePantalla titulo={<h1 className="text-lg font-semibold">Sucursales</h1>}>
         {puedeEscribir && (
-          <button
+          <Button
             onClick={() => {
               setEditando(null)
               setAbierto(true)
             }}
-            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white"
           >
+            <Plus className="size-4" />
             Nueva sucursal
-          </button>
+          </Button>
         )}
-      </div>
+      </EncabezadoDePantalla>
 
-      <p className="text-sm text-slate-500">
+      <p className="text-sm text-muted-foreground">
         Una sucursal no es un cliente aparte: comparten base, usuarios y
         reportes. Un complejo que factura con otro CUIT va en otra instancia.
       </p>
 
-      {error && (
-        <p
-          role="alert"
-          className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
-        >
-          {error}
-        </p>
-      )}
+      <AvisoDeError mensaje={error} />
 
-      <table className="w-full overflow-hidden rounded-lg border border-slate-200 bg-white text-sm">
-        <thead className="bg-slate-100 text-left text-slate-600">
-          <tr>
-            <th className="px-3 py-2">Nombre</th>
-            <th className="px-3 py-2">Localidad</th>
-            <th className="px-3 py-2">Teléfono</th>
-            <th className="px-3 py-2">Punto de venta</th>
-            {puedeEscribir && <th className="px-3 py-2" />}
-          </tr>
-        </thead>
-        <tbody>
-          {filas.map((s) => (
-            <tr
-              key={s.id}
-              className={`border-t border-slate-100 ${s.activa ? '' : 'text-slate-400'}`}
-            >
-              <td className="px-3 py-2 font-medium">
-                {s.nombre}
-                {s.id === actual && (
-                  <span className="ml-2 text-xs text-slate-500">(la que estás viendo)</span>
-                )}
-                {!s.activa && <span className="ml-2 text-xs">(de baja)</span>}
-              </td>
-              <td className="px-3 py-2">{s.localidad ?? '—'}</td>
-              <td className="px-3 py-2">{s.telefono ?? '—'}</td>
-              <td className="px-3 py-2">
-                {s.punto_venta_arca ?? (
-                  // No es lo mismo "no tiene" que "tiene el 0": sin punto de
-                  // venta la sucursal no puede facturar, y conviene que se vea.
-                  <span className="text-amber-700">sin asignar</span>
-                )}
-              </td>
-              {puedeEscribir && (
-                <td className="px-3 py-2 text-right whitespace-nowrap">
-                  <button
-                    onClick={() => {
-                      setEditando(s)
-                      setAbierto(true)
-                    }}
-                    className="rounded-md border border-slate-300 px-2 py-1 hover:bg-slate-100"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    onClick={() => borrar(s)}
-                    className="ml-2 rounded-md border border-red-300 px-2 py-1 text-red-800 hover:bg-red-50"
-                  >
-                    Borrar
-                  </button>
-                </td>
-              )}
-            </tr>
-          ))}
-          {filas.length === 0 && (
-            <tr>
-              <td colSpan={5} className="px-3 py-4 text-slate-500">
-                No hay ninguna sucursal. Sin una, la agenda no tiene dónde vivir.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+      <DataTable
+        columns={columnas}
+        data={filas}
+        getRowClassName={(s) => filaInactiva(s.activa)}
+        emptyMessage="No hay ninguna sucursal. Sin una, la agenda no tiene dónde vivir."
+        search={{
+          campos: (s) => [s.nombre, s.localidad, s.telefono, s.punto_venta_arca],
+          placeholder: 'Buscar por nombre, localidad o teléfono',
+          ariaLabel: 'Buscar sucursal',
+        }}
+      />
 
       <FormularioDeSucursal
         abierto={abierto}

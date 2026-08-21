@@ -114,3 +114,30 @@ class TarifaEntrada(BaseModel):
 class TarifaSalida(TarifaEntrada):
     model_config = ConfigDict(from_attributes=True)
     id: int
+
+
+class FranjaEntrada(BaseModel):
+    sucursal_id: int
+    cancha_id: int | None = None
+    alcance_dia: AlcanceDia = AlcanceDia.TODOS
+    dia_semana: int | None = Field(default=None, ge=0, le=6)
+    abre: time
+    cierra: time
+    activa: bool = True
+
+    @field_validator("dia_semana")
+    @classmethod
+    def _dia_coherente(cls, valor: int | None, info) -> int | None:
+        # Mismo par validador+CHECK que `TarifaEntrada`, y por el mismo motivo:
+        # el CHECK garantiza, éste da un 422 con el nombre del campo.
+        alcance = info.data.get("alcance_dia")
+        if alcance is AlcanceDia.DIA_SEMANA and valor is None:
+            raise ValueError("un horario por día de semana necesita dia_semana")
+        if alcance is not None and alcance is not AlcanceDia.DIA_SEMANA and valor is not None:
+            raise ValueError(f"dia_semana no aplica con alcance_dia={alcance.value}")
+        return valor
+
+
+class FranjaSalida(FranjaEntrada):
+    model_config = ConfigDict(from_attributes=True)
+    id: int

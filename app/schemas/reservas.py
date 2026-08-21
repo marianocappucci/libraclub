@@ -82,17 +82,53 @@ class SerieSalida(BaseModel):
     activa: bool
 
 
+class SerieEnLista(SerieSalida):
+    """Una serie con lo que hace falta para poder gestionarla desde la pantalla.
+
+    🔑 **`materializada_hasta` es el campo que evita el defecto silencioso.**
+    Una serie sin fin no genera reservas infinitas: se materializa una ventana
+    de 90 días y se extiende. Sin mostrar hasta dónde llega, esa ventana se
+    agota y **la cancha fija deja de aparecer en la agenda sin que nadie se
+    entere** — el grupo llega un martes y el turno está libre para cualquiera.
+    """
+
+    #: Resueltos para la pantalla: la tabla guarda ids y el operador busca por
+    #: nombre. Mismo criterio que el listado de tarifas.
+    cliente: str
+    cancha: str
+    #: La última reserva generada, o `null` si no se generó ninguna.
+    materializada_hasta: date | None
+    #: Cuántas reservas futuras tiene vivas. Es lo que se pierde al dar de baja.
+    proximas: int
+
+
+class SalteadaSalida(BaseModel):
+    """Una fecha de la serie que no se pudo crear, con el motivo."""
+
+    comienza_at: datetime
+    #: Código estable para la pantalla: `sin_tarifa`, `ocupada`,
+    #: `fuera_de_horario`.
+    motivo: str
+    #: El mensaje de la excepción, que nombra la cancha y el horario del día.
+    detalle: str
+
+
 class SerieCreada(BaseModel):
     """El resultado de materializar una serie.
 
     Devuelve las salteadas y no sólo las creadas: una cancha fija que chocó con
     un torneo el tercer martes tiene que decírselo al operador **en el momento**,
     no dejar que lo descubra el martes.
+
+    🔑 **Y con el motivo de cada una.** "Se saltearon 3 de 13" no alcanza: si fue
+    por falta de tarifa el operador carga la tarifa, si fue por horario revisa el
+    horario, y si fue por superposición le avisa al cliente. Sin el motivo tiene
+    que ir a buscar cada fecha a la grilla.
     """
 
     serie: SerieSalida
     creadas: list[ReservaSalida]
-    salteadas: list[datetime]
+    salteadas: list[SalteadaSalida]
 
 
 class TurnoSalida(BaseModel):

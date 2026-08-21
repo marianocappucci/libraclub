@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Modal } from '@/components/Modal'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
 import { agenda, clientes as apiClientes, ErrorDeApi } from '@/lib/api'
 import type { Cancha, Cliente, Turno } from '@/lib/api'
 import { fecha, hora, pesos } from '@/lib/fechas'
+import { Input } from '@/components/ui/input'
+import { buttonVariants } from '@/components/ui/button'
+import { AvisoDeError } from '@/components/listado'
 
 const ORIGENES = [
   { valor: 'mostrador', texto: 'Mostrador' },
@@ -139,171 +144,174 @@ export function DialogoDeReserva({
 
   if (!cancha || !turno) return null
 
+  // `onOpenChange` recibe el estado NUEVO. Se llama a `onCerrar` sólo cuando
+  // llega `false`: el padre es quien tiene el estado y quien decide. Hoy nunca
+  // llega `true` —ninguno de estos diálogos tiene `DialogTrigger`, los abre el
+  // padre—, así que el `if` es defensivo. Ver la nota en `dialogos.test.tsx`
+  // sobre por qué no se puede cubrir con un test.
   return (
-    <Modal abierto={abierto} titulo="Nueva reserva" onCerrar={onCerrar}>
-      <form onSubmit={enviar} className="space-y-4">
-        <div className="rounded-md bg-slate-100 px-3 py-2 text-sm">
-          <div className="font-medium">{cancha.nombre}</div>
-          <div className="text-slate-600">
-            {fecha(turno.comienza_at)} · desde las {hora(turno.comienza_at)}
-            {' · '}
-            {minutos} min
+    <Dialog open={abierto} onOpenChange={(o) => { if (!o) onCerrar() }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Nueva reserva</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={enviar} className="space-y-4">
+          <div className="rounded-md bg-muted px-3 py-2 text-sm">
+            <div className="font-medium">{cancha.nombre}</div>
+            <div className="text-muted-foreground">
+              {fecha(turno.comienza_at)} · desde las {hora(turno.comienza_at)}
+              {' · '}
+              {minutos} min
+            </div>
+            <div className={total ? 'text-foreground' : 'text-amber-700'}>
+              {total ? (
+                <>
+                  {pesos(total)}
+                  {turnos > 1 && (
+                    // Un solo nodo de texto a propósito: partido en varios, la
+                    // cuenta queda ilegible para un lector de pantalla y para
+                    // cualquier test que la busque como frase.
+                    <span className="text-muted-foreground">{` (${turnos} × ${pesos(turno.precio)})`}</span>
+                  )}
+                </>
+              ) : (
+                'Sin tarifa cargada para esta franja'
+              )}
+            </div>
           </div>
-          <div className={total ? 'text-slate-900' : 'text-amber-700'}>
-            {total ? (
-              <>
-                {pesos(total)}
-                {turnos > 1 && (
-                  // Un solo nodo de texto a propósito: partido en varios, la
-                  // cuenta queda ilegible para un lector de pantalla y para
-                  // cualquier test que la busque como frase.
-                  <span className="text-slate-500">{` (${turnos} × ${pesos(turno.precio)})`}</span>
-                )}
-              </>
-            ) : (
-              'Sin tarifa cargada para esta franja'
-            )}
-          </div>
-        </div>
 
-        {!nuevo ? (
-          <div className="space-y-1">
-            {/* El botón va FUERA del `<label>`: adentro, su texto entra en el
-                nombre accesible del select y el lector de pantalla anuncia
-                "Cliente … Cliente nuevo" como si fuera una sola cosa. */}
-            <label className="block space-y-1">
-              <span className="text-sm text-slate-600">Cliente</span>
-              <select
-                className="w-full rounded-md border border-slate-300 px-3 py-2"
-                value={clienteId}
-                onChange={(e) => setClienteId(e.target.value)}
+          {!nuevo ? (
+            <div className="space-y-1">
+              {/* El botón va FUERA del `<label>`: adentro, su texto entra en el
+                  nombre accesible del select y el lector de pantalla anuncia
+                  "Cliente … Cliente nuevo" como si fuera una sola cosa. */}
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">Cliente</span>
+                <select
+                  className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
+                  value={clienteId}
+                  onChange={(e) => setClienteId(e.target.value)}
+                >
+                  {lista.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nombre}
+                      {c.telefono ? ` — ${c.telefono}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                onClick={() => setNuevo(true)}
               >
-                {lista.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.nombre}
-                    {c.telefono ? ` — ${c.telefono}` : ''}
+                Cliente nuevo
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">Nombre del cliente</span>
+                <Input
+                  
+                  value={nombreNuevo}
+                  onChange={(e) => setNombreNuevo(e.target.value)}
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">Teléfono</span>
+                <Input
+                  
+                  value={telefonoNuevo}
+                  onChange={(e) => setTelefonoNuevo(e.target.value)}
+                />
+              </label>
+              {lista.length > 0 && (
+                <button
+                  type="button"
+                  className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+                  onClick={() => setNuevo(false)}
+                >
+                  Elegir uno existente
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="grid grid-cols-3 gap-2">
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Turnos</span>
+              <select
+                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
+                value={turnos}
+                onChange={(e) => setTurnos(Number(e.target.value))}
+              >
+                {Array.from({ length: MAX_TURNOS }, (_, i) => i + 1).map((n) => (
+                  <option key={n} value={n}>
+                    {n}
                   </option>
                 ))}
               </select>
             </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Origen</span>
+              <select
+                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
+                value={origen}
+                onChange={(e) => setOrigen(e.target.value)}
+              >
+                {ORIGENES.map((o) => (
+                  <option key={o.valor} value={o.valor}>
+                    {o.texto}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Estado</span>
+              <select
+                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
+                value={estado}
+                onChange={(e) => setEstado(e.target.value)}
+              >
+                {ESTADOS.map((o) => (
+                  <option key={o.valor} value={o.valor}>
+                    {o.texto}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <label className="block space-y-1">
+            <span className="text-sm font-medium">Observaciones</span>
+            <Input
+              
+              value={observaciones}
+              onChange={(e) => setObservaciones(e.target.value)}
+            />
+          </label>
+
+          <AvisoDeError mensaje={error} />
+
+          <div className="flex justify-end gap-2">
             <button
               type="button"
-              className="text-sm text-slate-600 underline"
-              onClick={() => setNuevo(true)}
+              onClick={onCerrar}
+              className={buttonVariants({ variant: 'outline' })}
             >
-              Cliente nuevo
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={enviando}
+              className={buttonVariants()}
+            >
+              {enviando ? 'Reservando…' : 'Reservar'}
             </button>
           </div>
-        ) : (
-          <div className="space-y-2">
-            <label className="block space-y-1">
-              <span className="text-sm text-slate-600">Nombre del cliente</span>
-              <input
-                className="w-full rounded-md border border-slate-300 px-3 py-2"
-                value={nombreNuevo}
-                onChange={(e) => setNombreNuevo(e.target.value)}
-              />
-            </label>
-            <label className="block space-y-1">
-              <span className="text-sm text-slate-600">Teléfono</span>
-              <input
-                className="w-full rounded-md border border-slate-300 px-3 py-2"
-                value={telefonoNuevo}
-                onChange={(e) => setTelefonoNuevo(e.target.value)}
-              />
-            </label>
-            {lista.length > 0 && (
-              <button
-                type="button"
-                className="text-sm text-slate-600 underline"
-                onClick={() => setNuevo(false)}
-              >
-                Elegir uno existente
-              </button>
-            )}
-          </div>
-        )}
-
-        <div className="grid grid-cols-3 gap-2">
-          <label className="space-y-1">
-            <span className="text-sm text-slate-600">Turnos</span>
-            <select
-              className="w-full rounded-md border border-slate-300 px-2 py-2"
-              value={turnos}
-              onChange={(e) => setTurnos(Number(e.target.value))}
-            >
-              {Array.from({ length: MAX_TURNOS }, (_, i) => i + 1).map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-1">
-            <span className="text-sm text-slate-600">Origen</span>
-            <select
-              className="w-full rounded-md border border-slate-300 px-2 py-2"
-              value={origen}
-              onChange={(e) => setOrigen(e.target.value)}
-            >
-              {ORIGENES.map((o) => (
-                <option key={o.valor} value={o.valor}>
-                  {o.texto}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-1">
-            <span className="text-sm text-slate-600">Estado</span>
-            <select
-              className="w-full rounded-md border border-slate-300 px-2 py-2"
-              value={estado}
-              onChange={(e) => setEstado(e.target.value)}
-            >
-              {ESTADOS.map((o) => (
-                <option key={o.valor} value={o.valor}>
-                  {o.texto}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        <label className="block space-y-1">
-          <span className="text-sm text-slate-600">Observaciones</span>
-          <input
-            className="w-full rounded-md border border-slate-300 px-3 py-2"
-            value={observaciones}
-            onChange={(e) => setObservaciones(e.target.value)}
-          />
-        </label>
-
-        {error && (
-          <p
-            role="alert"
-            className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
-          >
-            {error}
-          </p>
-        )}
-
-        <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCerrar}
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100"
-          >
-            Cancelar
-          </button>
-          <button
-            type="submit"
-            disabled={enviando}
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
-          >
-            {enviando ? 'Reservando…' : 'Reservar'}
-          </button>
-        </div>
-      </form>
-    </Modal>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }

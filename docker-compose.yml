@@ -75,6 +75,20 @@ services:
       - LIBRACLUB_ADMIN_USERNAME=${LIBRACLUB_ADMIN_USERNAME:-admin}
       - LIBRACLUB_ADMIN_PASSWORD=${LIBRACLUB_ADMIN_PASSWORD:?hay que definirla en el .env}
       - DATABASE_URL=postgresql+psycopg://libraclub:${LIBRACLUB_POSTGRES_PASSWORD:?hay que definirla en el .env}@libraclub-postgres:5432/libraclub
+      # 🔴 La base de LibraCore, SEPARADA de la del dominio y en el mismo
+      # servidor. Separada porque `init_core_schema()` crea `usuarios` y
+      # `auth_log`, que este producto ya tiene con la forma de `libraauth`:
+      # compartiendo base nada falla al arrancar y libracore queda leyendo
+      # tablas de otro motor. Mismo arreglo que Gestiolibra, MedLibra y
+      # VentaLibra.
+      #
+      # No hace falta crearla a mano: la app la crea si no existe (ver
+      # `servicios/facturacion.py`). Un paso manual acá tiraría el contenedor
+      # al arrancar el dia que alguien se lo olvide.
+      #
+      # ⚠️ Con esto el backup pasa a llevarse las DOS bases. Un backup de una
+      # sola no se puede restaurar y **no falla**: da un ZIP que pesa poco.
+      - LIBRACLUB_LIBRACORE_DATABASE_URL=postgresql://libraclub:${LIBRACLUB_POSTGRES_PASSWORD:?hay que definirla en el .env}@libraclub-postgres:5432/libraclub_core
       - ENTORNO=dev
       # Como el backoffice (admin.libraclub.com.ar) administra los usuarios de
       # esta instancia, y como el panel del dueño pide `/admin/resumen`.
@@ -84,6 +98,13 @@ services:
       # abre nada; lo que abriría algo sería ponerle un valor adivinable, y por
       # eso no hay uno de ejemplo.
       - LIBRA_SERVICE_TOKEN=${LIBRA_SERVICE_TOKEN:-}
+      # 🔴 **Credencial propia, distinta de `LIBRA_SERVICE_TOKEN`.** Aquél es
+      # UN TOKEN POR PRODUCTO, compartido por todas sus instancias de
+      # cliente: dárselo al dueño de un complejo le daría acceso de servicio
+      # a las instancias de otros clientes del mismo producto. Éste es por
+      # instancia, y si se filtra expone la lectura de agregados de UNA
+      # sucursal. Ver wiki/analyses/panel-del-dueno-multisucursal.md, punto 7.
+      - LIBRA_PANEL_TOKEN=${LIBRA_PANEL_TOKEN:-}
       # Dónde escribe los backups. Sin esto caen en `./datos` relativo al
       # directorio de trabajo, o sea adentro del bind mount.
       - DATA_DIR=/app/datos

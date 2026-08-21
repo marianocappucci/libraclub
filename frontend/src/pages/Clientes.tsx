@@ -1,22 +1,29 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { ColumnDef } from '@tanstack/react-table'
+import { DataTable, sortableHeader } from 'libra-ui/data-table'
+import { EncabezadoDePantalla } from 'libra-ui/acciones'
+import { Plus } from 'lucide-react'
+
 import { clientes as api } from '@/lib/api'
 import type { Cliente } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
 import { FormularioDeCliente } from '@/components/FormularioDeCliente'
+import { AvisoDeError, columnaDeAcciones, filaInactiva } from '@/components/listado'
+import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
 
 export function Clientes() {
-  const { usuario } = useAuth()
+  const { user } = useAuth()
   const [filas, setFilas] = useState<Cliente[]>([])
   const [error, setError] = useState<string | null>(null)
   const [editando, setEditando] = useState<Cliente | null>(null)
   const [abierto, setAbierto] = useState(false)
-  const [busca, setBusca] = useState('')
   const [verInactivos, setVerInactivos] = useState(false)
 
   // 🔑 Clientes es el ÚNICO maestro que un encargado puede escribir. El backend
   // lo gatea con `require_staff` y no con `require_admin`: si pidiera admin, no
   // se le podría tomar la reserva a alguien que llama por primera vez.
-  const puedeEscribir = usuario?.role === 'admin' || usuario?.role === 'staff'
+  const puedeEscribir = user?.role === 'admin' || user?.role === 'staff'
 
   const recargar = useCallback(() => {
     api.listar().then(setFilas).catch((e: Error) => setError(e.message))
@@ -24,137 +31,128 @@ export function Clientes() {
 
   useEffect(recargar, [recargar])
 
-  const visibles = useMemo(() => {
-    const texto = busca.trim().toLowerCase()
-    return filas
-      .filter((c) => verInactivos || c.activo)
-      .filter(
-        (c) =>
-          !texto ||
-          c.nombre.toLowerCase().includes(texto) ||
-          (c.telefono ?? '').toLowerCase().includes(texto) ||
-          (c.documento ?? '').toLowerCase().includes(texto),
-      )
-  }, [filas, busca, verInactivos])
+  // El único filtro que queda **fuera** de la tabla. La búsqueda por texto se
+  // fue adentro (`search` de `DataTable`), que además busca por varios términos
+  // en cualquier orden; esto no es una búsqueda sino un interruptor de qué
+  // conjunto se mira.
+  const visibles = useMemo(
+    () => filas.filter((c) => verInactivos || c.activo),
+    [filas, verInactivos],
+  )
 
-  async function borrar(cliente: Cliente) {
-    if (!confirm(`¿Borrar a ${cliente.nombre}? Si tiene reservas no se va a poder.`)) return
-    setError(null)
-    try {
-      await api.borrar(cliente.id)
-      recargar()
-    } catch (e) {
-      setError((e as Error).message)
-    }
-  }
+  const borrar = useCallback(
+    async (cliente: Cliente) => {
+      if (!confirm(`¿Borrar a ${cliente.nombre}? Si tiene reservas no se va a poder.`)) return
+      setError(null)
+      try {
+        await api.borrar(cliente.id)
+        recargar()
+      } catch (e) {
+        setError((e as Error).message)
+      }
+    },
+    [recargar],
+  )
+
+  const columnas = useMemo<ColumnDef<Cliente, unknown>[]>(() => {
+    const base: ColumnDef<Cliente, unknown>[] = [
+      {
+        accessorKey: 'nombre',
+        header: sortableHeader('Nombre'),
+        cell: ({ row }) => (
+          <span className="font-medium">
+            {row.original.nombre}
+            {!row.original.activo && (
+              <span className="ml-2 text-xs text-muted-foreground">(de baja)</span>
+            )}
+          </span>
+        ),
+      },
+      {
+        accessorKey: 'telefono',
+        header: 'Teléfono',
+        cell: ({ row }) => row.original.telefono ?? '—',
+      },
+      {
+        accessorKey: 'documento',
+        header: 'Documento',
+        cell: ({ row }) => row.original.documento ?? '—',
+      },
+      { accessorKey: 'cuit', header: 'CUIT', cell: ({ row }) => row.original.cuit ?? '—' },
+    ]
+    if (!puedeEscribir) return base
+    return [
+      ...base,
+      columnaDeAcciones<Cliente>({
+        onEditar: (c) => {
+          setEditando(c)
+          setAbierto(true)
+        },
+        onBorrar: borrar,
+        nombreDe: (c) => c.nombre,
+      }),
+    ]
+  }, [puedeEscribir, borrar])
+
+  // 🔑 Se distingue por qué está vacía. Un listado vacío sin explicación se lee
+  // como un error.
+  //
+  // Son **dos** casos y no tres: cuando lo que vació la tabla es la búsqueda,
+  // `DataTable` ignora este mensaje y pone el suyo —«Sin resultados para
+  // “...”»—, que además cita lo que se tecleó. Una tercera rama para ese caso
+  // se escribió y resultó ser **código muerto**: no hay forma de que se
+  // renderice. Lo delató un test que la esperaba y encontró el mensaje del kit.
+  const mensajeVacio =
+    filas.length === 0
+      ? 'Todavía no hay clientes cargados.'
+      : 'Todos los clientes están dados de baja. Marcá «Ver los dados de baja» para verlos.'
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Clientes</h1>
+      <EncabezadoDePantalla titulo={<h1 className="text-lg font-semibold">Clientes</h1>}>
         {puedeEscribir && (
-          <button
+          <Button
             onClick={() => {
               setEditando(null)
               setAbierto(true)
             }}
-            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white"
           >
+            <Plus className="size-4" />
             Nuevo cliente
-          </button>
+          </Button>
         )}
-      </div>
+      </EncabezadoDePantalla>
 
-      {/* Un buscador y no paginación: en un complejo la lista crece a miles y lo
-          que el encargado hace es teclear el nombre o el teléfono que le están
-          dictando por el mostrador. */}
       <div className="flex flex-wrap items-center gap-3">
-        <input
-          className="w-72 rounded-md border border-slate-300 px-3 py-2 text-sm"
-          placeholder="Buscar por nombre, teléfono o documento"
-          value={busca}
-          onChange={(e) => setBusca(e.target.value)}
-          aria-label="Buscar cliente"
-        />
-        <label className="flex items-center gap-2 text-sm text-slate-600">
+        <Label className="flex items-center gap-2 text-sm font-normal text-muted-foreground">
           <input
             type="checkbox"
             checked={verInactivos}
             onChange={(e) => setVerInactivos(e.target.checked)}
           />
           Ver los dados de baja
-        </label>
-        <span className="text-sm text-slate-400">
-          {visibles.length} de {filas.length}
+        </Label>
+        <span className="text-sm text-muted-foreground">
+          {filas.length} {filas.length === 1 ? 'cliente' : 'clientes'} en total
         </span>
       </div>
 
-      {error && (
-        <p
-          role="alert"
-          className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
-        >
-          {error}
-        </p>
-      )}
+      <AvisoDeError mensaje={error} />
 
-      <table className="w-full overflow-hidden rounded-lg border border-slate-200 bg-white text-sm">
-        <thead className="bg-slate-100 text-left text-slate-600">
-          <tr>
-            <th className="px-3 py-2">Nombre</th>
-            <th className="px-3 py-2">Teléfono</th>
-            <th className="px-3 py-2">Documento</th>
-            <th className="px-3 py-2">CUIT</th>
-            {puedeEscribir && <th className="px-3 py-2" />}
-          </tr>
-        </thead>
-        <tbody>
-          {visibles.map((c) => (
-            <tr
-              key={c.id}
-              className={`border-t border-slate-100 ${c.activo ? '' : 'text-slate-400'}`}
-            >
-              <td className="px-3 py-2 font-medium">
-                {c.nombre}
-                {!c.activo && <span className="ml-2 text-xs">(de baja)</span>}
-              </td>
-              <td className="px-3 py-2">{c.telefono ?? '—'}</td>
-              <td className="px-3 py-2">{c.documento ?? '—'}</td>
-              <td className="px-3 py-2">{c.cuit ?? '—'}</td>
-              {puedeEscribir && (
-                <td className="px-3 py-2 text-right whitespace-nowrap">
-                  <button
-                    onClick={() => {
-                      setEditando(c)
-                      setAbierto(true)
-                    }}
-                    className="rounded-md border border-slate-300 px-2 py-1 hover:bg-slate-100"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    onClick={() => borrar(c)}
-                    className="ml-2 rounded-md border border-red-300 px-2 py-1 text-red-800 hover:bg-red-50"
-                  >
-                    Borrar
-                  </button>
-                </td>
-              )}
-            </tr>
-          ))}
-          {visibles.length === 0 && (
-            <tr>
-              <td colSpan={5} className="px-3 py-4 text-slate-500">
-                {/* Se distingue "no hay clientes" de "la búsqueda no encontró".
-                    Un listado vacío sin explicación se lee como un error. */}
-                {filas.length === 0
-                  ? 'Todavía no hay clientes cargados.'
-                  : 'Ningún cliente coincide con la búsqueda.'}
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+      {/* Un buscador y no paginación: en un complejo la lista crece a miles y lo
+          que el encargado hace es teclear el nombre o el teléfono que le están
+          dictando por el mostrador. */}
+      <DataTable
+        columns={columnas}
+        data={visibles}
+        getRowClassName={(c) => filaInactiva(c.activo)}
+        emptyMessage={mensajeVacio}
+        search={{
+          campos: (c) => [c.nombre, c.telefono, c.documento, c.cuit],
+          placeholder: 'Buscar por nombre, teléfono o documento',
+          ariaLabel: 'Buscar cliente',
+        }}
+      />
 
       <FormularioDeCliente
         abierto={abierto}

@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Modal } from '@/components/Modal'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
 import { tarifas as api } from '@/lib/api'
 import type { Cancha, Tarifa, TarifaEntrada } from '@/lib/api'
 import { pesos } from '@/lib/fechas'
+import { Input } from '@/components/ui/input'
+import { buttonVariants } from '@/components/ui/button'
+import { AvisoDeError } from '@/components/listado'
 
 const DIAS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 
@@ -128,168 +133,162 @@ export function FormularioDeTarifa({
       ? pesos((Number(datos.precio) * datos.sena_porcentaje) / 100)
       : null
 
+  // `onOpenChange` recibe el estado NUEVO. Se llama a `onCerrar` sólo cuando
+  // llega `false`: el padre es quien tiene el estado y quien decide. Hoy nunca
+  // llega `true` —ninguno de estos diálogos tiene `DialogTrigger`, los abre el
+  // padre—, así que el `if` es defensivo. Ver la nota en `dialogos.test.tsx`
+  // sobre por qué no se puede cubrir con un test.
   return (
-    <Modal
-      abierto={abierto}
-      titulo={tarifa ? `Editar ${tarifa.nombre}` : 'Nueva tarifa'}
-      onCerrar={onCerrar}
-    >
-      <form onSubmit={enviar} className="space-y-3">
-        <label className="block space-y-1">
-          <span className="text-sm text-slate-600">Nombre</span>
-          <input
-            className="w-full rounded-md border border-slate-300 px-3 py-2"
-            value={datos.nombre}
-            onChange={(e) => set('nombre', e.target.value)}
-          />
-        </label>
+    <Dialog open={abierto} onOpenChange={(o) => { if (!o) onCerrar() }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{tarifa ? `Editar ${tarifa.nombre}` : 'Nueva tarifa'}</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={enviar} className="space-y-3">
+          <label className="block space-y-1">
+            <span className="text-sm font-medium">Nombre</span>
+            <Input
+              
+              value={datos.nombre}
+              onChange={(e) => set('nombre', e.target.value)}
+            />
+          </label>
 
-        <label className="block space-y-1">
-          <span className="text-sm text-slate-600">Cancha</span>
-          <select
-            className="w-full rounded-md border border-slate-300 px-2 py-2"
-            value={datos.cancha_id ?? ''}
-            onChange={(e) => set('cancha_id', e.target.value ? Number(e.target.value) : null)}
-          >
-            <option value="">Toda la sucursal</option>
-            {canchas.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.nombre}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className="grid grid-cols-2 gap-2">
-          <label className="space-y-1">
-            <span className="text-sm text-slate-600">Aplica</span>
+          <label className="block space-y-1">
+            <span className="text-sm font-medium">Cancha</span>
             <select
-              className="w-full rounded-md border border-slate-300 px-2 py-2"
-              value={datos.alcance_dia}
-              onChange={(e) =>
-                cambiarAlcance(e.target.value as TarifaEntrada['alcance_dia'])
-              }
+              className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
+              value={datos.cancha_id ?? ''}
+              onChange={(e) => set('cancha_id', e.target.value ? Number(e.target.value) : null)}
             >
-              {ALCANCES.map((a) => (
-                <option key={a.valor} value={a.valor}>
-                  {a.texto}
+              <option value="">Toda la sucursal</option>
+              {canchas.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.nombre}
                 </option>
               ))}
             </select>
           </label>
-          {datos.alcance_dia === 'dia_semana' && (
+
+          <div className="grid grid-cols-2 gap-2">
             <label className="space-y-1">
-              <span className="text-sm text-slate-600">Día</span>
+              <span className="text-sm font-medium">Aplica</span>
               <select
-                className="w-full rounded-md border border-slate-300 px-2 py-2"
-                value={datos.dia_semana ?? 0}
-                onChange={(e) => set('dia_semana', Number(e.target.value))}
+                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
+                value={datos.alcance_dia}
+                onChange={(e) =>
+                  cambiarAlcance(e.target.value as TarifaEntrada['alcance_dia'])
+                }
               >
-                {DIAS.map((d, i) => (
-                  <option key={d} value={i}>
-                    {d}
+                {ALCANCES.map((a) => (
+                  <option key={a.valor} value={a.valor}>
+                    {a.texto}
                   </option>
                 ))}
               </select>
             </label>
-          )}
-        </div>
+            {datos.alcance_dia === 'dia_semana' && (
+              <label className="space-y-1">
+                <span className="text-sm font-medium">Día</span>
+                <select
+                  className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
+                  value={datos.dia_semana ?? 0}
+                  onChange={(e) => set('dia_semana', Number(e.target.value))}
+                >
+                  {DIAS.map((d, i) => (
+                    <option key={d} value={i}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <label className="space-y-1">
-            <span className="text-sm text-slate-600">Desde</span>
-            <input
-              type="time"
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-              value={datos.hora_desde}
-              onChange={(e) => set('hora_desde', e.target.value)}
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="text-sm text-slate-600">Hasta</span>
-            <input
-              type="time"
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-              value={datos.hora_hasta}
-              onChange={(e) => set('hora_hasta', e.target.value)}
-            />
-          </label>
-        </div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Desde</span>
+              <Input
+                type="time"
+                value={datos.hora_desde}
+                onChange={(e) => set('hora_desde', e.target.value)}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Hasta</span>
+              <Input
+                type="time"
+                value={datos.hora_hasta}
+                onChange={(e) => set('hora_hasta', e.target.value)}
+              />
+            </label>
+          </div>
 
-        <div className="grid grid-cols-3 gap-2">
-          <label className="space-y-1">
-            <span className="text-sm text-slate-600">Precio</span>
-            <input
-              inputMode="decimal"
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-              value={datos.precio}
-              onChange={(e) => set('precio', e.target.value)}
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="text-sm text-slate-600">Seña %</span>
-            <input
-              type="number"
-              min={0}
-              max={100}
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-              value={datos.sena_porcentaje}
-              onChange={(e) => set('sena_porcentaje', Number(e.target.value))}
-            />
-          </label>
-          <label className="space-y-1">
-            <span className="text-sm text-slate-600">Prioridad</span>
-            <input
-              type="number"
-              className="w-full rounded-md border border-slate-300 px-3 py-2"
-              value={datos.prioridad}
-              onChange={(e) => set('prioridad', Number(e.target.value))}
-            />
-          </label>
-        </div>
+          <div className="grid grid-cols-3 gap-2">
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Precio</span>
+              <Input
+                inputMode="decimal"
+                value={datos.precio}
+                onChange={(e) => set('precio', e.target.value)}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Seña %</span>
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                value={datos.sena_porcentaje}
+                onChange={(e) => set('sena_porcentaje', Number(e.target.value))}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium">Prioridad</span>
+              <Input
+                type="number"
+                value={datos.prioridad}
+                onChange={(e) => set('prioridad', Number(e.target.value))}
+              />
+            </label>
+          </div>
 
-        {sena && <p className="text-sm text-slate-500">Seña: {sena}</p>}
+          {sena && <p className="text-sm text-muted-foreground">Seña: {sena}</p>}
 
-        <p className="text-xs text-slate-500">
-          Gana la de mayor prioridad. Con la misma prioridad, la más específica:
-          feriado antes que día de semana, y una cancha antes que toda la sucursal.
-        </p>
-
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={datos.activa}
-            onChange={(e) => set('activa', e.target.checked)}
-          />
-          Activa
-        </label>
-
-        {error && (
-          <p
-            role="alert"
-            className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800"
-          >
-            {error}
+          <p className="text-xs text-muted-foreground">
+            Gana la de mayor prioridad. Con la misma prioridad, la más específica:
+            feriado antes que día de semana, y una cancha antes que toda la sucursal.
           </p>
-        )}
 
-        <div className="flex justify-end gap-2 pt-1">
-          <button
-            type="button"
-            onClick={onCerrar}
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100"
-          >
-            Cancelar
-          </button>
-          <button
-            type="submit"
-            disabled={enviando}
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
-          >
-            {enviando ? 'Guardando…' : 'Guardar'}
-          </button>
-        </div>
-      </form>
-    </Modal>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={datos.activa}
+              onChange={(e) => set('activa', e.target.checked)}
+            />
+            Activa
+          </label>
+
+          <AvisoDeError mensaje={error} />
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onCerrar}
+              className={buttonVariants({ variant: 'outline' })}
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={enviando}
+              className={buttonVariants()}
+            >
+              {enviando ? 'Guardando…' : 'Guardar'}
+            </button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }

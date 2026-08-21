@@ -273,9 +273,263 @@ export const agenda = {
     api.post(`/api/reservas/${id}/estado`, { estado, motivo }),
 }
 
+/** El comprobante de una reserva. Los importes viajan como número porque los
+ *  arma el motor de facturación, no este producto. */
+export interface Factura {
+  id: number
+  tipo: number
+  punto_venta: number
+  numero: number
+  fecha: string
+  total: number
+  /** Vacío mientras ARCA no lo haya dado. **No es un error**: la factura existe
+   *  y lo que falta es el CAE. Sin certificado cargado siempre viene vacío. */
+  cae: string
+  cae_vto: string
+}
+
+/** Cómo se nombra un tipo de comprobante de ARCA. */
+export const TIPO_DE_FACTURA: Record<number, string> = {
+  1: 'A',
+  6: 'B',
+  11: 'C',
+}
+
+export const facturacion = {
+  /** `null` si todavía no se facturó. Lo puede ver el mostrador. */
+  ver: (reservaId: number) => api.get<Factura | null>(`/api/reservas/${reservaId}/factura`),
+  // 🔑 Emitir es de admin: el mostrador toma reservas y cobra, pero qué se le
+  // factura a quién es del dueño. Si el rol no alcanza, el backend contesta 403
+  // — la pantalla esconde el botón para no ofrecer lo que va a fallar.
+  emitir: (reservaId: number) => api.post<Factura>(`/api/reservas/${reservaId}/facturar`, {}),
+}
+
+export interface TurnoDeCaja {
+  id: number
+  usuario_id: number
+  apertura: string
+  cierre: string | null
+  monto_inicial: number
+  monto_declarado_cierre: number | null
+  monto_esperado_cierre: number | null
+  estado: string
+  notas: string
+}
+
+export interface ResumenDeCaja {
+  movimientos: { id: number; fecha: string; concepto: string; monto: number; medio_pago: string }[]
+  pagos_por_medio: Record<string, number>
+  total_ventas: number
+  efectivo_ventas: number
+}
+
+/** Los medios que cobra un complejo. Es un subconjunto de los del motor: acá no
+ *  hay cheques ni retenciones. Tiene que coincidir con `MEDIOS_PAGO` del
+ *  backend — si se agrega uno de un lado y no del otro, el cobro da 422. */
+export const MEDIOS_DE_PAGO = [
+  { valor: 'efectivo', etiqueta: 'Efectivo' },
+  { valor: 'transferencia', etiqueta: 'Transferencia' },
+  { valor: 'mercadopago', etiqueta: 'Mercado Pago' },
+  { valor: 'tarjeta', etiqueta: 'Tarjeta' },
+] as const
+
+export const caja = {
+  /** `null` si este usuario no tiene caja abierta. */
+  actual: () => api.get<{ turno: TurnoDeCaja; resumen: ResumenDeCaja } | null>('/api/caja/turnos/actual'),
+  abrir: (monto_inicial: string, notas = '') =>
+    api.post<TurnoDeCaja>('/api/caja/turnos', { monto_inicial, notas }),
+  cobrar: (cuerpo: { monto: string; concepto: string; medio_pago: string }) =>
+    api.post<ResumenDeCaja>('/api/caja/cobros', cuerpo),
+  cerrar: (turnoId: number, monto_declarado: string, notas = '') =>
+    api.post<TurnoDeCaja & { diferencia_de_caja: number }>(
+      `/api/caja/turnos/${turnoId}/cerrar`, { monto_declarado, notas },
+    ),
+  historial: () => api.get<TurnoDeCaja[]>('/api/caja/turnos'),
+}
+
 export const sesion = {
   login: (username: string, password: string) =>
     api.post<{ username: string }>('/auth/login', { username, password }),
   logout: () => api.post('/auth/logout', {}),
   yo: () => api.get<{ username: string; role?: string }>('/auth/me'),
+}
+
+export interface SaldoDeCuenta {
+  cliente_id: number
+  cliente: string
+  /** Positivo = debe. Negativo = tiene saldo a favor. Lo calcula el backend. */
+  saldo: number
+}
+
+export interface MovimientoDeCuenta {
+  fecha: string
+  /** `debito` suma deuda, `credito` la baja. */
+  tipo: string
+  concepto: string
+  /** 🔑 **Siempre positivo**: el signo lo pone `tipo`, no el número. */
+  monto: number
+  medio: string
+  usuario_nombre: string | null
+}
+
+export const cuentaCorriente = {
+  /** Fía una reserva: queda como deuda del cliente. */
+  cargar: (reservaId: number) =>
+    api.post<SaldoDeCuenta>(`/api/cuenta-corriente/reservas/${reservaId}/cargar`, {}),
+  /** Un pago a cuenta. Exige turno de caja abierto — el backend contesta 409. */
+  pagar: (clienteId: number, cuerpo: { monto: string; medio_pago: string }) =>
+    api.post<SaldoDeCuenta>(`/api/cuenta-corriente/clientes/${clienteId}/pagos`, cuerpo),
+  ver: (clienteId: number) =>
+    api.get<SaldoDeCuenta & { movimientos: MovimientoDeCuenta[] }>(
+      `/api/cuenta-corriente/clientes/${clienteId}`,
+    ),
+  /** La pantalla de cobranza. De admin. */
+  deudores: () => api.get<SaldoDeCuenta[]>('/api/cuenta-corriente/deudores'),
+}
+
+// ── Horario de atención ──────────────────────────────────────────────────
+
+export interface FranjaEntrada {
+  sucursal_id: number
+  cancha_id: number | null
+  alcance_dia: 'todos' | 'dia_semana' | 'feriado'
+  dia_semana: number | null
+  /** `HH:MM` desde el formulario; el backend devuelve `HH:MM:SS`. */
+  abre: string
+  /** 🔑 Menor o igual que `abre` significa **que cierra al día siguiente**: es
+   *  el complejo que abre a las 16 y cierra a las 02, que en pádel es lo
+   *  normal. Igual = 24 horas. */
+  cierra: string
+  activa: boolean
+}
+
+export interface Franja extends FranjaEntrada {
+  id: number
+}
+
+export const horarios = {
+  listar: () => api.get<Franja[]>('/api/horarios'),
+  crear: (cuerpo: FranjaEntrada) => api.post<Franja>('/api/horarios', cuerpo),
+  editar: (id: number, cuerpo: FranjaEntrada) =>
+    api.put<Franja>(`/api/horarios/${id}`, cuerpo),
+  borrar: (id: number) => api.del(`/api/horarios/${id}`),
+}
+
+// ── Buffet ───────────────────────────────────────────────────────────────
+
+export interface ProductoDeBuffet {
+  item_id: number
+  nombre: string
+  precio: number
+  activo: boolean
+  stock: number
+  stock_minimo: number
+  bajo_minimo: boolean
+}
+
+export interface ProductoEntrada {
+  nombre: string
+  precio: string
+  costo: string
+  stock_minimo: string
+  activo: boolean
+}
+
+export interface LineaDeConsumo {
+  descripcion: string
+  cantidad: number
+  precio_unitario: number
+  importe: number
+}
+
+export const buffet = {
+  productos: (sucursalId: number) =>
+    api.get<ProductoDeBuffet[]>(`/api/buffet/productos?sucursal_id=${sucursalId}`),
+  crearProducto: (sucursalId: number, cuerpo: ProductoEntrada) =>
+    api.post<ProductoDeBuffet>(`/api/buffet/productos?sucursal_id=${sucursalId}`, cuerpo),
+  editarProducto: (sucursalId: number, itemId: number, cuerpo: ProductoEntrada) =>
+    api.put<ProductoDeBuffet>(
+      `/api/buffet/productos/${itemId}?sucursal_id=${sucursalId}`, cuerpo,
+    ),
+  /** `cantidad` positiva repone, negativa descuenta (rotura, vencido). */
+  ajustar: (sucursalId: number, cuerpo: { item_id: number; cantidad: string; motivo: string }) =>
+    api.post<ProductoDeBuffet>(`/api/buffet/ajustes?sucursal_id=${sucursalId}`, cuerpo),
+  /** Con `reserva_id` se carga a la cancha y NO se cobra: se cobra con el turno. */
+  consumir: (
+    sucursalId: number,
+    cuerpo: {
+      lineas: { item_id: number; cantidad: string }[]
+      reserva_id?: number | null
+      medio_pago?: string | null
+    },
+  ) =>
+    api.post<{ id: number; numero: string; total: number; reserva_id: number | null }>(
+      `/api/buffet/consumos?sucursal_id=${sucursalId}`, cuerpo,
+    ),
+  consumosDe: (reservaId: number) =>
+    api.get<{ total: number; lineas: LineaDeConsumo[] }>(
+      `/api/buffet/reservas/${reservaId}/consumos`,
+    ),
+}
+
+// ── Turnos fijos (canchas fijas / series) ────────────────────────────────
+
+export interface SerieEntrada {
+  cancha_id: number
+  cliente_id: number
+  /** 0 = lunes … 6 = domingo. */
+  dia_semana: number
+  /** `HH:MM`. */
+  hora: string
+  duracion_min: number
+  desde: string
+  /** `null` = sin fin, que es el caso normal de una cancha fija. */
+  hasta: string | null
+  observaciones?: string | null
+}
+
+export interface Serie extends SerieEntrada {
+  id: number
+  activa: boolean
+  cliente: string
+  cancha: string
+  /** 🔑 Hasta cuándo hay reservas generadas. `null` = **ninguna**, o sea que la
+   *  serie existe y no está funcionando. Es lo que evita que una cancha fija se
+   *  apague sola al agotarse la ventana de 90 días. */
+  materializada_hasta: string | null
+  /** Reservas futuras vivas. Es lo que se cancela al dar de baja. */
+  proximas: number
+}
+
+/** Una fecha de la serie que no se pudo crear, **con el motivo**. */
+export interface Salteada {
+  comienza_at: string
+  /** `sin_tarifa` | `ocupada` | `fuera_de_horario`. */
+  motivo: string
+  detalle: string
+}
+
+export interface SerieCreada {
+  serie: Serie
+  creadas: Reserva[]
+  salteadas: Salteada[]
+}
+
+export const series = {
+  listar: () => api.get<Serie[]>('/api/reservas/series/listado'),
+  /** `hasta` acota hasta dónde generar; sin él, la ventana por defecto (90 días). */
+  crear: (cuerpo: SerieEntrada, hasta?: string) =>
+    api.post<SerieCreada>(
+      `/api/reservas/series${hasta ? `?hasta=${hasta}` : ''}`, cuerpo,
+    ),
+  /** Genera las ocurrencias que faltan de una serie ya creada. */
+  extender: (id: number, hasta?: string) =>
+    api.post<SerieCreada>(
+      `/api/reservas/series/${id}/extender${hasta ? `?hasta=${hasta}` : ''}`, {},
+    ),
+  /** Corta la cancha fija. Devuelve cuántas reservas futuras se cancelaron. */
+  darDeBaja: (id: number, cuerpo: { cancelar_futuras: boolean; motivo?: string }) =>
+    api.post<{ serie_id: number; canceladas: number }>(
+      `/api/reservas/series/${id}/baja`, cuerpo,
+    ),
 }

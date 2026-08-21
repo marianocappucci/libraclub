@@ -9,26 +9,30 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin, require_staff
 from app.db import obtener_sesion
 from app.models.enums import ESTADOS_QUE_OCUPAN, EstadoReserva
-from app.models.maestros import Cancha
+from app.models.maestros import Cancha, Cliente
 from app.models.reservas import Reserva, Serie
 from app.schemas.reservas import (
     BloqueoEntrada,
     CambioDeEstado,
     ReservaEntrada,
     ReservaSalida,
+    SalteadaSalida,
     SerieCreada,
+    SerieEnLista,
     SerieEntrada,
     SerieSalida,
 )
 from app.servicios import disponibilidad, tarifario
+from app.servicios import facturacion as servicio_facturacion
 from app.servicios import reservas as servicio
-from app.tiempo import TZ, ahora
+from app.tiempo import TZ, a_local, ahora
 
 router = APIRouter(prefix="/api/reservas", tags=["reservas"])
 
@@ -43,6 +47,12 @@ def _traducir(fn):
             raise HTTPException(409, str(exc)) from exc
         except servicio.TransicionInvalida as exc:
             raise HTTPException(409, str(exc)) from exc
+        except servicio.FueraDelHorario as exc:
+            # 422 y no 400: el pedido está bien formado y el dato es corregible
+            # —otra hora, u otro horario de atención cargado—, igual que
+            # `SinTarifa`. Un 400 lo leería como "el cliente mandó cualquier
+            # cosa", que manda a mirar el request y no la configuración.
+            raise HTTPException(422, str(exc)) from exc
         except tarifario.SinTarifa as exc:
             # 422 y no 500: falta un dato que el operador tiene que cargar, no
             # se rompió nada.
@@ -160,6 +170,81 @@ def vencer(
     return {"canceladas": cuantas}
 
 
+class FacturaSalida(BaseModel):
+    id: int
+    tipo: int
+    punto_venta: int
+    numero: int
+    fecha: str
+    total: float
+    #: Vacío mientras ARCA no lo haya dado. **No es un error**: la factura
+    #: existe y lo que falta es el CAE, que se reintenta.
+    cae: str = ""
+    cae_vto: str = ""
+
+
+@router.post("/{reserva_id}/facturar", response_model=FacturaSalida, status_code=201)
+async def facturar(
+    reserva_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    _: object = Depends(require_admin),
+):
+    """Emite el comprobante de una reserva.
+
+    🔑 **Admin y no staff.** El encargado de mostrador toma reservas y cobra; qué
+    se le factura a quién es del dueño. Es la misma línea que separa el alta de
+    canchas del alta de clientes en este producto.
+    """
+    reserva = sesion.get(Reserva, reserva_id)
+    if reserva is None:
+        raise HTTPException(404, "no existe esa reserva")
+    cliente = sesion.get(Cliente, reserva.cliente_id) if reserva.cliente_id else None
+    # El nombre de la cancha va a la línea del comprobante. Se resuelve acá y no
+    # dentro del servicio para que `servicios/facturacion.py` no dependa del
+    # modelo del dominio: ya depende de dos bases, alcanza.
+    cancha = sesion.get(Cancha, reserva.cancha_id)
+    try:
+        factura = await servicio_facturacion.facturar_reserva(
+            reserva, cliente, cancha.nombre if cancha else "cancha"
+        )
+    except servicio_facturacion.FacturacionNoConfigurada as e:
+        raise HTTPException(503, str(e)) from e
+    except servicio_facturacion.ReservaYaFacturada as e:
+        # 409 y no 400: el pedido está bien formado, lo que pasa es que el
+        # estado del recurso no lo admite.
+        raise HTTPException(409, str(e)) from e
+    except servicio_facturacion.SinPrecio as e:
+        raise HTTPException(422, str(e)) from e
+    sesion.commit()
+    return FacturaSalida(
+        id=factura["id"], tipo=factura["tipo"], punto_venta=factura["punto_venta"],
+        numero=factura["numero"], fecha=str(factura["fecha"]),
+        total=float(factura["total"]), cae=factura.get("cae") or "",
+        cae_vto=factura.get("cae_vto") or "",
+    )
+
+
+@router.get("/{reserva_id}/factura", response_model=FacturaSalida | None)
+def ver_factura(
+    reserva_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    _: object = Depends(require_staff),
+):
+    """El comprobante de una reserva, o `null`. Lo puede ver el mostrador."""
+    reserva = sesion.get(Reserva, reserva_id)
+    if reserva is None:
+        raise HTTPException(404, "no existe esa reserva")
+    factura = servicio_facturacion.factura_de_reserva(reserva)
+    if factura is None:
+        return None
+    return FacturaSalida(
+        id=factura["id"], tipo=factura["tipo"], punto_venta=factura["punto_venta"],
+        numero=factura["numero"], fecha=str(factura["fecha"]),
+        total=float(factura["total"]), cae=factura.get("cae") or "",
+        cae_vto=factura.get("cae_vto") or "",
+    )
+
+
 @router.post("/series", response_model=SerieCreada, status_code=201)
 def crear_serie(
     datos: SerieEntrada,
@@ -176,11 +261,14 @@ def crear_serie(
     return SerieCreada(
         serie=SerieSalida.model_validate(serie, from_attributes=True),
         creadas=[ReservaSalida.model_validate(r, from_attributes=True) for r in creadas],
-        salteadas=salteadas,
+        salteadas=[
+            SalteadaSalida(comienza_at=x.comienza_at, motivo=x.motivo, detalle=x.detalle)
+            for x in salteadas
+        ],
     )
 
 
-@router.get("/series/listado", response_model=list[SerieSalida])
+@router.get("/series/listado", response_model=list[SerieEnLista])
 def listar_series(
     sesion: Session = Depends(obtener_sesion),
     _: object = Depends(require_staff),
@@ -190,7 +278,137 @@ def listar_series(
     # `GET /api/reservas/series` entraría por ahí con `reserva_id="series"` y
     # contestaría un 422 confuso en vez de la lista. Con dos segmentos no hay
     # ambigüedad, y la ruta deja de depender del orden de declaración.
-    return list(sesion.scalars(select(Serie).order_by(Serie.dia_semana, Serie.hora)).all())
+    series = list(
+        sesion.scalars(select(Serie).order_by(Serie.dia_semana, Serie.hora)).all()
+    )
+    if not series:
+        return []
+
+    # Los tres agregados en una sola consulta y no una por serie: el listado de
+    # un complejo con veinte canchas fijas serían sesenta viajes a la base.
+    ahora_local = ahora()
+    filas = sesion.execute(
+        select(
+            Reserva.serie_id,
+            func.max(Reserva.comienza_at),
+            func.count(Reserva.id).filter(Reserva.comienza_at >= ahora_local),
+        )
+        .where(
+            Reserva.serie_id.in_([s.id for s in series]),
+            Reserva.estado.in_(ESTADOS_QUE_OCUPAN),
+        )
+        .group_by(Reserva.serie_id)
+    ).all()
+    por_serie = {f[0]: (f[1], f[2]) for f in filas}
+
+    canchas = {c.id: c.nombre for c in sesion.scalars(select(Cancha))}
+    clientes = {c.id: c.nombre for c in sesion.scalars(select(Cliente))}
+
+    salida = []
+    for serie in series:
+        ultima, proximas = por_serie.get(serie.id, (None, 0))
+        salida.append(
+            SerieEnLista(
+                **{c.name: getattr(serie, c.name) for c in Serie.__table__.columns
+                   if c.name in SerieSalida.model_fields},
+                cliente=clientes.get(serie.cliente_id, f"#{serie.cliente_id}"),
+                cancha=canchas.get(serie.cancha_id, f"#{serie.cancha_id}"),
+                materializada_hasta=a_local(ultima).date() if ultima else None,
+                proximas=proximas,
+            )
+        )
+    return salida
+
+
+@router.post("/series/{serie_id}/extender", response_model=SerieCreada)
+def extender_serie(
+    serie_id: int,
+    hasta: date | None = Query(default=None),
+    sesion: Session = Depends(obtener_sesion),
+    _: object = Depends(require_staff),
+):
+    """Genera las ocurrencias que faltan de una serie ya creada.
+
+    🔴 **Sin esto, una cancha fija se apaga sola a los 90 días.** Una serie sin
+    fin no materializa reservas infinitas —`HORIZONTE_SERIE`—, así que se genera
+    una ventana y se extiende. Hasta ahora sólo se generaba al crearla: pasada
+    la ventana, el grupo de los martes llegaba y el turno estaba libre para
+    cualquiera, sin que nada hubiera fallado.
+
+    Es idempotente en lo que importa: las ocurrencias que ya existen chocan
+    consigo mismas y salen como salteadas con motivo `ocupada`, no duplicadas.
+    """
+    serie = sesion.get(Serie, serie_id)
+    if serie is None:
+        raise HTTPException(404, "no existe esa serie")
+    if not serie.activa:
+        raise HTTPException(409, "esa serie está dada de baja")
+    creadas, salteadas = servicio.materializar_serie(sesion, serie, hasta)
+    sesion.commit()
+    return SerieCreada(
+        serie=SerieSalida.model_validate(serie, from_attributes=True),
+        creadas=[ReservaSalida.model_validate(r, from_attributes=True) for r in creadas],
+        salteadas=[
+            SalteadaSalida(comienza_at=x.comienza_at, motivo=x.motivo, detalle=x.detalle)
+            for x in salteadas
+        ],
+    )
+
+
+class BajaDeSerie(BaseModel):
+    #: Si además se cancelan las reservas futuras que quedaron generadas.
+    cancelar_futuras: bool = True
+    motivo: str = Field(default="", max_length=200)
+
+
+@router.post("/series/{serie_id}/baja", response_model=dict)
+def dar_de_baja_serie(
+    serie_id: int,
+    datos: BajaDeSerie,
+    sesion: Session = Depends(obtener_sesion),
+    _: object = Depends(require_staff),
+):
+    """Corta una cancha fija. Devuelve cuántas reservas futuras se cancelaron.
+
+    🔑 **Desactivar la serie NO borra sus reservas, y por eso `cancelar_futuras`
+    existe y viene en `True`.** Las ocurrencias ya materializadas son filas de
+    `reservas` como cualquier otra: sin cancelarlas, el grupo que dejó de venir
+    sigue ocupando la cancha todos los martes hasta que se agote la ventana, y
+    esos turnos no se pueden vender. Es el resultado que nadie espera de "dar de
+    baja".
+
+    🔴 **Sólo las FUTURAS.** Las pasadas se conservan tal cual: son historia
+    —se jugaron, se cobraron, están en la caja y en las facturas— y cancelarlas
+    reescribiría el pasado. La reserva de la semana que viene se cancela; la del
+    martes pasado, no.
+    """
+    serie = sesion.get(Serie, serie_id)
+    if serie is None:
+        raise HTTPException(404, "no existe esa serie")
+
+    canceladas = 0
+    if datos.cancelar_futuras:
+        futuras = sesion.scalars(
+            select(Reserva).where(
+                Reserva.serie_id == serie_id,
+                Reserva.comienza_at >= ahora(),
+                Reserva.estado.in_(ESTADOS_QUE_OCUPAN),
+            )
+        ).all()
+        for reserva in futuras:
+            # Por el servicio y no con un UPDATE masivo: la transición valida
+            # qué estados se pueden cancelar, y el motivo queda escrito en la
+            # reserva — que es lo que después contesta "por qué se cayó este
+            # turno".
+            servicio.cambiar_estado(
+                sesion, reserva.id, EstadoReserva.CANCELADA,
+                motivo=datos.motivo or f"Baja de la cancha fija #{serie_id}",
+            )
+            canceladas += 1
+
+    serie.activa = False
+    sesion.commit()
+    return {"serie_id": serie_id, "canceladas": canceladas}
 
 
 def _con_zona(valor: datetime) -> datetime:

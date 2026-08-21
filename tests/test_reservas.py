@@ -212,7 +212,11 @@ def test_la_serie_saltea_la_fecha_ocupada_y_deja_las_demas(
     # Cinco martes en septiembre de 2026: 1, 8, 15, 22, 29. El 15 está bloqueado.
     assert len(creadas) == 4
     assert len(salteadas) == 1
-    assert salteadas[0].date() == tercer_martes
+    # `Salteada` y no un `datetime` pelado desde el 2026-08-21: cada una dice
+    # POR QUÉ, que es lo que la pantalla necesita para mandar al operador a la
+    # pantalla correcta —Tarifas, Horario de atención o la grilla—.
+    assert salteadas[0].comienza_at.date() == tercer_martes
+    assert salteadas[0].motivo == "ocupada"
 
     # Y las cuatro quedaron **realmente** en la base: que el servicio devuelva
     # objetos no prueba que el commit las haya escrito.

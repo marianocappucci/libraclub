@@ -10,17 +10,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.enums import ESTADOS_QUE_OCUPAN, EstadoReserva
-from app.models.maestros import Cancha, Feriado
+from app.models.maestros import Cancha
 from app.models.reservas import Reserva
-from app.servicios import tarifario
+from app.servicios import horarios, tarifario
 from app.tiempo import TZ, a_local
-
-#: Horario por defecto del complejo, mientras no exista una tabla de
-#: disponibilidad semanal por cancha. **Es un supuesto, no un relevamiento** —
-#: ver TASKS.md. Cuando entre el horario configurable, esto se borra; hasta
-#: entonces está acá arriba y con nombre, y no metido en medio de una función.
-APERTURA = time(8, 0)
-CIERRE = time(0, 0)  # medianoche: se trata como "fin del día"
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,24 +45,33 @@ def grilla_del_dia(
 ) -> list[Turno]:
     """Los turnos de una cancha en un día, ocupados y libres.
 
-    El paso de la grilla es `cancha.duracion_turno_min`. Una reserva que no cae
-    en la grilla —un torneo de tres horas que arranca a las 17:20— **igual
-    aparece**: se dibuja sobre los casilleros que toca. Alinear la vista a la
-    grilla escondería reservas reales, que es peor que una fila despareja.
-    """
-    comienzo = datetime.combine(dia, APERTURA, tzinfo=TZ)
-    fin = _fin_del_dia(dia)
-    paso = timedelta(minutes=cancha.duracion_turno_min)
+    Los casilleros salen del **horario de atención** de esa cancha ese día (ver
+    `servicios/horarios.py`), que puede ser más de una franja: un complejo que
+    abre de 9 a 13 y de 16 a 24 no tiene casilleros entre las 13 y las 16. El
+    paso es `cancha.duracion_turno_min`.
 
-    cerrado = sesion.scalars(
-        select(Feriado).where(
-            Feriado.sucursal_id == cancha.sucursal_id,
-            Feriado.dia == dia,
-            Feriado.cerrado.is_(True),
-        )
-    ).first()
-    if cerrado is not None:
-        return []
+    Una reserva que no cae en la grilla —un torneo de tres horas que arranca a
+    las 17:20— **igual aparece**: se dibuja sobre los casilleros que toca.
+    Alinear la vista a la grilla escondería reservas reales, que es peor que una
+    fila despareja.
+
+    🔑 **Y una reserva que quedó FUERA de todo horario también aparece**, como
+    casillero propio al final. Pasa apenas alguien achica el horario de un
+    complejo que ya venía trabajando: las reservas viejas de las 7 de la mañana
+    no dejan de existir porque ahora se abra a las 9. Esconderlas sería la peor
+    versión del cambio — el turno sigue vendido y nadie lo ve.
+    """
+    intervalos = horarios.franjas_del_dia(sesion, cancha, dia)
+    # Los del día anterior, para saber si una reserva de la madrugada ya quedó
+    # dibujada en la grilla de ayer: un complejo que cierra a las 02:00 tiene su
+    # jornada del viernes terminando el sábado, y el turno de las 00:30 pertenece
+    # al viernes. Sin esto se dibujaría dos veces.
+    de_ayer = horarios.franjas_del_dia(sesion, cancha, dia - timedelta(days=1))
+
+    inicio_dia = datetime.combine(dia, time(0, 0), tzinfo=TZ)
+    fin_dia = _fin_del_dia(dia)
+    desde = min([inicio_dia, *(i for i, _ in intervalos)])
+    hasta = max([fin_dia, *(f for _, f in intervalos)])
 
     reservas = list(
         sesion.scalars(
@@ -77,52 +79,74 @@ def grilla_del_dia(
             .where(
                 Reserva.cancha_id == cancha.id,
                 Reserva.estado.in_(ESTADOS_QUE_OCUPAN),
-                Reserva.comienza_at < fin,
-                Reserva.termina_at > comienzo,
+                Reserva.comienza_at < hasta,
+                Reserva.termina_at > desde,
             )
             .order_by(Reserva.comienza_at)
         ).all()
     )
 
     turnos: list[Turno] = []
-    momento = comienzo
-    while momento + paso <= fin:
-        termina = momento + paso
-        ocupa = next(
-            (
-                r
-                for r in reservas
-                if r.comienza_at < termina and r.termina_at > momento
-            ),
-            None,
-        )
-        if ocupa is not None:
-            turnos.append(
-                Turno(
-                    comienza_at=momento,
-                    termina_at=termina,
-                    libre=False,
-                    reserva_id=ocupa.id,
-                    estado=ocupa.estado,
-                    cliente=ocupa.cliente.nombre if ocupa.cliente else None,
-                    motivo=ocupa.motivo,
+    dibujadas: set[int] = set()
+    paso = timedelta(minutes=cancha.duracion_turno_min)
+
+    for comienzo, fin in intervalos:
+        momento = comienzo
+        while momento + paso <= fin:
+            termina = momento + paso
+            ocupa = next(
+                (r for r in reservas if r.comienza_at < termina and r.termina_at > momento),
+                None,
+            )
+            if ocupa is not None:
+                dibujadas.add(ocupa.id)
+                turnos.append(_ocupado(ocupa, momento, termina))
+            else:
+                turnos.append(
+                    Turno(
+                        comienza_at=momento,
+                        termina_at=termina,
+                        libre=True,
+                        precio=_precio(sesion, cancha, momento) if con_precio else None,
+                    )
                 )
-            )
-        else:
-            precio = None
-            if con_precio:
-                try:
-                    precio, _ = tarifario.precio_y_sena(sesion, cancha, momento)
-                except tarifario.SinTarifa:
-                    # Un turno sin tarifa **se muestra igual, sin precio**. Si se
-                    # escondiera, la franja sin precio cargado sería invisible y
-                    # nadie se enteraría de que falta cargarla.
-                    precio = None
-            turnos.append(
-                Turno(comienza_at=momento, termina_at=termina, libre=True, precio=precio)
-            )
-        momento = termina
+            momento = termina
+
+    for reserva in reservas:
+        if reserva.id in dibujadas:
+            continue
+        if a_local(reserva.comienza_at).date() != dia:
+            continue
+        # Si alguna franja de ayer la contiene, ya se dibujó en la grilla de ayer.
+        if any(i <= reserva.comienza_at and reserva.termina_at <= f for i, f in de_ayer):
+            continue
+        turnos.append(_ocupado(reserva, reserva.comienza_at, reserva.termina_at))
+
+    turnos.sort(key=lambda t: t.comienza_at)
     return turnos
+
+
+def _ocupado(reserva: Reserva, comienza_at: datetime, termina_at: datetime) -> Turno:
+    return Turno(
+        comienza_at=comienza_at,
+        termina_at=termina_at,
+        libre=False,
+        reserva_id=reserva.id,
+        estado=reserva.estado,
+        cliente=reserva.cliente.nombre if reserva.cliente else None,
+        motivo=reserva.motivo,
+    )
+
+
+def _precio(sesion: Session, cancha: Cancha, momento: datetime) -> Decimal | None:
+    try:
+        precio, _ = tarifario.precio_y_sena(sesion, cancha, momento)
+    except tarifario.SinTarifa:
+        # Un turno sin tarifa **se muestra igual, sin precio**. Si se escondiera,
+        # la franja sin precio cargado sería invisible y nadie se enteraría de
+        # que falta cargarla.
+        return None
+    return precio
 
 
 def grilla_de_la_semana(

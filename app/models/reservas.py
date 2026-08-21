@@ -83,7 +83,6 @@ class Serie(Base, Auditable, Anotable):
 
 class Reserva(Base, Auditable, Anotable):
     """Una cancha ocupada durante un intervalo. También los bloqueos.
-
     Un bloqueo por mantenimiento, lluvia o torneo es una fila de esta tabla con
     `estado = 'bloqueo'` y sin cliente. **No una tabla aparte**: un constraint
     sólo puede mirar su propia tabla, así que un bloqueo de otro lado no podría
@@ -152,6 +151,16 @@ class Reserva(Base, Auditable, Anotable):
     #: Motivo del bloqueo, o de la cancelación. Texto libre del operador.
     motivo: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
+    #: El comprobante de esta reserva, **en la base de LibraCore**.
+    #:
+    #: Sin `ForeignKey` a propósito: la factura vive en OTRA base (ver
+    #: `servicios/facturacion.py`), así que no hay integridad referencial que
+    #: declarar. Lo que impide facturar dos veces es el índice único parcial de
+    #: la migración `0002` — no una FK, y tampoco el `if` de Python: dos clicks
+    #: simultáneos en «Facturar» pasan los dos por el `if` antes de que
+    #: cualquiera escriba.
+    factura_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     cancha = relationship("Cancha")
     cliente = relationship("Cliente")
 
@@ -172,6 +181,20 @@ class Reserva(Base, Auditable, Anotable):
         CheckConstraint("precio IS NULL OR precio >= 0", name="ck_reservas_precio"),
         CheckConstraint(
             "sena IS NULL OR precio IS NULL OR sena <= precio", name="ck_reservas_sena"
+        ),
+        # Una factura pertenece a UNA reserva. Parcial porque `factura_id` es
+        # nulo mientras no se facturó, y en PostgreSQL los nulos no colisionan
+        # en un UNIQUE — pero el índice parcial lo deja explícito.
+        #
+        # ⚠️ Se declara acá porque **la migración `0002` lo crea y el modelo no
+        # lo declaraba**: `alembic check` venía rojo desde entonces, proponiendo
+        # borrarlo. Un check que falla por deriva vieja deja de servir para
+        # detectar la deriva nueva.
+        Index(
+            "uq_reservas_factura",
+            "factura_id",
+            unique=True,
+            postgresql_where="factura_id IS NOT NULL",
         ),
         # 🔑 **La garantía del producto.**
         #
