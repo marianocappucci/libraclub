@@ -82,17 +82,33 @@ class SerieSalida(BaseModel):
     activa: bool
 
 
+class SalteadaSalida(BaseModel):
+    """Una fecha de la serie que no se pudo crear, con el motivo."""
+
+    comienza_at: datetime
+    #: Código estable para la pantalla: `sin_tarifa`, `ocupada`,
+    #: `fuera_de_horario`.
+    motivo: str
+    #: El mensaje de la excepción, que nombra la cancha y el horario del día.
+    detalle: str
+
+
 class SerieCreada(BaseModel):
     """El resultado de materializar una serie.
 
     Devuelve las salteadas y no sólo las creadas: una cancha fija que chocó con
     un torneo el tercer martes tiene que decírselo al operador **en el momento**,
     no dejar que lo descubra el martes.
+
+    🔑 **Y con el motivo de cada una.** "Se saltearon 3 de 13" no alcanza: si fue
+    por falta de tarifa el operador carga la tarifa, si fue por horario revisa el
+    horario, y si fue por superposición le avisa al cliente. Sin el motivo tiene
+    que ir a buscar cada fecha a la grilla.
     """
 
     serie: SerieSalida
     creadas: list[ReservaSalida]
-    salteadas: list[datetime]
+    salteadas: list[SalteadaSalida]
 
 
 class TurnoSalida(BaseModel):

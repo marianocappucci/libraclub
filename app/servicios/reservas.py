@@ -6,6 +6,7 @@ La regla que ordena este módulo: **la aplicación valida para dar un mensaje
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
@@ -318,9 +319,34 @@ def vencer_provisorias(sesion: Session, momento: datetime | None = None) -> int:
     return int(resultado.rowcount or 0)
 
 
+@dataclass(frozen=True, slots=True)
+class Salteada:
+    """Una ocurrencia de la serie que no se pudo crear, y por qué.
+
+    `motivo` es un código estable para la pantalla —`sin_tarifa`, `ocupada`,
+    `fuera_de_horario`— y `detalle` el mensaje que ya arma la excepción, que
+    nombra la cancha y el horario del día.
+    """
+
+    comienza_at: datetime
+    motivo: str
+    detalle: str
+
+
+#: Qué código le corresponde a cada excepción. Es un dict y no una cadena de
+#: `isinstance` para que agregar una causa nueva sea una línea acá **y** falle
+#: ruidosamente si alguien agrega la excepción al `except` y se olvida del
+#: motivo, en vez de mandar un código vacío a la pantalla.
+_MOTIVO: dict[type, str] = {
+    tarifario.SinTarifa: "sin_tarifa",
+    Superpuesta: "ocupada",
+    FueraDelHorario: "fuera_de_horario",
+}
+
+
 def materializar_serie(
     sesion: Session, serie: Serie, hasta: date | None = None
-) -> tuple[list[Reserva], list[datetime]]:
+) -> tuple[list[Reserva], list[Salteada]]:
     """Genera las reservas de una cancha fija. Devuelve (creadas, salteadas).
 
     **Una ocurrencia que choca no aborta la serie**: se saltea y se informa. Una
@@ -330,6 +356,11 @@ def materializar_serie(
     Lo que hace eso posible es el `SAVEPOINT` de `_guardar`, no un `try` acá: sin
     savepoint, el `IntegrityError` de la que choca deja la transacción abortada y
     todas las siguientes fallan también.
+
+    🔑 **Cada salteada dice POR QUÉ.** "Se saltearon 3 de 13" no le sirve al
+    encargado: si fue por falta de tarifa carga la tarifa, si fue por horario
+    revisa el horario, y si fue por superposición le avisa al cliente. Sin el
+    motivo tiene que ir a buscar cada fecha a la grilla.
     """
     tope = hasta or (a_local(ahora()).date() + HORIZONTE_SERIE)
     if serie.hasta is not None:
@@ -343,7 +374,7 @@ def materializar_serie(
     )
 
     creadas: list[Reserva] = []
-    salteadas: list[datetime] = []
+    salteadas: list[Salteada] = []
     for ocurrencia in generate_occurrences(regla):
         # 🔴 `generate_occurrences` devuelve datetimes **naive**: hace
         # `datetime.combine(fecha, hora)` y no le pone zona. Guardarlos así deja
@@ -362,9 +393,18 @@ def materializar_serie(
                     serie_id=serie.id,
                 )
             )
-        except (Superpuesta, tarifario.SinTarifa):
-            # Las dos son "esta fecha no se puede, las demás sí". `SinTarifa`
-            # además es frecuente y esperable: una serie que cruza el cambio de
-            # temporada llega a semanas sin precio cargado.
-            salteadas.append(comienza_at)
+        except (Superpuesta, tarifario.SinTarifa, FueraDelHorario) as exc:
+            # Las tres son "esta fecha no se puede, las demás sí".
+            #
+            # `SinTarifa` es frecuente y esperable: una serie que cruza el cambio
+            # de temporada llega a semanas sin precio cargado.
+            #
+            # 🔴 **`FueraDelHorario` no estaba en esta lista y la serie abortaba
+            # entera.** El `except` cubría las dos excepciones que existían
+            # cuando se escribió; la validación de horario nació el 2026-08-21 y
+            # esta línea no se enteró. Con el complejo abriendo 09:00 y una serie
+            # de los martes a las 07:00, `POST /series` devolvía 422 y no creaba
+            # **ninguna** de las trece ocurrencias — ni siquiera las que sí
+            # entraban. Verificado contra PostgreSQL antes de tocarlo.
+            salteadas.append(Salteada(comienza_at, _MOTIVO[type(exc)], str(exc)))
     return creadas, salteadas
