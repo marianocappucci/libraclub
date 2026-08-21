@@ -17,6 +17,7 @@ import { CalendarDays, LayoutGrid, MapPin, Tags, UserCog, Users } from 'lucide-r
 import { useAuth } from '@/context/AuthContext'
 import { useSucursal } from '@/context/SucursalContext'
 import { SelectorDeSucursal } from '@/components/SelectorDeSucursal'
+import { LOGO } from '@/branding'
 
 type Usuario = { role?: string; name?: string; username?: string; sucursal?: string }
 
@@ -46,6 +47,19 @@ function useAuthConSucursal() {
 const Cascaron = createLayout<Usuario>({
   productName: 'LibraClub',
   productInitial: 'C',
+  // 🔑 El `logo` le gana a `icon`: son dos formas de llenar el mismo hueco y el
+  // logo es la más específica. Se deja `icon` igual porque es el piso si algún
+  // día se saca el logo, y porque `CalendarDays` es el mismo dibujo que la
+  // Agenda — el ítem del menú y el encabezado no se confunden porque el
+  // encabezado ahora muestra el logo.
+  //
+  // El override de colapsado NO es decorativo: con la sidebar en modo icono el
+  // ancho útil son 32px, y sin bajarlo el logo se sale de la barra.
+  logo: {
+    src: LOGO,
+    alt: 'LibraClub',
+    className: 'h-8 w-8 group-data-[collapsible=icon]:h-7 group-data-[collapsible=icon]:w-7',
+  },
   icon: CalendarDays,
   homeTo: '/agenda',
   navSections: [
