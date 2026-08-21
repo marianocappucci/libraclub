@@ -61,7 +61,12 @@ def dibujar(lado: int, margen: float, redondeado: bool) -> Image.Image:
         d.rectangle([0, 0, g - 1, g - 1], fill=MARCA)
 
     m = int(g * margen)
-    izq, arr, der, aba = m, int(g * 0.30) if margen < 0.2 else m + int(g * 0.06), g - m, g - (int(g * 0.30) if margen < 0.2 else m + int(g * 0.06))
+    # La cancha es apaisada: ocupa todo el ancho util y menos alto, que es lo que
+    # la hace leerse como cancha y no como un cuadrado con lineas. En el maskable
+    # el margen ya es grande, asi que ahi el alto sale del propio margen.
+    borde_vertical = int(g * 0.30) if margen < 0.2 else m + int(g * 0.06)
+    izq, der = m, g - m
+    arr, aba = borde_vertical, g - borde_vertical
     grosor = max(2, int(g * 0.022))
 
     # El rectángulo de la cancha, la línea del medio y el círculo central: los
