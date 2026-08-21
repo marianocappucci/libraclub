@@ -44,7 +44,7 @@ class MedioDePagoInvalido(ValueError):
     pass
 
 
-def _espejar_usuario(usuario: dict) -> int:
+def espejar_usuario(usuario: dict) -> int:
     """Copia el usuario de `libraauth` a la tabla `usuarios` de LibraCore.
 
     🔴 **Hace falta porque las dos bases están al revés que en el resto de la
@@ -61,6 +61,11 @@ def _espejar_usuario(usuario: dict) -> int:
     **nada lo lee**: `password_hash` aparece únicamente en el `schema.py` de
     LibraCore, que no autentica en ningún lado. Quien autentica es `libraauth`,
     contra la otra base. Esta fila es puramente referencial.
+
+    Es pública porque la usa también la cuenta corriente:
+    `cc_debitos.usuario_id` tiene la misma FK, y fiar una reserva no abre
+    ningún turno — así que no puede apoyarse en que `abrir_turno` ya haya
+    espejado al usuario.
     """
     conexion = libracore_core.get_connection()
     try:
@@ -82,7 +87,7 @@ def _espejar_usuario(usuario: dict) -> int:
 
 def abrir_turno(usuario: dict, monto_inicial: Decimal, notas: str = "") -> dict:
     """Abre la caja de este usuario con el efectivo con el que arranca."""
-    usuario_id = _espejar_usuario(usuario)
+    usuario_id = espejar_usuario(usuario)
     if db_turnos.get_turno_activo(usuario_id) is not None:
         raise TurnoYaAbierto("Ya tenés una caja abierta.")
     tid = db_turnos.create_turno(usuario_id, float(monto_inicial), notas)

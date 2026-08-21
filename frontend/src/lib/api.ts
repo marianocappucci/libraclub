@@ -353,3 +353,36 @@ export const sesion = {
   logout: () => api.post('/auth/logout', {}),
   yo: () => api.get<{ username: string; role?: string }>('/auth/me'),
 }
+
+export interface SaldoDeCuenta {
+  cliente_id: number
+  cliente: string
+  /** Positivo = debe. Negativo = tiene saldo a favor. Lo calcula el backend. */
+  saldo: number
+}
+
+export interface MovimientoDeCuenta {
+  fecha: string
+  /** `debito` suma deuda, `credito` la baja. */
+  tipo: string
+  concepto: string
+  /** 🔑 **Siempre positivo**: el signo lo pone `tipo`, no el número. */
+  monto: number
+  medio: string
+  usuario_nombre: string | null
+}
+
+export const cuentaCorriente = {
+  /** Fía una reserva: queda como deuda del cliente. */
+  cargar: (reservaId: number) =>
+    api.post<SaldoDeCuenta>(`/api/cuenta-corriente/reservas/${reservaId}/cargar`, {}),
+  /** Un pago a cuenta. Exige turno de caja abierto — el backend contesta 409. */
+  pagar: (clienteId: number, cuerpo: { monto: string; medio_pago: string }) =>
+    api.post<SaldoDeCuenta>(`/api/cuenta-corriente/clientes/${clienteId}/pagos`, cuerpo),
+  ver: (clienteId: number) =>
+    api.get<SaldoDeCuenta & { movimientos: MovimientoDeCuenta[] }>(
+      `/api/cuenta-corriente/clientes/${clienteId}`,
+    ),
+  /** La pantalla de cobranza. De admin. */
+  deudores: () => api.get<SaldoDeCuenta[]>('/api/cuenta-corriente/deudores'),
+}
