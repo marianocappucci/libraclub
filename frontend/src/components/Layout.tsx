@@ -12,7 +12,9 @@
 // evitar.
 import { Outlet } from 'react-router-dom'
 import { createLayout } from 'libra-ui/Layout'
-import { CalendarDays, LayoutGrid, MapPin, Tags, UserCog, Users } from 'lucide-react'
+import {
+  CalendarDays, LayoutGrid, MapPin, Settings, Tags, UserCog, Users,
+} from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
 import { useSucursal } from '@/context/SucursalContext'
@@ -87,6 +89,9 @@ const Cascaron = createLayout<Usuario>({
         // link le daría 403. Un menú que ofrece lo que no se puede usar es peor
         // que no ofrecerlo.
         { to: '/usuarios', label: 'Usuarios', icon: UserCog, adminOnly: true },
+        // Configuración es de admin por los dos lados: el router de empresa
+        // lleva `require_admin` y el de SMTP lo exige por dentro.
+        { to: '/configuracion', label: 'Configuración', icon: Settings, adminOnly: true },
       ],
     },
   ],

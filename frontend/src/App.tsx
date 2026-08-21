@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { Layout } from '@/components/Layout'
 import { Agenda } from '@/pages/Agenda'
 import { Canchas } from '@/pages/Canchas'
+import { Configuracion } from '@/pages/Configuracion'
 import { Clientes } from '@/pages/Clientes'
 import { Login } from '@/pages/Login'
 import { Sucursales } from '@/pages/Sucursales'
@@ -28,6 +29,7 @@ function Ruteo() {
           <Route path="/clientes" element={<Clientes />} />
           <Route path="/sucursales" element={<Sucursales />} />
           <Route path="/usuarios" element={<Usuarios />} />
+          <Route path="/configuracion" element={<Configuracion />} />
           {/* Las rutas no llevan guarda de rol: el permiso lo decide el
               servidor, y una ruta escondida que igual carga datos no protege
               nada. Lo que las pantallas hacen es no ofrecer botones que van a

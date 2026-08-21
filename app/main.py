@@ -12,7 +12,13 @@ import os
 from fastapi import Depends, FastAPI
 from libraauth.bootstrap import ensure_default_admin
 from libraauth.models import Base as AuthBase
-from libracore.config_router import build_backup_router
+from libraauth.session_auth import build_smtp_settings_router
+from libraauth.smtp_settings import SmtpSettingsRepository
+from libracore.config_router import (
+    build_backup_router,
+    build_empresa_admin_router,
+    build_empresa_router,
+)
 from libracore.respaldo import Instancia
 
 from app import db
@@ -88,6 +94,29 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # restore contesta `ok` y no tiene efecto hasta que alguien reinicie el
     # contenedor, porque el pool sigue con la conexión vieja. La pantalla diría
     # que salió bien y los datos serían los de antes.
+    # Datos de la empresa y logo. Los dos routers son del motor: este producto no
+    # reimplementa nada, sólo les pone su dependencia de rol.
+    #
+    # **Todo admin, también la lectura.** Hasta hoy LibraClub no tenía ninguna
+    # pantalla de configuración, así que no hay ningún consumidor de la lectura
+    # que haya que dejar abierto — el día que la factura o el ticket necesiten
+    # el nombre de la empresa desde una pantalla de staff, se abre ahí y con ese
+    # motivo, no antes.
+    app.include_router(build_empresa_router(), dependencies=[Depends(require_admin)])
+    app.include_router(build_empresa_admin_router(), dependencies=[Depends(require_admin)])
+
+    # `GET`/`PUT`/`DELETE /admin/smtp`. El router ya exige rol admin por dentro,
+    # así que no lleva `dependencies`: quien pueda escribir ahí puede redirigir a
+    # dónde salen los enlaces de recuperación de contraseña de todos los
+    # usuarios.
+    #
+    # ⚠️ Esto NO enciende la recuperación de contraseña: `app/routers/auth.py`
+    # monta el router de `libraauth` **sin** `incluir_password_reset`. Lo que
+    # habilita es cargar el SMTP; encender la recuperación es una decisión
+    # aparte, con su propia pantalla de "olvidé mi contraseña" en el login.
+    app.state.smtp_settings = SmtpSettingsRepository(db.fabrica_de_sesiones())
+    app.include_router(build_smtp_settings_router())
+
     app.include_router(
         build_backup_router(
             _instancia_a_respaldar(config),
