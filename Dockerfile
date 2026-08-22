@@ -70,11 +70,11 @@ COPY migrations ./migrations
 # adentro. `app/asgi.py` mira primero acá.
 COPY --from=frontend-build /frontend/dist /opt/frontend-dist
 
-# `datos/` es el punto de montaje del volumen donde caen los ZIP de backup. Se
+# `data/` es el punto de montaje del volumen donde caen los ZIP de backup. Se
 # crea en la imagen para que nazca con el dueño correcto: Docker le copia el
 # propietario al volumen la primera vez, y si no existiera quedaría de root y el
 # proceso —que corre sin privilegios— no podría escribirlo.
-RUN mkdir -p /app/datos \
+RUN mkdir -p /app/data \
  && useradd -m -u 10001 libraclub && chown -R libraclub /app
 USER libraclub
 
