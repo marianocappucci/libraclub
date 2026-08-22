@@ -1,3 +1,6 @@
 node_modules/
 dist/
 *.tsbuildinfo
+
+# Reporte JUnit que emite el paso de tests del CI para su gate.
+vitest.xml
