@@ -89,3 +89,51 @@ class MedioPago(enum.Enum):
     CREDITO = "credito"
     MERCADOPAGO = "mercadopago"
     OTRO = "otro"
+
+
+class FormatoTorneo(enum.Enum):
+    """Cómo se define el campeón. Se elige al crear el torneo y no cambia.
+
+    🔴 **No cambia porque el fixture ya está sorteado.** Pasar de liga a llaves a
+    mitad de camino no es editar un campo: es tirar los partidos jugados. Lo
+    impide el servicio, que sólo deja sortear una vez.
+    """
+
+    #: Llaves directas: el que pierde se va.
+    ELIMINACION = "eliminacion"
+    #: Todos contra todos y la tabla decide. Sin playoff y **sin zonas** — sus
+    #: partidos van con `zona_id` en `NULL`.
+    LIGA = "liga"
+    #: Grupos y después playoff entre los que clasifican.
+    ZONAS = "zonas"
+
+
+class EstadoTorneo(enum.Enum):
+    """Dónde está parado el torneo.
+
+    🔑 **No hay `EN_CURSO`, y es a propósito.** "Empezó" es lo mismo que "tiene
+    algún partido con resultado", y eso ya está en la base: agregar un estado
+    obligaría a acordarse de moverlo en cada carga de resultado, y el día que
+    alguien se olvide el torneo diría "sorteado" con media llave jugada. Se
+    deriva al leer, que no puede desincronizarse.
+    """
+
+    #: Inscribiendo. Es el único estado en el que se puede sortear.
+    ARMADO = "armado"
+    #: Ya tiene fixture. Los competidores no se tocan más.
+    SORTEADO = "sorteado"
+    #: Se jugó todo. El campeón queda congelado.
+    FINALIZADO = "finalizado"
+    CANCELADO = "cancelado"
+
+
+class EtapaTorneo(enum.Enum):
+    """De qué parte del torneo es un partido.
+
+    Separa las dos formas de jugar que conviven en un torneo por zonas: la fase
+    de grupos, donde se suman puntos, y el playoff, donde el que pierde se va.
+    Un torneo de liga tiene sólo `GRUPOS`; uno de eliminación, sólo `LLAVES`.
+    """
+
+    GRUPOS = "grupos"
+    LLAVES = "llaves"
