@@ -28,6 +28,7 @@ from libraauth.session_auth import (
     demo_username,
 )
 from libraauth.smtp_settings import SmtpSettingsRepository, resolver_smtp_config
+from libraauth.terminos import TerminosRepository, build_terminos_router
 from libracore.config_router import (
     build_backup_router,
     build_empresa_admin_router,
@@ -310,6 +311,13 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # habilita es cargar el SMTP; encender la recuperación es una decisión
     # aparte, con su propia pantalla de "olvidé mi contraseña" en el login.
     app.state.smtp_settings = SmtpSettingsRepository(db.fabrica_de_sesiones())
+    # Terminos y Condiciones del Servicio: la prueba de la aceptacion y lo que
+    # enciende el gate. MISMA fabrica de sesiones que el SMTP y los usuarios --
+    # la tabla tiene FK a `usuarios`, que no siempre vive en la base del dominio.
+    #
+    # 🔴 Sin esta linea el gate NO corta y la instancia no falla: se queda sin
+    # gate, en silencio. Por eso cada producto tiene un test que lo prueba.
+    app.state.terminos = TerminosRepository(db.fabrica_de_sesiones())
     app.state.password_reset = PasswordResetService(
         db.fabrica_de_sesiones(),
         product_name="LibraClub",
@@ -322,6 +330,9 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
         smtp_config=lambda: resolver_smtp_config(db.fabrica_de_sesiones()),
     )
     app.include_router(build_smtp_settings_router())
+    # `GET /terminos`, `POST /terminos/aceptar`, `GET /terminos/historial`.
+    # NO se gatea desde afuera: es el unico camino para salir del gate.
+    app.include_router(build_terminos_router())
 
     app.include_router(
         build_backup_router(
