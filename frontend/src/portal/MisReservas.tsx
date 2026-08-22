@@ -1,6 +1,6 @@
 /** Las reservas del jugador: qué tiene, qué pagó y qué puede cancelar. */
 import { useCallback, useEffect, useState } from 'react'
-import { CalendarX } from 'lucide-react'
+import { CalendarX, UserPlus } from 'lucide-react'
 
 import { portal } from '@/lib/api'
 import type { ReservaDelJugador } from '@/lib/api'
@@ -8,6 +8,7 @@ import { fecha, hora, pesos } from '@/lib/fechas'
 import { useJugador } from '@/portal/JugadorContext'
 import { AvisoDeError } from '@/components/listado'
 import { Button } from '@/components/ui/button'
+import { DialogoDePublicar } from '@/portal/DialogoDePublicar'
 
 /** Cómo se le cuenta al jugador en qué anda su turno.
  *
@@ -36,6 +37,7 @@ export function MisReservas() {
   const [filas, setFilas] = useState<ReservaDelJugador[]>([])
   const [error, setError] = useState<string | null>(null)
   const [cargando, setCargando] = useState(true)
+  const [publicando, setPublicando] = useState<ReservaDelJugador | null>(null)
 
   const recargar = useCallback(() => {
     if (!jugador) {
@@ -105,6 +107,20 @@ export function MisReservas() {
                   {/* Sólo las futuras se pueden cancelar: la del martes pasado
                       ya se jugó, y ofrecer cancelarla sería ofrecer algo que el
                       servidor rechaza. */}
+                  {/* 🔑 Publicar sólo sobre una CONFIRMADA: el backend rechaza
+                      una provisoria —todavía se puede caer por falta de pago— y
+                      ofrecerlo acá sería un botón que siempre falla. */}
+                  {esFutura(r) && r.estado === 'confirmada' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label={`Buscar jugadores para el turno del ${fecha(r.comienza_at)}`}
+                      onClick={() => setPublicando(r)}
+                    >
+                      <UserPlus className="size-4" />
+                      Falta uno
+                    </Button>
+                  )}
                   {esFutura(r) && r.estado !== 'cancelada' && (
                     <Button
                       variant="ghost"
@@ -122,6 +138,12 @@ export function MisReservas() {
           })}
         </ul>
       )}
+
+      <DialogoDePublicar
+        reserva={publicando}
+        onCerrar={() => setPublicando(null)}
+        onPublicado={recargar}
+      />
     </div>
   )
 }

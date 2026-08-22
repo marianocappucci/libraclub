@@ -34,6 +34,16 @@ export function PortalLayout() {
             </NavLink>
             {jugador && (
               <NavLink
+                to="/partidos"
+                className={({ isActive }) =>
+                  `rounded-md px-2 py-1 ${isActive ? 'bg-muted font-medium' : 'hover:bg-muted'}`
+                }
+              >
+                Falta uno
+              </NavLink>
+            )}
+            {jugador && (
+              <NavLink
                 to="/mis-reservas"
                 className={({ isActive }) =>
                   `rounded-md px-2 py-1 ${isActive ? 'bg-muted font-medium' : 'hover:bg-muted'}`

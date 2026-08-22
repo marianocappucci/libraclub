@@ -613,3 +613,51 @@ export const portal = {
       `/api/portal/pagos/${pagoId}/simular?aprobado=${aprobado}`, {},
     ),
 }
+
+// ── «Falta uno» ──────────────────────────────────────────────────────────
+
+/** Un partido en el listado. **Sin datos de contacto** — a propósito: el
+ *  listado lo ve cualquiera con cuenta. */
+export interface PartidoAbierto {
+  id: number
+  cancha: string
+  deporte: string
+  comienza_at: string
+  termina_at: string
+  organizador: string
+  faltan: number
+  nota: string | null
+}
+
+/** El detalle. `organizador_telefono` y los `telefono` de los anotados vienen
+ *  `null` **salvo que quien pregunta juegue ahí** — el servidor lo decide, no
+ *  la pantalla. */
+export interface PartidoDetalle {
+  id: number
+  cancha: string
+  comienza_at: string
+  termina_at: string
+  organizador: string
+  organizador_telefono: string | null
+  faltan: number
+  nota: string | null
+  abierta: boolean
+  soy_organizador: boolean
+  estoy_anotado: boolean
+  anotados: { nombre: string; telefono: string | null; soy_yo: boolean }[]
+}
+
+export const partidos = {
+  abiertos: () => api.get<PartidoAbierto[]>('/api/portal/partidos'),
+  mios: () => api.get<PartidoDetalle[]>('/api/portal/partidos/mios'),
+  ver: (id: number) => api.get<PartidoDetalle>(`/api/portal/partidos/${id}`),
+  publicar: (reservaId: number, cuerpo: { faltan: number; nota?: string }) =>
+    api.post<PartidoDetalle>(
+      `/api/portal/reservas/${reservaId}/buscar-jugadores`, cuerpo),
+  sumarme: (id: number) =>
+    api.post<PartidoDetalle>(`/api/portal/partidos/${id}/sumarme`, {}),
+  bajarme: (id: number) =>
+    api.post<PartidoDetalle>(`/api/portal/partidos/${id}/bajarme`, {}),
+  cerrar: (id: number) =>
+    api.post<PartidoDetalle>(`/api/portal/partidos/${id}/cerrar`, {}),
+}

@@ -31,6 +31,7 @@ from app.models.maestros import Cancha, CuentaDeJugador
 from app.models.reservas import PagoDeReserva, Reserva
 from app.portal_sesion import borrar_cookie, crear_cookie, cuenta_actual, exigir_jugador
 from app.servicios import pagos as servicio_pagos
+from app.servicios import partidos as servicio_partidos
 from app.servicios import portal as servicio
 from app.tiempo import TZ, hoy
 
@@ -252,6 +253,119 @@ def cancelar(
         raise HTTPException(409, str(e)) from e
     sesion.commit()
     return {"id": reserva.id, "estado": reserva.estado.value}
+
+
+# ── «Falta uno»: completar el equipo de un partido ya reservado ──────────
+
+
+class PublicarEntrada(BaseModel):
+    faltan: int = Field(ge=1, le=20)
+    nota: str = Field(default="", max_length=200)
+
+
+@router.post("/reservas/{reserva_id}/buscar-jugadores", status_code=201)
+def publicar_partido(
+    reserva_id: int,
+    datos: PublicarEntrada,
+    sesion: Session = Depends(obtener_sesion),
+    cuenta: CuentaDeJugador = Depends(_jugador),
+):
+    """«Faltan 2 para el partido del jueves». Sobre una reserva propia y pagada."""
+    try:
+        busqueda = servicio_partidos.publicar(
+            sesion, cuenta=cuenta, reserva_id=reserva_id,
+            faltan=datos.faltan, nota=datos.nota,
+        )
+    except servicio_partidos.NoSePuedePublicar as e:
+        raise HTTPException(422, str(e)) from e
+    sesion.commit()
+    return servicio_partidos.detalle(sesion, cuenta, busqueda.id)
+
+
+@router.get("/partidos")
+def partidos_abiertos(
+    sesion: Session = Depends(obtener_sesion),
+    _: CuentaDeJugador = Depends(_jugador),
+):
+    """Los partidos que buscan jugadores.
+
+    🔴 **Pide sesión, y no trae contacto de nadie.** Lo primero porque publicar
+    en internet abierto a qué hora juega cada uno y en qué cancha es más de lo
+    que hace falta; lo segundo porque con teléfonos, alcanzaría con registrarse
+    para levantar la agenda de todos los que juegan en el complejo.
+    """
+    return servicio_partidos.listar(sesion)
+
+
+@router.get("/partidos/mios")
+def mis_partidos(
+    sesion: Session = Depends(obtener_sesion),
+    cuenta: CuentaDeJugador = Depends(_jugador),
+):
+    """Los partidos donde el jugador está anotado. **Con** contacto: juega ahí.
+
+    ⚠️ Va antes de `/partidos/{id}` a propósito: declarada después, la ruta con
+    parámetro se la come y `mios` llegaría como id, dando un 422 confuso.
+    """
+    return servicio_partidos.mis_partidos(sesion, cuenta)
+
+
+@router.get("/partidos/{busqueda_id}")
+def ver_partido(
+    busqueda_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    cuenta: CuentaDeJugador = Depends(_jugador),
+):
+    """Un partido. El contacto sale **sólo si quien pregunta juega ahí**."""
+    try:
+        return servicio_partidos.detalle(sesion, cuenta, busqueda_id)
+    except servicio_partidos.PartidoCerrado as e:
+        raise HTTPException(404, str(e)) from e
+
+
+@router.post("/partidos/{busqueda_id}/sumarme", status_code=201)
+def sumarme(
+    busqueda_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    cuenta: CuentaDeJugador = Depends(_jugador),
+):
+    try:
+        servicio_partidos.sumarse(sesion, cuenta, busqueda_id)
+    except servicio_partidos.PartidoCerrado as e:
+        raise HTTPException(409, str(e)) from e
+    sesion.commit()
+    return servicio_partidos.detalle(sesion, cuenta, busqueda_id)
+
+
+@router.post("/partidos/{busqueda_id}/bajarme")
+def bajarme(
+    busqueda_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    cuenta: CuentaDeJugador = Depends(_jugador),
+):
+    try:
+        servicio_partidos.bajarse(sesion, cuenta, busqueda_id)
+    except servicio_partidos.PartidoCerrado as e:
+        raise HTTPException(404, str(e)) from e
+    sesion.commit()
+    return servicio_partidos.detalle(sesion, cuenta, busqueda_id)
+
+
+@router.post("/partidos/{busqueda_id}/cerrar")
+def cerrar_partido(
+    busqueda_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    cuenta: CuentaDeJugador = Depends(_jugador),
+):
+    """El organizador deja de buscar."""
+    try:
+        servicio_partidos.cerrar(sesion, cuenta, busqueda_id)
+    except servicio_partidos.NoEsTuPartido as e:
+        raise HTTPException(403, str(e)) from e
+    except servicio_partidos.PartidoCerrado as e:
+        raise HTTPException(404, str(e)) from e
+    sesion.commit()
+    return servicio_partidos.detalle(sesion, cuenta, busqueda_id)
 
 
 # ── El webhook de MercadoPago, que es lo que confirma ────────────────────

@@ -19,6 +19,7 @@ import { AuthProvider, useAuth } from '@/context/AuthContext'
 import { JugadorProvider } from '@/portal/JugadorContext'
 import { MisReservas } from '@/portal/MisReservas'
 import { PortalLayout } from '@/portal/PortalLayout'
+import { Partidos } from '@/portal/Partidos'
 import { PortalReservar } from '@/portal/PortalReservar'
 import { SucursalProvider } from '@/context/SucursalContext'
 
@@ -50,6 +51,7 @@ export function Ruteo() {
       >
         <Route path="/reservar" element={<PortalReservar />} />
         <Route path="/mis-reservas" element={<MisReservas />} />
+        <Route path="/partidos" element={<Partidos />} />
       </Route>
       <Route path="/*" element={<Backoffice />} />
     </Routes>
