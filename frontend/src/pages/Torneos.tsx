@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
+import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 import { Plus, Trophy } from 'lucide-react'
 
 import { torneos as api } from '@/lib/api'
@@ -105,7 +106,7 @@ export function Torneos() {
 
   return (
     <div className="space-y-3">
-      <EncabezadoDePantalla titulo={<h1 className="text-lg font-semibold">Torneos</h1>}>
+      <EncabezadoDePantalla titulo={<TituloPantalla icono={Trophy}>Torneos</TituloPantalla>}>
         {puedeEscribir && actual !== null && (
           <Button onClick={() => setAbierto(true)}>
             <Plus className="size-4" />

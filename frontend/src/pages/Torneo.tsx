@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Dices, Plus, Swords, Trash2, Trophy } from 'lucide-react'
+import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 
 import { canchas as apiCanchas, torneos as api } from '@/lib/api'
 import type {
@@ -101,10 +102,14 @@ export function Torneo() {
         </Link>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h1 className="flex items-center gap-2 text-lg font-semibold">
+            {/* El mismo icono que la entrada «Torneos» del sidebar: el icono
+                del título es lo que confirma dónde estás parado, y el detalle
+                sigue siendo esa sección. Lo sostiene el guard de
+                `titulos-con-icono`. */}
+            <TituloPantalla icono={Trophy}>
               {torneo.nombre}
               <EstadoDelTorneo torneo={{ estado: torneo.estado, jugados }} />
-            </h1>
+            </TituloPantalla>
             <p className="text-sm text-muted-foreground">
               {NOMBRE_DE_FORMATO[torneo.formato]} · {torneo.deporte} ·{' '}
               {fecha(torneo.desde)}
