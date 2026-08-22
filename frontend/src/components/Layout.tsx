@@ -13,7 +13,7 @@
 import { Outlet } from 'react-router-dom'
 import { createLayout } from 'libra-ui/Layout'
 import {
-  CalendarDays, Clock, CupSoda, LayoutGrid, MapPin, NotebookText, Repeat, ScrollText, Settings, Tags, UserCog, Users, Wallet,
+  CalendarDays, Clock, CupSoda, LayoutGrid, MapPin, NotebookText, Repeat, ScrollText, Settings, Tags, Trophy, UserCog, Users, Wallet,
 } from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
@@ -82,6 +82,11 @@ const Cascaron = createLayout<Usuario>({
         // Junto a la Agenda: una cancha fija ES agenda, y el encargado la
         // toca cuando el grupo pide o deja el turno — no cuando configura.
         { to: '/turnos-fijos', label: 'Turnos fijos', icon: Repeat },
+        // Con la agenda y los turnos fijos: los tres son formas de que una
+        // cancha quede ocupada. Un torneo programado bloquea turnos igual que
+        // una cancha fija, y el encargado lo toca durante el torneo — no
+        // cuando configura el complejo.
+        { to: '/torneos', label: 'Torneos', icon: Trophy },
         { to: '/caja', label: 'Caja', icon: Wallet },
         // Con la caja y la cuenta corriente: es lo que se toca durante el
         // turno, no cuando se configura el complejo.

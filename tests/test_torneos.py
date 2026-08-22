@@ -709,3 +709,109 @@ def test_las_dos_zonas_no_comparten_posicion_en_el_fixture(sesion, por_zonas):
     # Y las dos zonas usan efectivamente las mismas (ronda, orden).
     sin_zona = [(p.ronda, p.orden) for p in grupos]
     assert len(sin_zona) != len(set(sin_zona))
+
+
+def _resultado(sesion, torneo, uno: str, otro: str, suyos: int, ajenos: int):
+    """Carga el resultado de `uno` contra `otro`, sin depender de qué lado le tocó.
+
+    🔑 El sorteo decide quién queda del lado `a`, así que un test que escriba
+    `[(3, 0)]` a ciegas le estaría dando la victoria a cualquiera. Acá se dice
+    el resultado **desde el punto de vista de `uno`** y la orientación se
+    resuelve mirando el partido.
+    """
+    por_nombre = {c.nombre: c.id for c in servicio.competidores_de(sesion, torneo)}
+    a, b = por_nombre[uno], por_nombre[otro]
+    partido = next(
+        p
+        for p in servicio.partidos_de(sesion, torneo)
+        if {p.competidor_a_id, p.competidor_b_id} == {a, b}
+    )
+    derecho = partido.competidor_a_id == a
+    servicio.cargar_resultado(
+        sesion, partido, [(suyos, ajenos)] if derecho else [(ajenos, suyos)]
+    )
+
+
+def test_la_tabla_desempata_por_diferencia(sesion, liga):
+    """🔑 Tres empatados en puntos y la diferencia los ordena.
+
+    El test de arriba no alcanzaba: ahí los tres empatados tenían también la
+    misma diferencia, así que quitar el criterio de desempate no cambiaba nada
+    y la mutación sobrevivía. Acá los tres tienen 3 puntos y diferencias
+    distintas, y el orden alfabético —el que quedaría sin el desempate— es
+    justamente el equivocado.
+    """
+    _resultado(sesion, liga, "Pareja 1", "Pareja 2", 3, 0)
+    _resultado(sesion, liga, "Pareja 1", "Pareja 3", 3, 0)
+    _resultado(sesion, liga, "Pareja 1", "Pareja 4", 3, 0)
+    _resultado(sesion, liga, "Pareja 2", "Pareja 3", 5, 0)
+    _resultado(sesion, liga, "Pareja 3", "Pareja 4", 1, 0)
+    _resultado(sesion, liga, "Pareja 4", "Pareja 2", 1, 0)
+    sesion.commit()
+
+    tabla = servicio.tabla_de_posiciones(sesion, liga)[0]
+    assert [f.nombre for f in tabla.filas] == [
+        "Pareja 1",   # 9 puntos
+        "Pareja 2",   # 3 puntos, diferencia +1
+        "Pareja 4",   # 3 puntos, diferencia -3
+        "Pareja 3",   # 3 puntos, diferencia -7
+    ]
+    assert [f.puntos for f in tabla.filas] == [9, 3, 3, 3]
+    assert [f.diferencia for f in tabla.filas] == [9, 1, -3, -7]
+
+
+def test_las_zonas_se_reparten_en_serpentina(sesion, sucursal):
+    """🔑 La zona que recibe la mejor siembra recibe también la peor de la vuelta.
+
+    🔴 Repartiendo con `i % zonas` las cuatro siembras caen una en cada zona en
+    la primera vuelta, pero en la segunda la 3ª vuelve a la zona A y la 4ª a la
+    B: la A termina con la 1ª y la 3ª, y la B con la 2ª y la 4ª — o sea que la A
+    queda más fuerte. La serpentina compensa: **la 1ª y la 4ª van juntas**.
+
+    El test de las zonas distintas no lo veía porque con dos zonas las dos
+    formas de repartir ponen a la 1ª y la 2ª separadas.
+    """
+    torneo = Torneo(
+        sucursal_id=sucursal.id, nombre="Serpentina", deporte=Deporte.PADEL,
+        formato=FormatoTorneo.ZONAS, desde=date(2026, 9, 5), sets_para_ganar=2,
+        cantidad_zonas=2, clasifican_por_zona=2,
+    )
+    sesion.add(torneo)
+    sesion.commit()
+    inscribir(sesion, torneo, 8, sembrados=4)
+    servicio.sortear(sesion, torneo, semilla=21)
+    sesion.commit()
+
+    zona_de = {c.nombre: c.zona_id for c in servicio.competidores_de(sesion, torneo)}
+    assert zona_de["Pareja 1"] == zona_de["Pareja 4"], "la 1ª y la 4ª van juntas"
+    assert zona_de["Pareja 2"] == zona_de["Pareja 3"], "la 2ª y la 3ª van juntas"
+    assert zona_de["Pareja 1"] != zona_de["Pareja 2"]
+
+
+def test_la_tabla_desempata_por_lo_hecho_a_favor(sesion, liga):
+    """El tercer criterio, cuando puntos y diferencia empatan.
+
+    🔑 Hace falta su propio test: en el de la diferencia, las diferencias son
+    todas distintas, así que ese criterio resuelve solo y el de abajo nunca
+    llega a decidir nada — la mutación que lo saca sobrevive.
+
+    Tres equipos con dos empates cada uno: mismos puntos, misma diferencia, y
+    lo único que los separa es cuánto hicieron. El orden alfabético —el que
+    quedaría sin este criterio— pone a la Pareja 3 antes que a la 4, y es al
+    revés.
+    """
+    _resultado(sesion, liga, "Pareja 1", "Pareja 2", 1, 0)
+    _resultado(sesion, liga, "Pareja 1", "Pareja 3", 1, 0)
+    _resultado(sesion, liga, "Pareja 1", "Pareja 4", 1, 0)
+    _resultado(sesion, liga, "Pareja 2", "Pareja 3", 2, 2)
+    _resultado(sesion, liga, "Pareja 2", "Pareja 4", 3, 3)
+    _resultado(sesion, liga, "Pareja 3", "Pareja 4", 1, 1)
+    sesion.commit()
+
+    tabla = servicio.tabla_de_posiciones(sesion, liga)[0]
+    assert [f.puntos for f in tabla.filas] == [9, 2, 2, 2]
+    assert [f.diferencia for f in tabla.filas][1:] == [-1, -1, -1]
+    assert [f.a_favor for f in tabla.filas][1:] == [5, 4, 3]
+    assert [f.nombre for f in tabla.filas] == [
+        "Pareja 1", "Pareja 2", "Pareja 4", "Pareja 3",
+    ]

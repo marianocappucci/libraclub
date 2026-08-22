@@ -13,6 +13,8 @@ import { ForgotPassword, ResetPassword } from '@/pages/PasswordReset'
 import { Logs } from '@/pages/Logs'
 import { Sucursales } from '@/pages/Sucursales'
 import { Tarifas } from '@/pages/Tarifas'
+import { Torneo } from '@/pages/Torneo'
+import { Torneos } from '@/pages/Torneos'
 import { TurnosFijos } from '@/pages/TurnosFijos'
 import { Usuarios } from '@/pages/Usuarios'
 import { AuthProvider, useAuth } from '@/context/AuthContext'
@@ -90,6 +92,10 @@ function Backoffice() {
           <Route path="/canchas" element={<Canchas />} />
           <Route path="/tarifas" element={<Tarifas />} />
           <Route path="/turnos-fijos" element={<TurnosFijos />} />
+          <Route path="/torneos" element={<Torneos />} />
+          {/* El detalle va acá y no anidado: no comparte nada con el listado
+              salvo el camino, y anidarlo obligaría a un Outlet para nada. */}
+          <Route path="/torneos/:id" element={<Torneo />} />
           <Route path="/horarios" element={<Horarios />} />
           <Route path="/clientes" element={<Clientes />} />
           <Route path="/sucursales" element={<Sucursales />} />
