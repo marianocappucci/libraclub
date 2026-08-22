@@ -118,8 +118,49 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # `--reporter=default` mantiene la salida legible en el log; el `junit`
+      # agregado deja además el XML que lee el gate del paso siguiente. Los dos
+      # reporters conviven: el `--outputFile.junit` le da destino sólo al
+      # segundo.
       - name: Tests
-        run: npm run test
+        run: |
+          rm -f vitest.xml
+          npm run test -- --reporter=default --reporter=junit --outputFile.junit=vitest.xml
+
+      # 🔑 Mismo patrón que el gate de concurrencia del job de arriba, y por el
+      # mismo motivo: que la suite haya CORRIDO no se deduce de que el paso
+      # anterior haya salido en verde.
+      #
+      # 🔴 Lo que este gate agrega —y el exit code de `vitest run` NO cubre— son
+      # los tests SALTEADOS. Medido el 2026-08-22 sobre vitest 3.2.7: un
+      # `describe.skip` que envuelve la suite entera sale con **código 0**, así
+      # que un módulo que se saltea completo deja el job igual de verde que uno
+      # que corrió todo. Es el mismo agujero que el job de backend ya tapa
+      # exigiendo `skipped="0"`.
+      #
+      # 🔴 `skipped` se cuenta por ocurrencias y no con `head -1`: el
+      # `<testsuites>` raíz trae `tests`/`failures`/`errors` totales pero **no**
+      # trae `skipped` — ese atributo vive en cada `<testsuite>`. Un `head -1`
+      # leería el del primer archivo y daría por limpia una suite salteada más
+      # abajo.
+      #
+      # `failures`/`errors` son hoy redundantes con el exit code de vitest (que
+      # sí devuelve 1 con tests rojos — verificado con control positivo y
+      # negativo el 2026-08-22). Se chequean igual porque salen gratis del mismo
+      # XML y dejan de depender de que esa garantía siga valiendo.
+      - name: La suite de frontend corrio de verdad
+        run: |
+          test -f vitest.xml
+          CORRIDOS=$(grep -o 'tests="[0-9]*"' vitest.xml | head -1 | tr -dc '0-9')
+          FALLADOS=$(grep -o 'failures="[0-9]*"' vitest.xml | head -1 | tr -dc '0-9')
+          ERRORES=$(grep -o 'errors="[0-9]*"' vitest.xml | head -1 | tr -dc '0-9')
+          SALTEADOS=$(grep -o '<skipped/>' vitest.xml | wc -l)
+          echo "frontend: $CORRIDOS corridos, $FALLADOS fallados, $ERRORES con error, $SALTEADOS salteados"
+          test -n "$CORRIDOS"
+          test "$CORRIDOS" -gt 0
+          test "$FALLADOS" = "0"
+          test "$ERRORES" = "0"
+          test "$SALTEADOS" = "0"
 
       - name: Build
         run: npm run build
