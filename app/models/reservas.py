@@ -168,12 +168,27 @@ class Reserva(Base, Auditable, Anotable):
 
     __table_args__ = (
         CheckConstraint("termina_at > comienza_at", name="ck_reservas_intervalo"),
-        # Un bloqueo no tiene cliente; cualquier otra cosa sí. Sin esto,
+        # Un bloqueo no tiene cliente; cualquier otra cosa viva sí. Sin esto,
         # "reserva sin cliente" es un estado que la base acepta y que la grilla
         # muestra como una fila sin nombre que nadie sabe de quién es.
+        #
+        # 🔴 **`cancelada` queda exenta, y no es un detalle: sin la exención,
+        # cancelar un bloqueo era imposible.** Un bloqueo cancelado deja de ser
+        # `bloqueo` y no gana un cliente por eso, así que la regla anterior
+        # —"todo lo que no sea bloqueo tiene cliente"— lo rechazaba. El producto
+        # se contradecía a sí mismo desde `0001`: `TRANSICIONES` declara
+        # `BLOQUEO -> CANCELADA` y el botón «Quitar bloqueo» de la agenda manda
+        # justamente eso, y la base contestaba `CheckViolation` — que el router
+        # no traduce, así que al operador le llegaba un 500.
+        #
+        # La regla dice ahora lo que siempre quiso decir: **el cliente es
+        # obligatorio mientras la fila esté viva**. Una cancelada no ocupa
+        # cancha ni se factura; qué tiene en `cliente_id` dejó de ser una regla
+        # del dominio. Ver la migración `0007`.
         CheckConstraint(
-            "(estado = 'bloqueo' AND cliente_id IS NULL) "
-            "OR (estado <> 'bloqueo' AND cliente_id IS NOT NULL)",
+            "estado = 'cancelada' "
+            "OR (estado = 'bloqueo' AND cliente_id IS NULL) "
+            "OR (estado NOT IN ('bloqueo', 'cancelada') AND cliente_id IS NOT NULL)",
             name="ck_reservas_cliente_segun_estado",
         ),
         CheckConstraint(

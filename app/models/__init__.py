@@ -11,12 +11,23 @@ from app.models.enums import (
     AlcanceDia,
     Deporte,
     EstadoReserva,
+    EstadoTorneo,
+    EtapaTorneo,
+    FormatoTorneo,
     MedioPago,
     OrigenReserva,
 )
 from app.models.maestros import Cancha, Cliente, Feriado, Sucursal
 from app.models.reservas import WHERE_OCUPA, Reserva, Serie
 from app.models.tarifas import Tarifa
+from app.models.torneos import (
+    Competidor,
+    IntegranteDeCompetidor,
+    ParcialDePartido,
+    PartidoDeTorneo,
+    Torneo,
+    Zona,
+)
 
 __all__ = [
     "ESTADOS_QUE_OCUPAN",
@@ -26,14 +37,23 @@ __all__ = [
     "Base",
     "Cancha",
     "Cliente",
+    "Competidor",
     "Deporte",
     "EstadoReserva",
+    "EstadoTorneo",
+    "EtapaTorneo",
     "Feriado",
+    "FormatoTorneo",
+    "IntegranteDeCompetidor",
     "MedioPago",
     "OrigenReserva",
+    "ParcialDePartido",
+    "PartidoDeTorneo",
     "Reserva",
     "Serie",
     "Sucursal",
     "Tarifa",
+    "Torneo",
+    "Zona",
     "WHERE_OCUPA",
 ]

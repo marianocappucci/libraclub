@@ -254,3 +254,97 @@ agregado sin la apertura no es reversible del otro lado.
 **Falla cerrado.** Sin `LIBRA_SERVICE_TOKEN` definido el endpoint pide sesión de
 admin, igual que el resto. Un token vacío no abre nada — `libraauth` lo trata
 como no definido.
+
+---
+
+## ADR-010 — Un partido de torneo ocupa la cancha con un bloqueo de `reservas`
+
+**Decisión.** `partidos_de_torneo` guarda el cruce del fixture y **no** el
+horario. Cuando un partido recibe cancha y hora se crea una fila en `reservas`
+con `estado = 'bloqueo'`, y el partido la referencia por `reserva_id`.
+
+**Motivo.** Es el ADR-005 aplicado: la no-superposición la garantiza un
+constraint de exclusión, y **un constraint sólo puede mirar su propia tabla**.
+Un partido de torneo con su horario guardado en `partidos_de_torneo` no
+impediría que el mostrador alquile esa cancha a esa hora — y el día del torneo
+hay dos grupos en la puerta. Es exactamente el argumento por el que un bloqueo
+de mantenimiento no tiene tabla propia (ADR-004).
+
+**Consecuencia buena.** El torneo aparece solo en la agenda, en el detalle de la
+reserva y en los reportes de ocupación, sin que ninguno de los tres se entere de
+que existen los torneos.
+
+**Consecuencia a manejar.** Cancelar el torneo tiene que **liberar los
+bloqueos**, y reprogramar un partido tiene que soltar el viejo y tomar el nuevo
+**en la misma transacción**: si el horario nuevo está ocupado y las dos cosas no
+van en un mismo `SAVEPOINT`, el partido se queda sin ninguno.
+
+**Lo que destapó.** Liberar un bloqueo lo cancela, y hasta el 2026-08-21 eso era
+imposible: `ck_reservas_cliente_segun_estado` exigía cliente a toda fila que no
+fuera `bloqueo`, y un bloqueo cancelado deja de ser `bloqueo` sin ganar cliente.
+El botón «Quitar bloqueo» de la agenda venía dando 500 desde `0001`. La regla
+dice ahora lo que quiso decir siempre: el cliente es obligatorio **mientras la
+fila esté viva**. Ver la migración `0007`.
+
+---
+
+## ADR-011 — El fixture se arma con funciones puras, separadas de la base
+
+**Decisión.** `app/servicios/fixture.py` calcula llaves, ronda robin y el orden
+de los clasificados **sin tocar la base**: entran cantidades y salen cruces
+identificados por índice. `app/servicios/torneos.py` los materializa.
+
+**Motivo.** Un cuadro mal armado **no falla**: dibuja bien, deja jugar, y recién
+en semifinales alguien nota que las dos cabezas de serie se cruzaron antes de
+tiempo. Probar eso contra la base cuesta un torneo entero por caso; contra una
+lista de enteros se prueban veintitrés tamaños distintos y **propiedades** en vez
+de ejemplos — que todos entren una vez, que cada partido alimente un solo slot,
+que ningún slot quede sin quien lo llene, que el 1 y el 2 sólo se crucen en la
+final.
+
+**Consecuencia.** Un bye **no genera partido**: el que sortea con suerte aparece
+directamente en la ronda siguiente. Crear el partido y darlo por ganado llenaría
+la pantalla de encuentros que nadie va a jugar y obligaría a que todo lo que
+recorra el fixture sepa distinguirlos.
+
+---
+
+## ADR-012 — El resultado de un partido son parciales, y `sets_para_ganar` unifica los deportes
+
+**Decisión.** Un partido guarda N filas en `parciales_de_partido`. El torneo
+declara `sets_para_ganar`: **1 en fútbol** —el partido es un único parcial, el
+resultado— y **2 en un pádel al mejor de tres**.
+
+**Motivo.** Con esa columna, contar quién ganó es el mismo código en los tres
+deportes. La alternativa —una rama por deporte— acierta mientras la lista de
+deportes no crezca, y `Deporte` ya tiene siete valores.
+
+**Qué se valida.** Que el ganador se lleve exactamente `sets_para_ganar`
+parciales; que ningún parcial termine empatado salvo en un torneo a uno; que una
+llave no termine empatada —alguien tiene que pasar— y que **el último parcial lo
+gane el que gana el partido**, que es el error de tipeo más común: `6-4 / 3-6 /
+2-6` cargado como victoria de A haría avanzar al que perdió.
+
+**El empate existe sólo en grupos.** `finalizado` es un booleano aparte de
+`ganador_id` justamente por eso: `ganador_id IS NULL` no alcanza para distinguir
+«empataron» de «todavía no se jugó».
+
+---
+
+## ADR-013 — Se soportan 1 o 2 clasificados por zona, y el límite es explícito
+
+**Decisión.** `clasifican_por_zona` admite 1 o 2. Lo garantiza un CHECK.
+
+**Motivo.** La regla que evita que dos de la misma zona se crucen en la primera
+ronda del playoff es una rotación: el 1º de la zona `z` juega contra el 2º de la
+zona siguiente. Con tres o más clasificados esa rotación deja de alcanzar y el
+emparejamiento pasa a depender del reglamento del torneo — hay varios, y no son
+equivalentes.
+
+**Por qué un límite y no una aproximación.** Un cruce mal armado no falla:
+enfrenta a dos que acaban de jugar entre ellos y el playoff pierde la gracia,
+sin que nada avise. Es preferible no soportarlo a soportarlo de una forma que
+parezca correcta.
+
+**Si aparece la necesidad**, el lugar es `fixture.orden_de_clasificados`, y hay
+que decidir *qué* reglamento antes de escribir código.

@@ -38,7 +38,7 @@ from libracore.respaldo import Instancia
 from app import db
 from app.auth import UserRepository, construir_session_auth, require_admin
 from app.config import Config
-from app.routers import admin, disponibilidad, maestros, reservas, salud
+from app.routers import admin, disponibilidad, maestros, reservas, salud, torneos
 from app.routers import auth as auth_router
 from app.routers import buffet as buffet_router
 from app.routers import caja as caja_router
@@ -76,6 +76,18 @@ AUDITABLES = {
     # 🔑 El que motivó todo esto: *"quién movió el turno de las 20:00 a las
     # 21:00 sin avisar"* es una discusión con un cliente, no un bug.
     "Reserva": "reserva",
+    # El mismo argumento, en un torneo: "quién cambió el resultado de la
+    # semifinal" y "quién movió el partido a la otra cancha" son discusiones con
+    # gente, y el resultado se puede corregir después de cargado.
+    #
+    # `ParcialDePartido` queda AFUERA: es el detalle del partido y se reemplaza
+    # entero al corregir, así que anotarlo pondría el mismo hecho dos veces —
+    # mismo criterio que `Serie`. `Zona` e `IntegranteDeCompetidor` tampoco: se
+    # escriben una vez, en el sorteo y en la inscripción, que ya quedan
+    # anotados por el torneo y el competidor.
+    "Torneo": "torneo",
+    "Competidor": "competidor",
+    "PartidoDeTorneo": "partido de torneo",
 }
 
 
@@ -200,6 +212,10 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     for router in maestros.TODOS:
         app.include_router(router)
     app.include_router(reservas.router)
+    # Los torneos. Sin `dependencies`: definir y sortear son de admin —cambian
+    # lo que el complejo se comprometió a jugar— e inscribir, programar y cargar
+    # resultados son de mostrador. Cada endpoint declara el suyo.
+    app.include_router(torneos.router)
     app.include_router(disponibilidad.router)
     app.include_router(usuarios_router.router)
     app.include_router(admin.router)

@@ -9,9 +9,16 @@ ningún competidor del mercado argentino de reservas hace hoy.
 
 ## Estado
 
-**F1 en construcción.** Canchas, tarifas, calendario, reservas, bloqueos y
-reservas fijas recurrentes. Sin portal público, sin cobro online y sin buffet
-todavía — ver [ROADMAP.md](ROADMAP.md).
+**F1 a F5 en dev, más el portal público y los torneos.** Canchas, tarifas,
+horario de atención, agenda, reservas, bloqueos y canchas fijas; caja, cuenta
+corriente, facturación ARCA y buffet; portal público con cobro por MercadoPago
+—armado y **sin credenciales reales todavía**—, «falta uno» y torneos con
+fixture. Ver [ROADMAP.md](ROADMAP.md) para lo que falta.
+
+> ⚠️ Esta línea decía *"F1 en construcción, sin portal público, sin cobro online
+> y sin buffet todavía"* hasta el 2026-08-22, con las tres cosas hechas hacía
+> semanas. El estado del README es lo primero que lee cualquiera que llega al
+> repo: cuando está vencido, manda a construir lo que ya existe.
 
 Nació el 2026-08-20 como **inversión de producto**, sin piloto comprometido.
 El grupo de cinco complejos de pádel que motivó el análisis descartó las
