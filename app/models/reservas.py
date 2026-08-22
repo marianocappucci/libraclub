@@ -301,3 +301,72 @@ class PagoDeReserva(Base, Auditable):
         Index("ix_pagos_reserva_payment", "payment_id"),
         CheckConstraint("monto > 0", name="ck_pagos_reserva_monto"),
     )
+
+
+class BusquedaDeJugadores(Base, Auditable):
+    """«Faltan 2 para el partido del jueves». Lo publica quien reservó.
+
+    🔑 **Cuelga de una reserva ya confirmada y pagada.** No es una forma de
+    reservar entre varios: la cancha ya está tomada y el organizador ya la pagó,
+    y esto sólo sirve para completar el equipo. Por eso no toca plata — lo que
+    cada uno le devuelve al que pagó lo arreglan entre ellos, decisión del
+    humano del 2026-08-21.
+
+    🔴 **La privacidad es la mitad del diseño.** El listado de partidos abiertos
+    es visible para cualquiera con cuenta: si trajera teléfonos, alcanzaría con
+    registrarse para levantar la agenda de todos los que juegan en el complejo.
+    El contacto se revela **sólo entre los que están anotados en ese partido**,
+    que es cuando lo necesitan. Lo resuelve `servicios/partidos.py`, no el
+    modelo.
+    """
+
+    __tablename__ = "busquedas_de_jugadores"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    reserva_id: Mapped[int] = mapped_column(
+        ForeignKey("reservas.id", ondelete="CASCADE"), nullable=False
+    )
+    #: Cuántos lugares hay que cubrir. Lo dice el organizador y no se deduce del
+    #: deporte: en un fútbol 5 pueden faltar dos o pueden faltar siete, y una
+    #: tabla de "cuántos juegan a cada deporte" acertaría la mitad de las veces.
+    faltan: Mapped[int] = mapped_column(Integer, nullable=False)
+    #: «Nivel intermedio», «traer paletas». Libre y opcional.
+    nota: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    abierta: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    reserva: Mapped[Reserva] = relationship()
+    anotados: Mapped[list[AnotadoEnPartido]] = relationship(
+        back_populates="busqueda", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        # Una reserva tiene UNA búsqueda. Dos publicaciones del mismo partido
+        # serían dos listas de anotados que no se ven entre sí, y el organizador
+        # terminaría con ocho personas para cuatro lugares.
+        UniqueConstraint("reserva_id", name="uq_busquedas_reserva"),
+        CheckConstraint("faltan > 0 AND faltan <= 20", name="ck_busquedas_faltan"),
+    )
+
+
+class AnotadoEnPartido(Base, Auditable):
+    """Un jugador que se sumó a un partido abierto."""
+
+    __tablename__ = "anotados_en_partido"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    busqueda_id: Mapped[int] = mapped_column(
+        ForeignKey("busquedas_de_jugadores.id", ondelete="CASCADE"), nullable=False
+    )
+    cuenta_id: Mapped[int] = mapped_column(
+        ForeignKey("cuentas_de_jugador.id", ondelete="CASCADE"), nullable=False
+    )
+
+    busqueda: Mapped[BusquedaDeJugadores] = relationship(back_populates="anotados")
+
+    __table_args__ = (
+        # 🔑 Nadie se anota dos veces. Sin esto, dos clicks seguidos ocupan dos
+        # lugares con la misma persona y el partido queda "completo" con gente
+        # que no existe.
+        UniqueConstraint("busqueda_id", "cuenta_id", name="uq_anotados_unico"),
+        Index("ix_anotados_busqueda", "busqueda_id"),
+    )
