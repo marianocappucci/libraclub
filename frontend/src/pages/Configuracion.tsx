@@ -19,11 +19,14 @@
  *  `LIBRACLUB_LIBRACORE_DATABASE_URL` la pestaña contesta 503 diciendo
  *  exactamente qué falta, en vez de un error genérico.
  */
+import { Settings } from 'lucide-react'
 import {
   SECCIONES_BASE, SECCION_ARCA, createConfiguracion,
 } from 'libra-ui/Configuracion'
 
 export const Configuracion = createConfiguracion({
+  // El icono que el sidebar de este producto le da a /configuracion.
+  icono: Settings,
   // Empresa (+ logo), Correo (SMTP), Datos / Backup y ARCA.
   secciones: [...SECCIONES_BASE, SECCION_ARCA],
 })

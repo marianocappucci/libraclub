@@ -19,6 +19,7 @@ import { AvisoDeError } from '@/components/listado'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 
 type Cierre = TurnoDeCaja & { diferencia_de_caja: number }
 
@@ -47,7 +48,7 @@ export function Caja() {
 
   return (
     <div className="space-y-4">
-      <EncabezadoDePantalla titulo={<h1 className="text-lg font-semibold">Caja</h1>} />
+      <EncabezadoDePantalla titulo={<TituloPantalla icono={Wallet}>Caja</TituloPantalla>} />
       <AvisoDeError mensaje={error} />
 
       {turno === null ? (

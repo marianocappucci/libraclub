@@ -14,7 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-import { AlertTriangle, Plus } from 'lucide-react'
+import { AlertTriangle, Plus, Repeat } from 'lucide-react'
 
 import {
   canchas as apiCanchas, clientes as apiClientes, series as api,
@@ -26,6 +26,7 @@ import { FormularioDeSerie } from '@/components/FormularioDeSerie'
 import { ResultadoDeSerie } from '@/components/ResultadoDeSerie'
 import { AvisoDeError, filaInactiva } from '@/components/listado'
 import { Button } from '@/components/ui/button'
+import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 
 const DIAS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 
@@ -178,7 +179,7 @@ export function TurnosFijos() {
 
   return (
     <div className="space-y-3">
-      <EncabezadoDePantalla titulo={<h1 className="text-lg font-semibold">Turnos fijos</h1>}>
+      <EncabezadoDePantalla titulo={<TituloPantalla icono={Repeat}>Turnos fijos</TituloPantalla>}>
         {deLaSucursal.length > 0 && clientes.length > 0 && (
           <Button onClick={() => setAbierto(true)}>
             <Plus className="size-4" />

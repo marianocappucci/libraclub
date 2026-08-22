@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-import { Plus } from 'lucide-react'
+import { LayoutGrid, Plus } from 'lucide-react'
 
 import { canchas as api } from '@/lib/api'
 import type { Cancha } from '@/lib/api'
@@ -11,6 +11,7 @@ import { useAuth } from '@/context/AuthContext'
 import { FormularioDeCancha } from '@/components/FormularioDeCancha'
 import { AvisoDeError, columnaDeAcciones, filaInactiva } from '@/components/listado'
 import { Button } from '@/components/ui/button'
+import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 
 export function Canchas() {
   const { actual } = useSucursal()
@@ -99,7 +100,7 @@ export function Canchas() {
 
   return (
     <div className="space-y-3">
-      <EncabezadoDePantalla titulo={<h1 className="text-lg font-semibold">Canchas</h1>}>
+      <EncabezadoDePantalla titulo={<TituloPantalla icono={LayoutGrid}>Canchas</TituloPantalla>}>
         {puedeEscribir && actual !== null && (
           <Button
             onClick={() => {
