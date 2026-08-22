@@ -38,12 +38,13 @@ from libracore.respaldo import Instancia
 from app import db
 from app.auth import UserRepository, construir_session_auth, require_admin
 from app.config import Config
-from app.routers import admin, disponibilidad, maestros, reservas, salud
+from app.routers import admin, disponibilidad, maestros, reservas, salud, torneos
 from app.routers import auth as auth_router
 from app.routers import buffet as buffet_router
 from app.routers import caja as caja_router
 from app.routers import cuenta_corriente as cuenta_corriente_router
 from app.routers import facturacion as facturacion_router
+from app.routers import portal as portal_router
 from app.routers import resumen as resumen_router
 
 # Con alias: más abajo hay una variable local `usuarios` con el repositorio, y
@@ -75,6 +76,18 @@ AUDITABLES = {
     # 🔑 El que motivó todo esto: *"quién movió el turno de las 20:00 a las
     # 21:00 sin avisar"* es una discusión con un cliente, no un bug.
     "Reserva": "reserva",
+    # El mismo argumento, en un torneo: "quién cambió el resultado de la
+    # semifinal" y "quién movió el partido a la otra cancha" son discusiones con
+    # gente, y el resultado se puede corregir después de cargado.
+    #
+    # `ParcialDePartido` queda AFUERA: es el detalle del partido y se reemplaza
+    # entero al corregir, así que anotarlo pondría el mismo hecho dos veces —
+    # mismo criterio que `Serie`. `Zona` e `IntegranteDeCompetidor` tampoco: se
+    # escriben una vez, en el sorteo y en la inscripción, que ya quedan
+    # anotados por el torneo y el competidor.
+    "Torneo": "torneo",
+    "Competidor": "competidor",
+    "PartidoDeTorneo": "partido de torneo",
 }
 
 
@@ -199,6 +212,10 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     for router in maestros.TODOS:
         app.include_router(router)
     app.include_router(reservas.router)
+    # Los torneos. Sin `dependencies`: definir y sortear son de admin —cambian
+    # lo que el complejo se comprometió a jugar— e inscribir, programar y cargar
+    # resultados son de mostrador. Cada endpoint declara el suyo.
+    app.include_router(torneos.router)
     app.include_router(disponibilidad.router)
     app.include_router(usuarios_router.router)
     app.include_router(admin.router)
@@ -262,6 +279,20 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # Puede venir `None`: sin base de LibraCore no hay núcleo que contestar, y
     # entonces **no se monta**. Un 404 dice "esta instancia no informa"; un
     # endpoint que contesta ceros diría "informa que no vendió nada".
+    # El portal público: `/api/portal`. **El único router sin sesión de staff
+    # detrás**, así que las reglas de qué se devuelve viven en
+    # `servicios/portal.py` y no en el handler.
+    app.include_router(portal_router.router)
+
+    # 🔴 El simulador de pago **no se monta en producción**. Confirma una
+    # reserva sin que nadie haya pagado: en la instancia de un complejo,
+    # cualquiera con la URL se lleva los viernes a la noche gratis. Devuelve
+    # `None` según el entorno, y por eso el `if` está acá y no adentro del
+    # handler — un `if` mal escrito adentro deja el endpoint existiendo.
+    simulador = portal_router.construir_router_de_simulacion(config.entorno)
+    if simulador is not None:
+        app.include_router(simulador)
+
     resumen = resumen_router.construir_router()
     if resumen is not None:
         app.include_router(resumen)

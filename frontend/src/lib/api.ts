@@ -533,3 +533,322 @@ export const series = {
       `/api/reservas/series/${id}/baja`, cuerpo,
     ),
 }
+
+// ── Portal público ───────────────────────────────────────────────────────
+//
+// 🔴 **Todo esto sale a internet sin sesión de staff.** Las respuestas traen
+// menos campos que las del backoffice a propósito: la disponibilidad pública no
+// dice quién ocupa los turnos, y las canchas no traen `punto_venta_arca`. Si
+// algún día un tipo de acá crece de golpe, mirar el servidor antes que la
+// pantalla.
+
+export interface Jugador {
+  id: number
+  nombre: string
+  email: string
+}
+
+export interface CanchaPublica {
+  id: number
+  nombre: string
+  deporte: string
+  techada: boolean
+  iluminacion: boolean
+  duracion_turno_min: number
+}
+
+export interface TurnoLibre {
+  comienza_at: string
+  termina_at: string
+  precio: number
+}
+
+export interface ReservaDelJugador {
+  id: number
+  cancha: string
+  comienza_at: string
+  termina_at: string
+  estado: string
+  precio: number | null
+  /** `pendiente` | `aprobado` | `rechazado` | `vencido` | `null`. */
+  pago: string | null
+  /** Hasta cuándo se retiene el turno esperando el pago. */
+  vence_at: string | null
+}
+
+export interface ReservaCreada {
+  reserva_id: number
+  pago_id: number
+  referencia: string
+  monto: number
+  vence_at: string
+  /** `null` mientras la instancia no tenga credenciales de MercadoPago. */
+  url_de_pago: string | null
+}
+
+export const portal = {
+  registro: (cuerpo: {
+    email: string; password: string; nombre: string; telefono?: string
+  }) => api.post<Jugador>('/api/portal/registro', cuerpo),
+  login: (cuerpo: { email: string; password: string }) =>
+    api.post<Jugador>('/api/portal/login', cuerpo),
+  logout: () => api.post<void>('/api/portal/logout', {}),
+  yo: () => api.get<Jugador | null>('/api/portal/yo'),
+
+  canchas: (sucursalId: number) =>
+    api.get<CanchaPublica[]>(`/api/portal/canchas?sucursal_id=${sucursalId}`),
+  disponibilidad: (canchaId: number, dia: string) =>
+    api.get<TurnoLibre[]>(`/api/portal/disponibilidad?cancha_id=${canchaId}&dia=${dia}`),
+
+  reservar: (cuerpo: { cancha_id: number; comienza_at: string }) =>
+    api.post<ReservaCreada>('/api/portal/reservas', cuerpo),
+  misReservas: () => api.get<ReservaDelJugador[]>('/api/portal/reservas'),
+  cancelar: (id: number) =>
+    api.post<{ id: number; estado: string }>(`/api/portal/reservas/${id}/cancelar`, {}),
+
+  /** 🔴 Sólo existe fuera de producción. La pantalla lo ofrece únicamente
+   *  cuando el endpoint contesta; en la instancia de un complejo da 404. */
+  simularPago: (pagoId: number, aprobado = true) =>
+    api.post<{ pago: string; reserva: string; simulado: boolean }>(
+      `/api/portal/pagos/${pagoId}/simular?aprobado=${aprobado}`, {},
+    ),
+}
+
+// ── «Falta uno» ──────────────────────────────────────────────────────────
+
+/** Un partido en el listado. **Sin datos de contacto** — a propósito: el
+ *  listado lo ve cualquiera con cuenta. */
+export interface PartidoAbierto {
+  id: number
+  cancha: string
+  deporte: string
+  comienza_at: string
+  termina_at: string
+  organizador: string
+  faltan: number
+  nota: string | null
+}
+
+/** El detalle. `organizador_telefono` y los `telefono` de los anotados vienen
+ *  `null` **salvo que quien pregunta juegue ahí** — el servidor lo decide, no
+ *  la pantalla. */
+export interface PartidoDetalle {
+  id: number
+  cancha: string
+  comienza_at: string
+  termina_at: string
+  organizador: string
+  organizador_telefono: string | null
+  faltan: number
+  nota: string | null
+  abierta: boolean
+  soy_organizador: boolean
+  estoy_anotado: boolean
+  anotados: { nombre: string; telefono: string | null; soy_yo: boolean }[]
+}
+
+export const partidos = {
+  abiertos: () => api.get<PartidoAbierto[]>('/api/portal/partidos'),
+  mios: () => api.get<PartidoDetalle[]>('/api/portal/partidos/mios'),
+  ver: (id: number) => api.get<PartidoDetalle>(`/api/portal/partidos/${id}`),
+  publicar: (reservaId: number, cuerpo: { faltan: number; nota?: string }) =>
+    api.post<PartidoDetalle>(
+      `/api/portal/reservas/${reservaId}/buscar-jugadores`, cuerpo),
+  sumarme: (id: number) =>
+    api.post<PartidoDetalle>(`/api/portal/partidos/${id}/sumarme`, {}),
+  bajarme: (id: number) =>
+    api.post<PartidoDetalle>(`/api/portal/partidos/${id}/bajarme`, {}),
+  cerrar: (id: number) =>
+    api.post<PartidoDetalle>(`/api/portal/partidos/${id}/cerrar`, {}),
+}
+
+// ── Torneos ──────────────────────────────────────────────────────────────
+//
+// El backoffice, no el portal: acá **sí** viajan los teléfonos de los
+// integrantes, porque quien consulta es el encargado que necesita avisarle a
+// una pareja que su partido se movió. La regla contraria —la del portal— vive
+// en `partidos`, más arriba.
+
+/** `eliminacion` | `liga` | `zonas`. */
+export type FormatoTorneo = 'eliminacion' | 'liga' | 'zonas'
+/** `armado` | `sorteado` | `finalizado` | `cancelado`. */
+export type EstadoTorneo = 'armado' | 'sorteado' | 'finalizado' | 'cancelado'
+
+export const FORMATOS: { valor: FormatoTorneo; nombre: string; ayuda: string }[] = [
+  {
+    valor: 'eliminacion',
+    nombre: 'Eliminación directa',
+    ayuda: 'Llaves: el que pierde se va. Con byes si no son potencia de dos.',
+  },
+  {
+    valor: 'liga',
+    nombre: 'Todos contra todos',
+    ayuda: 'Una sola tabla, sin playoff. El campeón es el primero.',
+  },
+  {
+    valor: 'zonas',
+    nombre: 'Zonas y playoff',
+    ayuda: 'Grupos y después llaves entre los que clasifican.',
+  },
+]
+
+export interface TorneoEntrada {
+  sucursal_id: number
+  nombre: string
+  deporte: string
+  formato: FormatoTorneo
+  desde: string
+  hasta: string | null
+  /** 1 = fútbol (un solo resultado). 2 = al mejor de tres, el pádel normal. */
+  sets_para_ganar: number
+  /** Sólo en formato `zonas`; `null` en los otros, y el backend lo exige así. */
+  cantidad_zonas: number | null
+  /** Sólo en formato `zonas`. El backend soporta 1 o 2. */
+  clasifican_por_zona: number | null
+  observaciones: string | null
+}
+
+export interface Torneo extends TorneoEntrada {
+  id: number
+  estado: EstadoTorneo
+  /** La semilla del sorteo. Con ella y la lista de inscriptos el cuadro se
+   *  reproduce entero: es lo que hace auditable el sorteo. */
+  semilla: number | null
+}
+
+export interface TorneoEnLista extends Torneo {
+  competidores: number
+  partidos: number
+  jugados: number
+  /** Partidos sin cancha ni horario. Es lo que le dice al encargado que le
+   *  queda trabajo por hacer. */
+  sin_programar: number
+  campeon: string | null
+}
+
+export interface Integrante {
+  nombre: string
+  telefono: string | null
+}
+
+export interface Competidor {
+  id: number
+  nombre: string
+  siembra: number | null
+  zona_id: number | null
+  zona: string | null
+  integrantes: Integrante[]
+}
+
+export interface CompetidorEntrada {
+  nombre: string
+  siembra: number | null
+  integrantes: Integrante[]
+}
+
+export interface Parcial {
+  numero: number
+  puntos_a: number
+  puntos_b: number
+}
+
+export interface PartidoDeTorneo {
+  id: number
+  /** `grupos` | `llaves`. */
+  etapa: 'grupos' | 'llaves'
+  zona_id: number | null
+  zona: string | null
+  ronda: number
+  orden: number
+  /** «Semifinal», «Zona A · Fecha 2». Lo resuelve el servidor porque depende de
+   *  cuántas rondas tiene el cuadro. */
+  instancia: string
+  competidor_a_id: number | null
+  competidor_a: string | null
+  competidor_b_id: number | null
+  competidor_b: string | null
+  avanza_a_id: number | null
+  avanza_a_slot: string | null
+  reserva_id: number | null
+  cancha: string | null
+  comienza_at: string | null
+  termina_at: string | null
+  ganador_id: number | null
+  finalizado: boolean
+  parciales: Parcial[]
+}
+
+export interface Fixture {
+  /** Cuántas rondas tiene el cuadro; `0` si todavía no hay llaves. Es lo que la
+   *  pantalla usa para dibujar las columnas. */
+  rondas: number
+  partidos: PartidoDeTorneo[]
+}
+
+export interface FilaDePosiciones {
+  competidor_id: number
+  nombre: string
+  jugados: number
+  ganados: number
+  empatados: number
+  perdidos: number
+  /** La suma de los parciales: goles en fútbol, games en pádel y tenis. */
+  a_favor: number
+  en_contra: number
+  diferencia: number
+  puntos: number
+}
+
+export interface TablaDeZona {
+  zona_id: number | null
+  /** `null` en una liga, que no tiene zonas. */
+  nombre: string | null
+  filas: FilaDePosiciones[]
+}
+
+export const torneos = {
+  listar: (sucursalId?: number) =>
+    api.get<TorneoEnLista[]>(
+      `/api/torneos${sucursalId ? `?sucursal_id=${sucursalId}` : ''}`,
+    ),
+  ver: (id: number) => api.get<Torneo>(`/api/torneos/${id}`),
+  crear: (cuerpo: TorneoEntrada) => api.post<Torneo>('/api/torneos', cuerpo),
+  /** Sólo lo que no toca el cuadro: el formato no se puede cambiar. */
+  editar: (
+    id: number,
+    cuerpo: { nombre: string; desde: string; hasta: string | null; observaciones: string | null },
+  ) => api.put<Torneo>(`/api/torneos/${id}`, cuerpo),
+  cancelar: (id: number) =>
+    api.post<{ torneo_id: number; canchas_liberadas: number }>(
+      `/api/torneos/${id}/cancelar`, {},
+    ),
+
+  competidores: (id: number) =>
+    api.get<Competidor[]>(`/api/torneos/${id}/competidores`),
+  inscribir: (id: number, cuerpo: CompetidorEntrada) =>
+    api.post<Competidor>(`/api/torneos/${id}/competidores`, cuerpo),
+  bajar: (competidorId: number) =>
+    api.del(`/api/torneos/competidores/${competidorId}`),
+
+  /** `semilla` reproduce un sorteo hecho frente a la gente. Sin ella se elige
+   *  una y se guarda igual. */
+  sortear: (id: number, semilla?: number) =>
+    api.post<Torneo>(
+      `/api/torneos/${id}/sortear${semilla ? `?semilla=${semilla}` : ''}`, {},
+    ),
+  playoff: (id: number) => api.post<Torneo>(`/api/torneos/${id}/playoff`, {}),
+
+  fixture: (id: number) => api.get<Fixture>(`/api/torneos/${id}/fixture`),
+  posiciones: (id: number) => api.get<TablaDeZona[]>(`/api/torneos/${id}/posiciones`),
+
+  programar: (
+    partidoId: number,
+    cuerpo: { cancha_id: number; comienza_at: string; duracion_min?: number | null },
+  ) => api.post<PartidoDeTorneo>(`/api/torneos/partidos/${partidoId}/programar`, cuerpo),
+  liberar: (partidoId: number) =>
+    api.post<PartidoDeTorneo>(`/api/torneos/partidos/${partidoId}/liberar`, {}),
+  cargarResultado: (partidoId: number, parciales: { puntos_a: number; puntos_b: number }[]) =>
+    api.post<PartidoDeTorneo>(`/api/torneos/partidos/${partidoId}/resultado`, { parciales }),
+  borrarResultado: (partidoId: number) =>
+    api.del(`/api/torneos/partidos/${partidoId}/resultado`),
+}

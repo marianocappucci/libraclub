@@ -6,6 +6,7 @@ y eso lo sostiene la base, no la aplicación. Ver DECISIONS.md ADR-004 y ADR-005
 
 from __future__ import annotations
 
+import enum
 from datetime import date, datetime, time
 from decimal import Decimal
 
@@ -22,6 +23,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Time,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import TSTZRANGE, ExcludeConstraint
@@ -166,12 +168,27 @@ class Reserva(Base, Auditable, Anotable):
 
     __table_args__ = (
         CheckConstraint("termina_at > comienza_at", name="ck_reservas_intervalo"),
-        # Un bloqueo no tiene cliente; cualquier otra cosa sí. Sin esto,
+        # Un bloqueo no tiene cliente; cualquier otra cosa viva sí. Sin esto,
         # "reserva sin cliente" es un estado que la base acepta y que la grilla
         # muestra como una fila sin nombre que nadie sabe de quién es.
+        #
+        # 🔴 **`cancelada` queda exenta, y no es un detalle: sin la exención,
+        # cancelar un bloqueo era imposible.** Un bloqueo cancelado deja de ser
+        # `bloqueo` y no gana un cliente por eso, así que la regla anterior
+        # —"todo lo que no sea bloqueo tiene cliente"— lo rechazaba. El producto
+        # se contradecía a sí mismo desde `0001`: `TRANSICIONES` declara
+        # `BLOQUEO -> CANCELADA` y el botón «Quitar bloqueo» de la agenda manda
+        # justamente eso, y la base contestaba `CheckViolation` — que el router
+        # no traduce, así que al operador le llegaba un 500.
+        #
+        # La regla dice ahora lo que siempre quiso decir: **el cliente es
+        # obligatorio mientras la fila esté viva**. Una cancelada no ocupa
+        # cancha ni se factura; qué tiene en `cliente_id` dejó de ser una regla
+        # del dominio. Ver la migración `0007`.
         CheckConstraint(
-            "(estado = 'bloqueo' AND cliente_id IS NULL) "
-            "OR (estado <> 'bloqueo' AND cliente_id IS NOT NULL)",
+            "estado = 'cancelada' "
+            "OR (estado = 'bloqueo' AND cliente_id IS NULL) "
+            "OR (estado NOT IN ('bloqueo', 'cancelada') AND cliente_id IS NOT NULL)",
             name="ck_reservas_cliente_segun_estado",
         ),
         CheckConstraint(
@@ -223,4 +240,148 @@ class Reserva(Base, Auditable, Anotable):
             "vence_at",
             postgresql_where="estado = 'provisoria'",
         ),
+    )
+
+
+class EstadoPago(enum.Enum):
+    """En qué anda el pago de una reserva del portal.
+
+    🔴 **`APROBADO` es lo único que confirma la reserva.** El resto de los
+    estados dejan el turno provisorio, y por lo tanto venciendo: sin pago no hay
+    reserva, que es la regla del portal.
+    """
+
+    PENDIENTE = "pendiente"
+    APROBADO = "aprobado"
+    RECHAZADO = "rechazado"
+    #: El jugador nunca volvió de MercadoPago y la provisoria venció.
+    VENCIDO = "vencido"
+
+
+class PagoDeReserva(Base, Auditable):
+    """El pago online que hace efectiva una reserva del portal.
+
+    Vive en la base del **dominio** y no en la de LibraCore, a diferencia de los
+    movimientos de caja: es parte del ciclo de vida de la reserva —decide si
+    existe o no— y necesita una FK real contra `reservas`. Cuando el pago se
+    aprueba, el ingreso **también** se registra en la caja de LibraCore, que es
+    donde vive la plata.
+    """
+
+    __tablename__ = "pagos_de_reserva"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    reserva_id: Mapped[int] = mapped_column(
+        ForeignKey("reservas.id", ondelete="CASCADE"), nullable=False
+    )
+    monto: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    estado: Mapped[EstadoPago] = mapped_column(
+        Enum(EstadoPago, name="estado_pago", values_callable=lambda e: [m.value for m in e]),
+        nullable=False,
+        default=EstadoPago.PENDIENTE,
+    )
+
+    #: 🔑 **Lo que ata este pago con el de MercadoPago, y es NUESTRO.** Se manda
+    #: como `external_reference` al crear la preferencia y vuelve en el webhook.
+    #: Es lo que permite reconocer un pago sin confiar en el orden de llegada de
+    #: las notificaciones — MercadoPago puede avisar dos veces, o tarde.
+    referencia: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: El id de la preferencia de Checkout, para poder reabrir el pago.
+    preference_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: El id del pago en MercadoPago. Llega con el webhook.
+    payment_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: El estado crudo que informó MercadoPago (`approved`, `rejected`,
+    #: `in_process`…). Se guarda además del nuestro: cuando un pago queda en un
+    #: estado raro, esto es lo único que dice cuál era.
+    estado_mp: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    pagado_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    reserva: Mapped[Reserva] = relationship()
+
+    __table_args__ = (
+        # 🔴 **Único, y es lo que hace idempotente al webhook.** MercadoPago
+        # reintenta las notificaciones: sin esto, dos avisos del mismo pago
+        # crearían dos filas y la reserva se cobraría dos veces en la caja.
+        UniqueConstraint("referencia", name="uq_pagos_reserva_referencia"),
+        # Una reserva del portal tiene UN pago vivo. Se permite más de uno en la
+        # tabla —un rechazado y un reintento— pero no dos aprobados.
+        Index(
+            "uq_pagos_reserva_aprobado",
+            "reserva_id",
+            unique=True,
+            postgresql_where="estado = 'aprobado'",
+        ),
+        Index("ix_pagos_reserva_payment", "payment_id"),
+        CheckConstraint("monto > 0", name="ck_pagos_reserva_monto"),
+    )
+
+
+class BusquedaDeJugadores(Base, Auditable):
+    """«Faltan 2 para el partido del jueves». Lo publica quien reservó.
+
+    🔑 **Cuelga de una reserva ya confirmada y pagada.** No es una forma de
+    reservar entre varios: la cancha ya está tomada y el organizador ya la pagó,
+    y esto sólo sirve para completar el equipo. Por eso no toca plata — lo que
+    cada uno le devuelve al que pagó lo arreglan entre ellos, decisión del
+    humano del 2026-08-21.
+
+    🔴 **La privacidad es la mitad del diseño.** El listado de partidos abiertos
+    es visible para cualquiera con cuenta: si trajera teléfonos, alcanzaría con
+    registrarse para levantar la agenda de todos los que juegan en el complejo.
+    El contacto se revela **sólo entre los que están anotados en ese partido**,
+    que es cuando lo necesitan. Lo resuelve `servicios/partidos.py`, no el
+    modelo.
+    """
+
+    __tablename__ = "busquedas_de_jugadores"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    reserva_id: Mapped[int] = mapped_column(
+        ForeignKey("reservas.id", ondelete="CASCADE"), nullable=False
+    )
+    #: Cuántos lugares hay que cubrir. Lo dice el organizador y no se deduce del
+    #: deporte: en un fútbol 5 pueden faltar dos o pueden faltar siete, y una
+    #: tabla de "cuántos juegan a cada deporte" acertaría la mitad de las veces.
+    faltan: Mapped[int] = mapped_column(Integer, nullable=False)
+    #: «Nivel intermedio», «traer paletas». Libre y opcional.
+    nota: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    abierta: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    reserva: Mapped[Reserva] = relationship()
+    anotados: Mapped[list[AnotadoEnPartido]] = relationship(
+        back_populates="busqueda", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        # Una reserva tiene UNA búsqueda. Dos publicaciones del mismo partido
+        # serían dos listas de anotados que no se ven entre sí, y el organizador
+        # terminaría con ocho personas para cuatro lugares.
+        UniqueConstraint("reserva_id", name="uq_busquedas_reserva"),
+        CheckConstraint("faltan > 0 AND faltan <= 20", name="ck_busquedas_faltan"),
+    )
+
+
+class AnotadoEnPartido(Base, Auditable):
+    """Un jugador que se sumó a un partido abierto."""
+
+    __tablename__ = "anotados_en_partido"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    busqueda_id: Mapped[int] = mapped_column(
+        ForeignKey("busquedas_de_jugadores.id", ondelete="CASCADE"), nullable=False
+    )
+    cuenta_id: Mapped[int] = mapped_column(
+        ForeignKey("cuentas_de_jugador.id", ondelete="CASCADE"), nullable=False
+    )
+
+    busqueda: Mapped[BusquedaDeJugadores] = relationship(back_populates="anotados")
+
+    __table_args__ = (
+        # 🔑 Nadie se anota dos veces. Sin esto, dos clicks seguidos ocupan dos
+        # lugares con la misma persona y el partido queda "completo" con gente
+        # que no existe.
+        UniqueConstraint("busqueda_id", "cuenta_id", name="uq_anotados_unico"),
+        Index("ix_anotados_busqueda", "busqueda_id"),
     )

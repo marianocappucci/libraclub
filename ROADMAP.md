@@ -64,8 +64,15 @@ Gate: un dueño con dos instancias y cinco sucursales viendo cinco filas, no dos
 
 ## F6 — Producto
 
-Socios y abonos, clases y escuelas, torneos, eventos, analítica de rentabilidad
-por cancha y por franja.
+Socios y abonos, clases y escuelas, ~~torneos~~, eventos, analítica de
+rentabilidad por cancha y por franja.
+
+**Torneos: hecho** (2026-08-22). Eliminación directa, todos contra todos y zonas
+con playoff; sorteo reproducible por semilla, fixture con byes, cancha y horario
+por partido —que ocupan el turno de verdad, ADR-010— y resultados con avance
+automático del cuadro. Límite conocido y explícito: 1 o 2 clasificados por zona
+(ADR-013), y **no hay eliminación doble** — el cuadro de perdedores es otro
+problema y no apareció el pedido.
 
 Gate: cada módulo justificado por uso medido, no por catálogo de features.
 

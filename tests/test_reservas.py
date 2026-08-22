@@ -7,9 +7,10 @@ from decimal import Decimal
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from app.models.enums import EstadoReserva, OrigenReserva
-from app.models.reservas import Serie
+from app.models.reservas import Reserva, Serie
 from app.servicios import reservas as servicio
 from app.tiempo import TZ
 
@@ -271,3 +272,64 @@ def test_una_serie_sin_fin_se_materializa_hasta_el_horizonte(
 
     assert 1 <= len(creadas) <= 10
     assert max(r.comienza_at for r in creadas).date() <= date(2026, 10, 31)
+
+
+def test_un_bloqueo_se_puede_quitar_y_la_cancha_queda_libre(sesion, cancha):
+    """🔴 Regresión: esto devolvía un 500 desde `0001`.
+
+    `TRANSICIONES` declara `BLOQUEO -> CANCELADA` y el botón «Quitar bloqueo» de
+    la agenda manda exactamente eso — pero el CHECK
+    `ck_reservas_cliente_segun_estado` decía que toda fila que no fuera
+    `bloqueo` tenía que tener cliente, y un bloqueo cancelado deja de ser
+    `bloqueo` sin ganar un cliente. La base lo rechazaba con `CheckViolation`,
+    que el router no traduce: al operador le llegaba un 500.
+
+    Se descubrió armando la reprogramación de un partido de torneo, que necesita
+    liberar el bloqueo viejo antes de tomar el nuevo. La suite no lo veía porque
+    ningún test cancelaba un bloqueo: se probaba que se creara y que impidiera
+    reservar encima, que es lo que uno piensa en probar de un bloqueo. Ver la
+    migración `0007`.
+    """
+    comienza = _a_las(8)
+    bloqueo = servicio.crear_bloqueo(
+        sesion, cancha_id=cancha.id, comienza_at=comienza,
+        termina_at=comienza + timedelta(minutes=90), motivo="lluvia",
+    )
+    sesion.commit()
+
+    servicio.cambiar_estado(
+        sesion, bloqueo.id, EstadoReserva.CANCELADA, motivo="paró de llover"
+    )
+    sesion.commit()
+
+    assert bloqueo.estado is EstadoReserva.CANCELADA
+    # Y la cancha queda libre **de verdad**: sin esto, el estado cambiaría y el
+    # turno seguiría sin poder venderse.
+    assert not servicio.ocupadas(
+        sesion, cancha.id, comienza, comienza + timedelta(minutes=90)
+    )
+
+
+def test_una_reserva_viva_sigue_necesitando_cliente(sesion, cancha):
+    """🔑 El control positivo del test de arriba.
+
+    Al exceptuar a las canceladas del CHECK se corre el riesgo de aflojar lo que
+    el CHECK protegía. Lo que protegía —que una reserva viva tenga dueño— tiene
+    que seguir en pie: una fila sin nombre en la grilla es un turno que nadie
+    sabe de quién es.
+    """
+    comienza = _a_las(8)
+    for estado in (
+        EstadoReserva.CONFIRMADA,
+        EstadoReserva.JUGADA,
+        EstadoReserva.PENDIENTE_PAGO,
+    ):
+        with pytest.raises(IntegrityError):
+            sesion.add(
+                Reserva(
+                    cancha_id=cancha.id, cliente_id=None, estado=estado,
+                    comienza_at=comienza, termina_at=comienza + timedelta(minutes=90),
+                )
+            )
+            sesion.flush()
+        sesion.rollback()

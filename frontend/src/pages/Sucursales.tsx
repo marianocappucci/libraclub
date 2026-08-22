@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-import { Plus } from 'lucide-react'
+import { MapPin, Plus } from 'lucide-react'
 
 import { sucursales as api } from '@/lib/api'
 import type { Sucursal } from '@/lib/api'
@@ -11,6 +11,7 @@ import { useAuth } from '@/context/AuthContext'
 import { FormularioDeSucursal } from '@/components/FormularioDeSucursal'
 import { AvisoDeError, columnaDeAcciones, filaInactiva } from '@/components/listado'
 import { Button } from '@/components/ui/button'
+import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 
 export function Sucursales() {
   // 🔴 Esta pantalla pide su **propia** lista, completa, y no usa la del
@@ -104,7 +105,7 @@ export function Sucursales() {
 
   return (
     <div className="space-y-3">
-      <EncabezadoDePantalla titulo={<h1 className="text-lg font-semibold">Sucursales</h1>}>
+      <EncabezadoDePantalla titulo={<TituloPantalla icono={MapPin}>Sucursales</TituloPantalla>}>
         {puedeEscribir && (
           <Button
             onClick={() => {

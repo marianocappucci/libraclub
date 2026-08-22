@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-import { Plus } from 'lucide-react'
+import { Clock, Plus } from 'lucide-react'
 
 import { canchas as apiCanchas, horarios as api } from '@/lib/api'
 import type { Cancha, Franja } from '@/lib/api'
@@ -18,6 +18,7 @@ import { useAuth } from '@/context/AuthContext'
 import { FormularioDeHorario } from '@/components/FormularioDeHorario'
 import { AvisoDeError, columnaDeAcciones, filaInactiva } from '@/components/listado'
 import { Button } from '@/components/ui/button'
+import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 
 const DIAS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 
@@ -118,7 +119,7 @@ export function Horarios() {
   return (
     <div className="space-y-3">
       <EncabezadoDePantalla
-        titulo={<h1 className="text-lg font-semibold">Horario de atención</h1>}
+        titulo={<TituloPantalla icono={Clock}>Horario de atención</TituloPantalla>}
       >
         {puedeEscribir && actual !== null && (
           <Button

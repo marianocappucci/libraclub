@@ -17,6 +17,8 @@ import { AvisoDeError } from '@/components/listado'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { NotebookText } from 'lucide-react'
+import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 
 export function CuentaCorriente() {
   const [deudores, setDeudores] = useState<SaldoDeCuenta[]>([])
@@ -40,7 +42,7 @@ export function CuentaCorriente() {
   return (
     <div className="space-y-4">
       <EncabezadoDePantalla
-        titulo={<h1 className="text-lg font-semibold">Cuenta corriente</h1>}
+        titulo={<TituloPantalla icono={NotebookText}>Cuenta corriente</TituloPantalla>}
       />
       <AvisoDeError mensaje={error} />
 

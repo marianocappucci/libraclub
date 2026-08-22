@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-import { Plus } from 'lucide-react'
+import { Plus, Users } from 'lucide-react'
 
 import { clientes as api } from '@/lib/api'
 import type { Cliente } from '@/lib/api'
@@ -11,6 +11,7 @@ import { FormularioDeCliente } from '@/components/FormularioDeCliente'
 import { AvisoDeError, columnaDeAcciones, filaInactiva } from '@/components/listado'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 
 export function Clientes() {
   const { user } = useAuth()
@@ -109,7 +110,7 @@ export function Clientes() {
 
   return (
     <div className="space-y-3">
-      <EncabezadoDePantalla titulo={<h1 className="text-lg font-semibold">Clientes</h1>}>
+      <EncabezadoDePantalla titulo={<TituloPantalla icono={Users}>Clientes</TituloPantalla>}>
         {puedeEscribir && (
           <Button
             onClick={() => {
