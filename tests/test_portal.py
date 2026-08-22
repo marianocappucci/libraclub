@@ -634,3 +634,74 @@ def test_el_webhook_con_firma_INVALIDA_no_confirma(
     reserva = sesion.get(Reserva, creada["reserva_id"])
     sesion.refresh(reserva)
     assert reserva.estado is EstadoReserva.PROVISORIA
+
+
+# ── El barrido que libera los turnos ─────────────────────────────────────
+
+
+def test_el_script_del_cron_vence_reservas_Y_marca_pagos(
+    api, sesion, cancha, tarifa_base, abierto
+):
+    """🔴 Sin este barrido el portal no funciona: el turno que alguien empezó a
+    reservar y abandonó queda retenido para siempre.
+
+    Y hace **las dos** cosas. Vencer la reserva libera el turno; marcar el pago
+    deja de mostrarle al jugador «esperando pago» sobre algo que ya no existe.
+    Son dos tablas, y la segunda es la que se olvida.
+    """
+    from scripts.vencer_provisorias import main
+
+    _registrar(api)
+    creada = _reservar(api, cancha).json()
+    reserva = sesion.get(Reserva, creada["reserva_id"])
+    reserva.vence_at = ahora() - timedelta(minutes=1)
+    sesion.commit()
+
+    assert main() == 0
+
+    sesion.expire_all()
+    reserva = sesion.get(Reserva, creada["reserva_id"])
+    pago = sesion.get(PagoDeReserva, creada["pago_id"])
+    assert reserva.estado is not EstadoReserva.PROVISORIA, "el turno sigue retenido"
+    assert pago.estado is EstadoPago.VENCIDO, "el pago quedó diciendo «esperando»"
+
+
+def test_el_barrido_NO_toca_las_que_todavia_no_vencieron(
+    api, sesion, cancha, tarifa_base, abierto
+):
+    """Control del test de arriba: si venciera todo, aquél pasaría igual con el
+    barrido llevándose reservas vivas — que es peor que no correr."""
+    from scripts.vencer_provisorias import main
+
+    _registrar(api)
+    creada = _reservar(api, cancha).json()
+
+    assert main() == 0
+
+    sesion.expire_all()
+    reserva = sesion.get(Reserva, creada["reserva_id"])
+    pago = sesion.get(PagoDeReserva, creada["pago_id"])
+    assert reserva.estado is EstadoReserva.PROVISORIA
+    assert pago.estado is EstadoPago.PENDIENTE
+
+
+def test_el_barrido_no_toca_una_reserva_YA_PAGADA(
+    api, sesion, cancha, tarifa_base, abierto
+):
+    """🔴 El caso que rompería lo que el jugador pagó.
+
+    Una confirmada no tiene `vence_at` —se limpia al aprobar el pago— así que el
+    barrido no la ve. Este test es lo que sostiene esa limpieza: si algún día se
+    dejara de limpiar, acá se vería.
+    """
+    from scripts.vencer_provisorias import main
+
+    _registrar(api)
+    creada = _reservar(api, cancha).json()
+    api.post(f"/api/portal/pagos/{creada['pago_id']}/simular")
+
+    assert main() == 0
+
+    sesion.expire_all()
+    reserva = sesion.get(Reserva, creada["reserva_id"])
+    assert reserva.estado is EstadoReserva.CONFIRMADA, "se llevó un turno pagado"
