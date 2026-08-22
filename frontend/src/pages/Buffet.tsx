@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-import { AlertTriangle, Plus, ShoppingCart } from 'lucide-react'
+import { AlertTriangle, CupSoda, Plus, ShoppingCart } from 'lucide-react'
 
 import { buffet as api } from '@/lib/api'
 import type { ProductoDeBuffet } from '@/lib/api'
@@ -20,6 +20,7 @@ import { DialogoDeConsumo } from '@/components/DialogoDeConsumo'
 import { FormularioDeProducto } from '@/components/FormularioDeProducto'
 import { AvisoDeError, filaInactiva } from '@/components/listado'
 import { Button } from '@/components/ui/button'
+import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 
 export function Buffet() {
   const { actual } = useSucursal()
@@ -149,7 +150,7 @@ export function Buffet() {
 
   return (
     <div className="space-y-3">
-      <EncabezadoDePantalla titulo={<h1 className="text-lg font-semibold">Buffet</h1>}>
+      <EncabezadoDePantalla titulo={<TituloPantalla icono={CupSoda}>Buffet</TituloPantalla>}>
         <Button variant="outline" onClick={() => setVendiendo(true)}>
           <ShoppingCart className="size-4" />
           Vender

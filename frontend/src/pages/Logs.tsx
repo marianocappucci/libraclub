@@ -12,8 +12,9 @@
 // dos pestañas, y el kit resuelve `@/components/ui/*` contra el CONSUMIDOR. Sin
 // ese archivo el build no resuelve el import — no es un error de runtime, no
 // llega a compilar.
+import { ScrollText } from 'lucide-react'
 import { Logs as LogsCompartido } from 'libra-ui/Logs'
 
 export function Logs() {
-  return <LogsCompartido basePath="/api/logs" />
+  return <LogsCompartido icono={ScrollText} basePath="/api/logs" />
 }
