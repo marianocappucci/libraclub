@@ -4,6 +4,7 @@ import { Agenda } from '@/pages/Agenda'
 import { Buffet } from '@/pages/Buffet'
 import { Caja } from '@/pages/Caja'
 import { CuentaCorriente } from '@/pages/CuentaCorriente'
+import { CuentaCorrienteDetalle } from '@/pages/CuentaCorrienteDetalle'
 import { Horarios } from '@/pages/Horarios'
 import { Canchas } from '@/pages/Canchas'
 import { Configuracion } from '@/pages/Configuracion'
@@ -103,6 +104,12 @@ function Backoffice() {
           <Route path="/caja" element={<Caja />} />
           <Route path="/buffet" element={<Buffet />} />
           <Route path="/cuenta-corriente" element={<CuentaCorriente />} />
+          {/* Mismo criterio que el detalle de torneo: al lado del listado y no
+              anidado, porque no comparte nada con él salvo el camino. */}
+          <Route
+            path="/cuenta-corriente/:id"
+            element={<CuentaCorrienteDetalle />}
+          />
           <Route path="/configuracion" element={<Configuracion />} />
           <Route path="/logs" element={<Logs />} />
           {/* Las rutas no llevan guarda de rol: el permiso lo decide el

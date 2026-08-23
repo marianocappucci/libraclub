@@ -52,3 +52,21 @@ describe('formateo de fechas', () => {
     expect(pesos('no es un número')).toBe('')
   })
 })
+
+describe('🔴 las fechas sin hora no se corren un día', () => {
+  it('un aaaa-mm-dd se muestra tal cual, sin convertir de zona', () => {
+    // Es lo que serializa una columna `date`: el extracto de la cuenta
+    // corriente, el `desde`/`hasta` de un torneo, el `materializada_hasta` de
+    // una serie. `new Date('2026-08-22')` es medianoche UTC = 21:00 del 21 en
+    // Argentina, así que convertirlo mostraba SIEMPRE el día anterior.
+    expect(fecha('2026-08-22')).toBe('22-08-2026')
+    expect(fecha('2026-01-01')).toBe('01-01-2026')
+  })
+
+  it('el control — con hora sí se convierte, que es lo que hay que conservar', () => {
+    // Sin este caso, "no convertir nunca" pasaría el test de arriba y rompería
+    // la agenda: un turno de las 22:00 de Argentina llega como 01:00 UTC del
+    // día siguiente y tiene que mostrarse en el día del complejo.
+    expect(fecha('2026-09-02T01:00:00Z')).toBe('01-09-2026')
+  })
+})

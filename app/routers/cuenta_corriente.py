@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -22,6 +23,14 @@ router = APIRouter(prefix="/api/cuenta-corriente", tags=["cuenta corriente"])
 class PagoEntrada(BaseModel):
     monto: Decimal = Field(gt=0)
     medio_pago: str
+    #: Fecha de la línea en el extracto. Vacío = hoy. NO mueve el movimiento de
+    #: caja, que va siempre al turno abierto — ver `servicios/cuenta_corriente`.
+    fecha: date | None = None
+    #: Vacío = "Pago a cuenta". Lo pone el servicio, no acá: un default escrito
+    #: en dos lugares es un default que en algún momento va a diferir.
+    concepto: str = ""
+    #: N° de transferencia, cheque. Va a `cc_pagos` y no al movimiento de caja.
+    referencia: str = ""
 
 
 class SaldoSalida(BaseModel):
@@ -31,6 +40,18 @@ class SaldoSalida(BaseModel):
     #: es plata, y dos pantallas sumando por su cuenta terminan mostrando
     #: números distintos.
     saldo: float
+
+
+class DeudoresSalida(BaseModel):
+    """El listado de cobranza, con el total ya sumado.
+
+    🔑 **El total lo suma el backend**, igual que cada saldo. Es la misma
+    razón: es plata, y una pantalla que la sume por su cuenta termina mostrando
+    un número distinto del que muestra otra.
+    """
+
+    deudores: list[SaldoSalida]
+    total_deuda: float
 
 
 def _exigir_base() -> None:
@@ -82,7 +103,10 @@ def pagar(
     if cliente is None:
         raise HTTPException(404, "no existe ese cliente")
     try:
-        saldo = servicio.registrar_pago(cliente, datos.monto, datos.medio_pago, usuario)
+        saldo = servicio.registrar_pago(
+            cliente, datos.monto, datos.medio_pago, usuario,
+            fecha=datos.fecha, concepto=datos.concepto, referencia=datos.referencia,
+        )
     except servicio_caja.SinTurnoAbierto as e:
         raise HTTPException(409, str(e)) from e
     except servicio_caja.MedioDePagoInvalido as e:
@@ -114,7 +138,7 @@ def ver(
     }
 
 
-@router.get("/deudores", response_model=list[SaldoSalida])
+@router.get("/deudores", response_model=DeudoresSalida)
 def deudores(_: object = Depends(require_staff)):
     """Quién debe y cuánto: la pantalla de cobranza.
 
@@ -124,11 +148,15 @@ def deudores(_: object = Depends(require_staff)):
     rol que no la usa.
     """
     _exigir_base()
-    return [
-        SaldoSalida(
-            cliente_id=int(d["id"]),
-            cliente=d.get("name") or "",
-            saldo=float(d["saldo"]),
-        )
-        for d in servicio.deudores()
-    ]
+    filas = servicio.deudores()
+    return DeudoresSalida(
+        deudores=[
+            SaldoSalida(
+                cliente_id=int(d["id"]),
+                cliente=d.get("name") or "",
+                saldo=float(d["saldo"]),
+            )
+            for d in filas
+        ],
+        total_deuda=servicio.total_deuda(filas),
+    )

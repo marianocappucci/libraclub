@@ -17,7 +17,23 @@ export const TZ = 'America/Argentina/Buenos_Aires'
  * con guiones. Lo agarró el test; leyendo el código, `es-AR` + `2-digit` parece
  * que ya diera el formato pedido.
  */
+/** Un `aaaa-mm-dd` pelado, tal como lo serializa una columna `date`. */
+const SOLO_FECHA = /^(\d{4})-(\d{2})-(\d{2})$/
+
 export function fecha(valor: string | Date | null | undefined): string {
+  // 🔴 **Un `aaaa-mm-dd` no es un instante: es un día del calendario**, y
+  // convertirlo de zona lo corre uno para atrás SIEMPRE. `new Date('2026-08-22')`
+  // es medianoche UTC, que en Argentina son las 21:00 del 21 — así que el
+  // extracto de la cuenta corriente, las fechas de un torneo y la ventana de una
+  // serie mostraban todas el día anterior. No es un caso de borde nocturno como
+  // el que cuida `diaISO`: es cada valor, a toda hora.
+  //
+  // Se reordena el texto sin construir un `Date`, que es lo único que no puede
+  // volver a corromperse: no hay zona de la que convertir.
+  if (typeof valor === 'string') {
+    const partes = SOLO_FECHA.exec(valor)
+    if (partes) return `${partes[3]}-${partes[2]}-${partes[1]}`
+  }
   const d = aDate(valor)
   if (!d) return ''
   const partes = new Intl.DateTimeFormat('es-AR', {

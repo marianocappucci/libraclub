@@ -1,41 +1,95 @@
-/** La cobranza: quién debe, cuánto, y el extracto de cada uno.
+/** La cobranza: quién debe y cuánto.
  *
- * Una sola pantalla con la lista a la izquierda y el detalle a la derecha: el
- * uso real es *"¿quién me debe?"* seguido de *"mostrame lo de éste"*, y partirlo
- * en dos rutas obligaría a volver atrás en cada cliente.
+ * Converge con el listado de cuenta corriente de Contalibra —`DataTable` con
+ * buscador, pastilla de saldo y la tarjeta con el total por cobrar arriba— y el
+ * extracto de cada cliente pasó a su propia ruta, `/cuenta-corriente/:id`.
  *
- * 🔑 **El saldo lo calcula el backend y acá sólo se muestra.** Es plata, y dos
- * lugares sumando por su cuenta terminan mostrando números distintos.
+ * > Hasta el 2026-08-22 esto era **una sola pantalla partida al medio**, con la
+ * > lista a la izquierda y el detalle a la derecha. El argumento era que el uso
+ * > real es *"¿quién me debe?"* seguido de *"mostrame lo de éste"*. Sigue siendo
+ * > cierto; lo que lo movió es que el resto de la familia abre el detalle en su
+ * > propia ruta, y una pantalla que se ve distinta en cada producto obliga a
+ * > reaprenderla en cada uno.
+ *
+ * 🔑 **El saldo y el total los calcula el backend y acá sólo se muestran.** Es
+ * plata, y dos lugares sumando por su cuenta terminan mostrando números
+ * distintos.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import type { ColumnDef } from '@tanstack/react-table'
+import { Eye, NotebookText } from 'lucide-react'
+import { DataTable, anchoColumnaAcciones, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-
-import { MEDIOS_DE_PAGO, cuentaCorriente } from '@/lib/api'
-import type { MovimientoDeCuenta, SaldoDeCuenta } from '@/lib/api'
-import { fecha, pesos } from '@/lib/fechas'
-import { AvisoDeError } from '@/components/listado'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { NotebookText } from 'lucide-react'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
+
+import { cuentaCorriente } from '@/lib/api'
+import type { SaldoDeCuenta } from '@/lib/api'
+import { pesos } from '@/lib/fechas'
+import { AvisoDeError } from '@/components/listado'
+import { BadgeDeSaldo } from '@/components/saldo'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
 
 export function CuentaCorriente() {
   const [deudores, setDeudores] = useState<SaldoDeCuenta[]>([])
-  const [elegido, setElegido] = useState<number | null>(null)
+  const [totalDeuda, setTotalDeuda] = useState(0)
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const navegar = useNavigate()
 
   const recargar = useCallback(() => {
     setCargando(true)
     cuentaCorriente
       .deudores()
-      .then(setDeudores)
+      .then((datos) => {
+        setDeudores(datos.deudores)
+        setTotalDeuda(datos.total_deuda)
+      })
       .catch((e: Error) => setError(e.message))
       .finally(() => setCargando(false))
   }, [])
 
   useEffect(recargar, [recargar])
+
+  // No hay columna de CUIT/DNI, y no es un olvido: la trae `clients` de
+  // LibraCore, donde este producto deja el `cuit_dni` **vacío a propósito**
+  // (ver `servicios/cuenta_corriente.py`). Una columna que siempre dice "—"
+  // invita a "arreglarla" espejando el documento, y eso abriría un segundo
+  // camino al saldo que contaría cada deuda dos veces.
+  const columnas = useMemo<ColumnDef<SaldoDeCuenta, unknown>[]>(
+    () => [
+      {
+        accessorKey: 'cliente',
+        header: sortableHeader('Cliente'),
+        cell: ({ row }) => <span className="font-medium">{row.original.cliente}</span>,
+      },
+      {
+        accessorKey: 'saldo',
+        header: sortableHeader('Saldo'),
+        cell: ({ row }) => <BadgeDeSaldo monto={row.original.saldo} />,
+      },
+      {
+        id: 'acciones',
+        header: '',
+        size: anchoColumnaAcciones(1),
+        enableSorting: false,
+        cell: ({ row }) => (
+          <div className="flex justify-end">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={`Ver la cuenta de ${row.original.cliente}`}
+              onClick={() => navegar(`/cuenta-corriente/${row.original.cliente_id}`)}
+            >
+              <Eye className="size-4" />
+            </Button>
+          </div>
+        ),
+      },
+    ],
+    [navegar],
+  )
 
   if (cargando) return <p className="text-muted-foreground">Cargando…</p>
 
@@ -46,182 +100,33 @@ export function CuentaCorriente() {
       />
       <AvisoDeError mensaje={error} />
 
-      {deudores.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          Nadie tiene movimientos en cuenta corriente todavía. Las reservas se fían
-          desde el detalle del turno, con «Cargar a la cuenta».
-        </p>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-[minmax(0,20rem)_1fr]">
-          <ListaDeDeudores deudores={deudores} elegido={elegido} onElegir={setElegido} />
-          {elegido === null ? (
-            <p className="text-sm text-muted-foreground">
-              Elegí un cliente para ver su extracto.
+      {/* Sólo si hay algo que cobrar: una tarjeta que dice "$0" ocupa el lugar
+          más visible de la pantalla para no informar nada. */}
+      {totalDeuda > 0 && (
+        <Card className="border-0 bg-amber-50 dark:bg-amber-950/40">
+          <CardContent className="py-3 text-center">
+            <p className="text-sm text-muted-foreground">Total por cobrar</p>
+            <p className="text-xl font-bold text-amber-800 dark:text-amber-400">
+              {pesos(totalDeuda)}
             </p>
-          ) : (
-            <Detalle clienteId={elegido} onPago={recargar} />
-          )}
-        </div>
+          </CardContent>
+        </Card>
       )}
-    </div>
-  )
-}
 
-function ListaDeDeudores({ deudores, elegido, onElegir }: {
-  deudores: SaldoDeCuenta[]
-  elegido: number | null
-  onElegir: (id: number) => void
-}) {
-  return (
-    <ul className="divide-y rounded-lg border bg-card">
-      {deudores.map((d) => (
-        <li key={d.cliente_id}>
-          <button
-            type="button"
-            onClick={() => onElegir(d.cliente_id)}
-            aria-current={d.cliente_id === elegido ? 'true' : undefined}
-            className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted ${
-              d.cliente_id === elegido ? 'bg-muted' : ''
-            }`}
-          >
-            <span className="truncate">{d.cliente}</span>
-            <Saldo monto={d.saldo} />
-          </button>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-/** 🔑 Un saldo a favor no es un error: se dice «a favor», no un número negativo
- *  con signo menos que hay que interpretar. */
-function Saldo({ monto }: { monto: number }) {
-  if (monto === 0) return <span className="text-muted-foreground">Al día</span>
-  if (monto > 0) return <span className="font-medium">{pesos(String(monto))}</span>
-  return (
-    <span className="text-muted-foreground">
-      {pesos(String(-monto))} a favor
-    </span>
-  )
-}
-
-function Detalle({ clienteId, onPago }: { clienteId: number; onPago: () => void }) {
-  const [datos, setDatos] = useState<
-    (SaldoDeCuenta & { movimientos: MovimientoDeCuenta[] }) | null
-  >(null)
-  const [monto, setMonto] = useState('')
-  const [medio, setMedio] = useState<string>(MEDIOS_DE_PAGO[0].valor)
-  const [enviando, setEnviando] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const recargar = useCallback(() => {
-    cuentaCorriente
-      .ver(clienteId)
-      .then(setDatos)
-      .catch((e: Error) => setError(e.message))
-  }, [clienteId])
-
-  useEffect(recargar, [recargar])
-
-  if (datos === null) return <p className="text-muted-foreground">Cargando…</p>
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-baseline justify-between gap-2 rounded-lg border bg-card p-4">
-        <div className="font-medium">{datos.cliente}</div>
-        <div className="text-lg"><Saldo monto={datos.saldo} /></div>
-      </div>
-
-      <div className="space-y-3 rounded-lg border bg-card p-4">
-        <div className="font-medium">Registrar un pago</div>
-        {/* El pago entra a la caja del turno abierto: sin turno, el backend
-            contesta 409 y el mensaje lo dice. No se esconde el formulario —
-            abrir la caja es lo que hay que hacer, y esconderlo no lo explica. */}
-        <div className="grid grid-cols-2 gap-2">
-          <div className="grid gap-1.5">
-            <Label htmlFor="monto-cc">Monto</Label>
-            <Input
-              id="monto-cc"
-              inputMode="decimal"
-              value={monto}
-              onChange={(e) => setMonto(e.target.value)}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="medio-cc">Medio</Label>
-            <select
-              id="medio-cc"
-              className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
-              value={medio}
-              onChange={(e) => setMedio(e.target.value)}
-            >
-              {MEDIOS_DE_PAGO.map((m) => (
-                <option key={m.valor} value={m.valor}>{m.etiqueta}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <AvisoDeError mensaje={error} />
-        <Button
-          disabled={enviando || !monto.trim()}
-          onClick={async () => {
-            setError(null)
-            setEnviando(true)
-            try {
-              await cuentaCorriente.pagar(clienteId, { monto, medio_pago: medio })
-              setMonto('')
-              recargar()
-              onPago()
-            } catch (e) {
-              setError((e as Error).message)
-            } finally {
-              setEnviando(false)
-            }
-          }}
-        >
-          {enviando ? 'Registrando…' : 'Registrar pago'}
-        </Button>
-      </div>
-
-      <Extracto movimientos={datos.movimientos} />
-    </div>
-  )
-}
-
-function Extracto({ movimientos }: { movimientos: MovimientoDeCuenta[] }) {
-  if (movimientos.length === 0) {
-    return <p className="text-sm text-muted-foreground">Sin movimientos.</p>
-  }
-  return (
-    <div className="overflow-x-auto rounded-lg border bg-card">
-      <table className="w-full text-sm">
-        <thead className="border-b text-muted-foreground">
-          <tr>
-            <th className="px-3 py-2 text-left font-medium">Fecha</th>
-            <th className="px-3 py-2 text-left font-medium">Concepto</th>
-            <th className="px-3 py-2 text-right font-medium">Debe</th>
-            <th className="px-3 py-2 text-right font-medium">Haber</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y">
-          {movimientos.map((m, i) => (
-            // El motor no devuelve un id único por movimiento —vienen de tres
-            // tablas distintas—, así que la key va por posición.
-            <tr key={`${m.fecha}-${i}`}>
-              <td className="whitespace-nowrap px-3 py-2">{fecha(m.fecha)}</td>
-              <td className="px-3 py-2">{m.concepto}</td>
-              {/* 🔑 Dos columnas y no una con signo: el monto viene siempre
-                  positivo y el que dice de qué lado va es `tipo`. */}
-              <td className="px-3 py-2 text-right">
-                {m.tipo === 'debito' ? pesos(String(m.monto)) : ''}
-              </td>
-              <td className="px-3 py-2 text-right">
-                {m.tipo === 'debito' ? '' : pesos(String(m.monto))}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable
+        columns={columnas}
+        data={deudores}
+        // La fila entera abre la cuenta, igual que en Torneos. El botón del ojo
+        // queda igual porque es lo que hace el resto de la familia y porque es
+        // la única forma de llegar al detalle con el teclado.
+        onRowClick={(d: SaldoDeCuenta) => navegar(`/cuenta-corriente/${d.cliente_id}`)}
+        emptyMessage="Nadie tiene movimientos en cuenta corriente todavía. Las reservas se fían desde el detalle del turno, con «Cargar a la cuenta»."
+        search={{
+          campos: (d: SaldoDeCuenta) => [d.cliente],
+          placeholder: 'Buscar cliente',
+          ariaLabel: 'Buscar cliente',
+        }}
+      />
     </div>
   )
 }
