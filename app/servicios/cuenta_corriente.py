@@ -33,6 +33,7 @@ from libracore.db import core as libracore_core
 from libracore.db import cuenta_corriente as db_cc
 
 from app.servicios import caja as servicio_caja
+from app.tiempo import hoy
 
 
 def _espejar_cliente(cliente) -> int:
@@ -79,7 +80,7 @@ def cargar_reserva(cliente, reserva, usuario: dict) -> float:
     _espejar_cliente(cliente)
     servicio_caja.espejar_usuario(usuario)
     db_cc.create_cc_debito(
-        int(cliente.id), float(reserva.precio), date.today().isoformat(),
+        int(cliente.id), float(reserva.precio), hoy().isoformat(),
         concepto=f"Reserva del {reserva.comienza_at:%d-%m-%Y %H:%M}",
         # Idempotente en el motor: dos clicks no fían dos veces lo mismo.
         referencia=f"reserva-{reserva.id}",
@@ -88,7 +89,15 @@ def cargar_reserva(cliente, reserva, usuario: dict) -> float:
     return saldo(int(cliente.id))
 
 
-def registrar_pago(cliente, monto: Decimal, medio_pago: str, usuario: dict) -> float:
+def registrar_pago(
+    cliente,
+    monto: Decimal,
+    medio_pago: str,
+    usuario: dict,
+    fecha: date | None = None,
+    concepto: str = "",
+    referencia: str = "",
+) -> float:
     """Un pago a cuenta. Entra a la caja **y** baja el saldo del cliente.
 
     🔑 **Son dos registros y ninguno sobra.** `caja_movimientos` es lo que hay
@@ -112,15 +121,27 @@ def registrar_pago(cliente, monto: Decimal, medio_pago: str, usuario: dict) -> f
     mientras `cc_pagos` sí registra los dos. El saldo bajaría dos veces y el
     cajón tendría una sola. Un pago no es idempotente: dos pagos son dos pagos,
     y deshacer uno equivocado es otra operación.
+
+    ⚠️ **La `referencia` que teclea el mostrador va a `cc_pagos` y NO al
+    movimiento de caja**, por lo mismo de arriba: `create_cc_pago` es un INSERT
+    pelado —no deduplica por referencia—, así que ahí guardar el número de
+    transferencia es gratis; en `caja_movimientos` dos pagos con la misma
+    referencia se colapsarían en uno.
+
+    🔑 **La `fecha` es la de la línea del extracto, no la del cajón.** El
+    movimiento de caja lo escribe `caja.cobrar` contra el **turno abierto**, que
+    es de hoy por construcción: la plata entró hoy. Antedatar un pago mueve dónde
+    aparece en el extracto del cliente y no toca ningún arqueo, que es
+    justamente lo que se quiere cuando se carga un pago que se recibió ayer.
     """
     _espejar_cliente(cliente)
     servicio_caja.cobrar(
         usuario, monto, f"Pago a cuenta — {cliente.nombre}", medio_pago,
     )
     db_cc.create_cc_pago(
-        int(cliente.id), float(monto), date.today().isoformat(),
-        concepto="Pago a cuenta", referencia="", medio_pago=medio_pago,
-        caja_id=None, usuario_id=int(usuario["id"]),
+        int(cliente.id), float(monto), (fecha or hoy()).isoformat(),
+        concepto=concepto or "Pago a cuenta", referencia=referencia,
+        medio_pago=medio_pago, caja_id=None, usuario_id=int(usuario["id"]),
     )
     return saldo(int(cliente.id))
 
@@ -142,3 +163,14 @@ def movimientos(cliente_id: int) -> list[dict]:
 def deudores() -> list[dict]:
     """Los clientes con movimientos en la cuenta, ordenados por saldo."""
     return db_cc.get_clientes_con_saldo_cc()
+
+
+def total_deuda(filas: list[dict]) -> float:
+    """Lo que el complejo tiene por cobrar, sumando **sólo los saldos positivos**.
+
+    🔑 Un saldo a favor no compensa la deuda de otro cliente: son cuentas
+    distintas. Sumar los negativos daría un total más chico que la plata que
+    efectivamente hay que salir a cobrar, y nadie sabría por qué no cierra
+    contra la suma de la columna.
+    """
+    return float(sum(float(f["saldo"]) for f in filas if float(f["saldo"]) > 0))

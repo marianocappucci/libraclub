@@ -21,6 +21,7 @@ from libraauth.models import Base as AuthBase
 
 from app.config import Config
 from app.main import crear_app
+from app.tiempo import hoy
 
 USUARIO, CLAVE = "admin", "clave-de-prueba"
 
@@ -233,7 +234,7 @@ def test_la_lista_de_deudores_la_ve_el_mostrador(api, cancha, cliente, tarifa_ba
 
     deudores = api.get("/api/cuenta-corriente/deudores")
     assert deudores.status_code == 200, deudores.text
-    assert [(d["cliente"], d["saldo"]) for d in deudores.json()] == [
+    assert [(d["cliente"], d["saldo"]) for d in deudores.json()["deudores"]] == [
         (cliente.nombre, float(reserva["precio"]))]
 
 
@@ -252,3 +253,94 @@ def test_sin_base_de_libracore_lo_dice_en_vez_de_romperse(engine, sesion, monkey
         assert "LIBRACLUB_LIBRACORE_DATABASE_URL" in r.json()["detail"]
     finally:
         AuthBase.metadata.drop_all(engine)
+def test_el_total_por_cobrar_no_lo_baja_el_que_pago_de_mas(
+    api, cancha, cliente, tarifa_base
+):
+    """🔑 Los saldos a favor **no** se restan del total.
+
+    Son cuentas distintas: lo que uno adelantó no es plata que se le deje de
+    reclamar a otro. Sumando todos los saldos, este total daría más chico que lo
+    que efectivamente hay que salir a cobrar, y nadie sabría por qué no cierra
+    contra la columna de la pantalla.
+    """
+    reserva = _reserva(api, cancha, cliente)
+    deuda = api.post(
+        f"/api/cuenta-corriente/reservas/{reserva['id']}/cargar").json()["saldo"]
+
+    # Un segundo cliente que paga sin deber nada: queda con saldo a favor.
+    otro = api.post("/api/clientes", json={"nombre": "Adelantados FC"})
+    assert otro.status_code == 201, otro.text
+    api.post("/api/caja/turnos", json={"monto_inicial": "0"})
+    a_favor = api.post(f"/api/cuenta-corriente/clientes/{otro.json()['id']}/pagos",
+                       json={"monto": "2500", "medio_pago": "efectivo"})
+    assert a_favor.status_code == 200, a_favor.text
+    assert a_favor.json()["saldo"] == -2500.0
+
+    listado = api.get("/api/cuenta-corriente/deudores").json()
+    assert listado["total_deuda"] == deuda
+    # El control: los dos están en el listado, así que el total no da eso por
+    # haberse quedado corto de filas.
+    assert len(listado["deudores"]) == 2, listado
+    assert deuda > 2500, "sin esto, restar el saldo a favor daría el mismo número"
+
+
+def test_el_pago_guarda_la_fecha_el_concepto_y_la_referencia(api, cliente):
+    """Lo que se teclea en el diálogo de cobro tiene que llegar al extracto.
+
+    Sin esto, los tres campos se pueden agregar a la pantalla y perderse en el
+    camino: el pago se registra igual y el saldo baja igual, así que nada se ve
+    roto.
+    """
+    api.post("/api/caja/turnos", json={"monto_inicial": "0"})
+    r = api.post(f"/api/cuenta-corriente/clientes/{cliente.id}/pagos", json={
+        "monto": "1000", "medio_pago": "transferencia", "fecha": "2026-09-10",
+        "concepto": "Seña del torneo", "referencia": "TRF-4412"})
+    assert r.status_code == 200, r.text
+
+    movs = api.get(f"/api/cuenta-corriente/clientes/{cliente.id}").json()["movimientos"]
+    assert len(movs) == 1, movs
+    assert movs[0]["fecha"] == "2026-09-10"
+    assert movs[0]["concepto"] == "Seña del torneo"
+    assert movs[0]["referencia"] == "TRF-4412"
+    assert movs[0]["medio"] == "transferencia"
+
+
+def test_sin_fecha_ni_concepto_el_pago_usa_los_defaults(api, cliente):
+    """El control del test de arriba: los tres campos son opcionales.
+
+    Si el endpoint los exigiera, aquél pasaría igual y este cortaría.
+    """
+    api.post("/api/caja/turnos", json={"monto_inicial": "0"})
+    r = api.post(f"/api/cuenta-corriente/clientes/{cliente.id}/pagos",
+                 json={"monto": "1000", "medio_pago": "efectivo"})
+    assert r.status_code == 200, r.text
+
+    movs = api.get(f"/api/cuenta-corriente/clientes/{cliente.id}").json()["movimientos"]
+    assert movs[0]["concepto"] == "Pago a cuenta"
+    assert movs[0]["fecha"] == hoy().isoformat()
+    assert movs[0]["referencia"] == ""
+
+
+def test_dos_pagos_con_la_misma_referencia_entran_los_dos_a_la_caja(api, cliente):
+    """🔴 La referencia ahora la teclea el mostrador, y ahí está la trampa.
+
+    `create_caja_movimiento` es idempotente por referencia. Si la referencia del
+    pago se le pasara también al movimiento de caja —que es lo que hace
+    Contalibra, donde el cobro no pasa por un turno— dos pagos con el mismo
+    número de comprobante dejarían **un solo** movimiento en el cajón mientras
+    `cc_pagos` registra los dos: el saldo baja 2000 y en la caja hay 1000.
+
+    Y repetir la referencia no es un caso raro: es un dedo pesado sobre
+    «Registrar pago», o dos cobros contra el mismo recibo.
+    """
+    api.post("/api/caja/turnos", json={"monto_inicial": "0"})
+    for _ in range(2):
+        r = api.post(f"/api/cuenta-corriente/clientes/{cliente.id}/pagos", json={
+            "monto": "1000", "medio_pago": "efectivo", "referencia": "REC-1"})
+        assert r.status_code == 200, r.text
+
+    turno = api.get("/api/caja/turnos/actual").json()
+    assert turno["resumen"]["efectivo_ventas"] == 2000.0, (
+        "los dos pagos tienen que estar en el cajón, no uno")
+    assert api.get(
+        f"/api/cuenta-corriente/clientes/{cliente.id}").json()["saldo"] == -2000.0

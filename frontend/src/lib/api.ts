@@ -368,8 +368,26 @@ export interface MovimientoDeCuenta {
   concepto: string
   /** 🔑 **Siempre positivo**: el signo lo pone `tipo`, no el número. */
   monto: number
+  /** N° de transferencia o cheque que se tecleó al cobrar. Vacío si no se puso. */
+  referencia: string
   medio: string
   usuario_nombre: string | null
+}
+
+/** Lo que el diálogo de cobro le manda al backend.
+ *
+ * `fecha`, `concepto` y `referencia` son opcionales: vacíos, el backend usa
+ * hoy y "Pago a cuenta". El default vive **de un solo lado** —el servicio— para
+ * que no haya dos que puedan diferir.
+ */
+export interface PagoDeCuenta {
+  monto: string
+  medio_pago: string
+  /** ISO `aaaa-mm-dd`. Es la fecha de la línea del extracto: el movimiento de
+   *  caja va igual al turno abierto, que es de hoy. */
+  fecha?: string
+  concepto?: string
+  referencia?: string
 }
 
 export const cuentaCorriente = {
@@ -377,14 +395,22 @@ export const cuentaCorriente = {
   cargar: (reservaId: number) =>
     api.post<SaldoDeCuenta>(`/api/cuenta-corriente/reservas/${reservaId}/cargar`, {}),
   /** Un pago a cuenta. Exige turno de caja abierto — el backend contesta 409. */
-  pagar: (clienteId: number, cuerpo: { monto: string; medio_pago: string }) =>
+  pagar: (clienteId: number, cuerpo: PagoDeCuenta) =>
     api.post<SaldoDeCuenta>(`/api/cuenta-corriente/clientes/${clienteId}/pagos`, cuerpo),
   ver: (clienteId: number) =>
     api.get<SaldoDeCuenta & { movimientos: MovimientoDeCuenta[] }>(
       `/api/cuenta-corriente/clientes/${clienteId}`,
     ),
-  /** La pantalla de cobranza. De admin. */
-  deudores: () => api.get<SaldoDeCuenta[]>('/api/cuenta-corriente/deudores'),
+  /** La pantalla de cobranza. De **mostrador**: el encargado es el que fía y
+   *  el que cobra, y sin ver el saldo no puede atender al que viene a pagar.
+   *
+   *  El `total_deuda` lo suma el backend —sólo los saldos positivos— por la
+   *  misma razón que cada saldo: es plata, y dos lugares sumándola por su
+   *  cuenta terminan mostrando números distintos. */
+  deudores: () =>
+    api.get<{ deudores: SaldoDeCuenta[]; total_deuda: number }>(
+      '/api/cuenta-corriente/deudores',
+    ),
 }
 
 // ── Horario de atención ──────────────────────────────────────────────────
