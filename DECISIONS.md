@@ -348,3 +348,61 @@ parezca correcta.
 
 **Si aparece la necesidad**, el lugar es `fixture.orden_de_clasificados`, y hay
 que decidir *qué* reglamento antes de escribir código.
+
+## ADR-014 — El cobro con QR usa la tabla del portal, y sólo el poll toca la caja
+
+**Contexto.** Pedido de tener acá la misma función de facturación automática con
+QR de MercadoPago que Contalibra tiene en producción desde el 2026-08-19. Este
+producto ya tenía MercadoPago a medias: el webhook verificado por firma existe
+desde F5, pero **nunca inicia un pago** — `POST /api/portal/reservas` devuelve
+`url_de_pago: null`. El QR del mostrador es, entonces, el primer cobro real de
+MercadoPago del producto.
+
+**Decisión.** El pago del mostrador es un `PagoDeReserva` más, con una columna
+`canal` que dice de dónde vino (migración `0008`). Misma tabla, misma
+`external_reference`, mismo webhook. Lo que cambia es **qué hace al
+acreditarse**:
+
+- `PORTAL`: el pago **confirma la reserva** — sin pago no hay reserva.
+- `MOSTRADOR`: la reserva ya está confirmada (o jugada, que es cuando el grupo
+  suele pagar); lo que falta es el movimiento de caja y, si está prendido, la
+  factura.
+
+**Por qué una columna y no el prefijo de la referencia.** Distinguirlos leyendo
+el string sería información de negocio escondida en un identificador: el día que
+alguien cambie el formato, el cobro del mostrador empieza a comportarse como uno
+del portal y nada lo avisa.
+
+**🔴 Sólo el poll registra el cobro en la caja, y no es una omisión.** El
+movimiento va contra el **turno abierto de quien cobra**, y el webhook no sabe
+quién es: llega de MercadoPago, sin sesión. Un ingreso sin `turno_id` queda
+fuera de todo arqueo — plata que entró y que ningún cierre cuenta. Así que el
+webhook sella el pago y el poll —el tick siguiente, con el encargado ahí—
+completa. Si el webhook llegó primero, el poll lo ve aprobado y hace su parte
+igual; si no hay turno abierto, el poll corta con 409 **sin perder el cobro**:
+el pago ya quedó sellado y el tick posterior a abrir la caja lo completa.
+
+**Qué se cobra: el turno entero.** Cancha **más** el consumo de buffet, que es
+el mismo total que factura `facturar_reserva`. Si el QR cobrara sólo
+`reserva.precio`, la factura saldría por más de lo que entró y el arqueo no
+cerraría — y el que lo descubre es el cierre de turno, horas después.
+
+**La idempotencia del cobro es `caja_movimiento_id`, no la de LibraCore.** El
+chequeo de `create_caja_movimiento` es por `(referencia, factura_id)`: un primer
+intento sin factura —porque ARCA estaba caído— y un reintento que sí factura
+**no se ven entre sí** y entran dos veces. La pantalla pollea cada 3 segundos,
+así que eso no es un caso raro.
+
+**Dos bases, sin transacción única.** La factura y el movimiento viven en la
+base de LibraCore; el pago y la reserva, en la del dominio. Cada parte es
+idempotente por separado — el mismo criterio que VentaLibra documenta en su
+ADR-022.
+
+**Bajar la orden del QR es parte del cobro.** `DELETE /api/reservas/{id}/mp-qr`
+saca el monto del cartel al cancelar o al agotarse la espera. Contalibra **no
+llama nunca** a `eliminar_orden_qr` —no tiene un solo call site en todo el
+repo— y por eso depende de que nadie escanee entre un cobro y el siguiente.
+
+**El rol.** Cobrar es `staff`; facturar a mano sigue siendo `admin`. La factura
+que sale sola no rompe esa línea: quien decidió que se emita fue el dueño, al
+prender el toggle en Configuración — el encargado no elige nada.

@@ -7,6 +7,21 @@ versionado [SemVer](https://semver.org/lang/es/).
 
 ### Agregado
 
+- **Cobro con QR de MercadoPago y factura automática** (ADR-014): desde el
+  detalle de un turno confirmado o jugado, «Cobrar con QR» pone el total —la
+  cancha **más** el consumo de buffet— en el QR impreso del mostrador y espera a
+  que MercadoPago avise. Al acreditarse, el cobro entra a la caja del turno y
+  —si la instancia tiene la automática prendida— sale la factura sola, con las
+  dos cosas detalladas. El QR es el cartel fijo de la caja y no cambia nunca;
+  lo que cambia es cuánto cobra.
+
+  Es el **primer cobro real de MercadoPago del producto**: hasta acá el webhook
+  existía y verificaba firma, pero nada iniciaba un pago. Cancelar el cobro baja
+  el monto del cartel, para que el próximo que escanee no pague el turno
+  anterior. Sección nueva **Mercado Pago** en Configuración, que además reúne el
+  Webhook Secret del portal. Migración `0008`. 20 tests de backend y 9 de
+  frontend.
+
 - **Torneos** (F6): eliminación directa, todos contra todos y zonas con
   playoff, para pádel, tenis y fútbol. Inscripción con integrantes y cabezas de
   serie, sorteo reproducible por semilla, fixture con byes, programación de

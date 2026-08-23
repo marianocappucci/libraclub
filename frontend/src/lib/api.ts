@@ -304,6 +304,59 @@ export const facturacion = {
   emitir: (reservaId: number) => api.post<Factura>(`/api/reservas/${reservaId}/facturar`, {}),
 }
 
+/** Lo que el mostrador necesita saber del QR sin ver ninguna credencial. */
+export interface QrDisponible {
+  disponible: boolean
+  auto_facturar: boolean
+}
+
+export interface QrPuesto {
+  referencia: string
+  monto: number
+}
+
+export interface QrEstado {
+  /** `aprobado`, `pendiente`, `rechazado`, `sin_orden`. */
+  estado: string
+  payment_id: string | null
+  /** El comprobante que salió solo, si la automática está prendida. */
+  factura_id: number | null
+}
+
+/** El cobro con QR de MercadoPago en el mostrador.
+ *
+ * 🔑 **No hay ninguna imagen de QR.** Es el cartel impreso de la caja, que no
+ * cambia nunca; lo que `poner` cambia es cuánto cobra cuando alguien lo escanea.
+ */
+export const cobroQr = {
+  /** Si este mostrador puede cobrar por QR, y si eso factura solo. */
+  estado: () => api.get<QrDisponible>('/api/reservas/mp/estado'),
+  poner: (reservaId: number) =>
+    api.post<QrPuesto>(`/api/reservas/${reservaId}/mp-qr`, {}),
+  /** 🔴 Sin esto, el próximo que escanee paga el turno anterior. */
+  bajar: (reservaId: number) => api.del(`/api/reservas/${reservaId}/mp-qr`),
+  consultar: (reservaId: number) =>
+    api.get<QrEstado>(`/api/reservas/${reservaId}/mp-status`),
+}
+
+/** Las credenciales del QR. Sólo las lee la pantalla de Configuración, que es
+ *  admin: quien escriba acá cambia a qué cuenta va la plata del complejo. */
+export interface ConfigMercadoPago {
+  access_token: string
+  user_id: string
+  pos_id: string
+  webhook_secret: string
+  auto_facturar: boolean
+  /** Lo calcula el backend con el mismo criterio que usa el mostrador. */
+  configurado?: boolean
+}
+
+export const configMercadoPago = {
+  ver: () => api.get<ConfigMercadoPago>('/config/mercadopago'),
+  guardar: (datos: Omit<ConfigMercadoPago, 'configurado'>) =>
+    api.put<ConfigMercadoPago>('/config/mercadopago', datos),
+}
+
 export interface TurnoDeCaja {
   id: number
   usuario_id: number
