@@ -18,6 +18,7 @@ import { useJugador } from '@/portal/JugadorContext'
 import { DialogoDeCuenta } from '@/portal/DialogoDeCuenta'
 import { DialogoDePago } from '@/portal/DialogoDePago'
 import { AvisoDeError } from '@/components/listado'
+import { enDiasISO, hoyISO } from 'libra-ui/fechas'
 
 /** La sucursal que atiende este portal.
  *
@@ -28,19 +29,9 @@ import { AvisoDeError } from '@/components/listado'
  */
 const SUCURSAL = 1
 
-function hoyISO(): string {
-  return new Date().toISOString().slice(0, 10)
-}
-
-function enDias(n: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() + n)
-  return d.toISOString().slice(0, 10)
-}
-
 /** Los próximos días, para el selector. Sin calendario: en un complejo se
  *  reserva para esta semana, no para dentro de tres meses. */
-const DIAS = Array.from({ length: 14 }, (_, i) => enDias(i))
+const DIAS = Array.from({ length: 14 }, (_, i) => enDiasISO(i))
 
 const NOMBRE_DIA = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb']
 

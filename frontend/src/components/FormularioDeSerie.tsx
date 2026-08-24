@@ -8,12 +8,9 @@ import { Input } from '@/components/ui/input'
 import { buttonVariants } from '@/components/ui/button'
 import { AvisoDeError } from '@/components/listado'
 import { ResultadoDeSerie } from '@/components/ResultadoDeSerie'
+import { hoyISO } from 'libra-ui/fechas'
 
 const DIAS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
-
-function hoy(): string {
-  return new Date().toISOString().slice(0, 10)
-}
 
 function vacia(): SerieEntrada {
   return {
@@ -22,7 +19,7 @@ function vacia(): SerieEntrada {
     dia_semana: 1,
     hora: '20:00',
     duracion_min: 90,
-    desde: hoy(),
+    desde: hoyISO(),
     hasta: null,
   }
 }
