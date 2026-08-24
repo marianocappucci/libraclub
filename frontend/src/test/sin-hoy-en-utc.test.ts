@@ -14,8 +14,8 @@
 // de una sesión y de datos que habría que sembrar. El precio es que no ve una
 // fuga que pase por una variable intermedia; a cambio cubre todas, no las
 // pocas que tienen test de render.
-import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { join, relative } from 'node:path'
 import { cwd } from 'node:process'
 
 import { describe, expect, it } from 'vitest'
@@ -25,6 +25,13 @@ const RAIZ = cwd()
 const DIRECTORIOS = [join(RAIZ, 'src')]
 /** Si el barrido ve menos que esto, la ruta está mal y el cero no vale. */
 const MINIMO_DE_ARCHIVOS = 20
+
+/** 🔴 **Vacía a propósito, y esa es la afirmación.** Ningún módulo de este
+ *  producto deriva un día del calendario de un `toISOString()`: eso lo hace
+ *  `libra-ui/fechas`, donde el `Date` está anclado al mediodía UTC. Si algún
+ *  día hiciera falta una exención, se agrega acá con su razón — no se ensancha
+ *  el patrón. */
+const EXENTAS: string[] = []
 
 /** Sacarle el día a un instante UTC. Las tres formas que toma en la práctica. */
 const RECORTE_UTC =
@@ -80,6 +87,14 @@ describe('ningún día del calendario sale de un toISOString', () => {
     expect(fugasEn('   * `toISOString().slice(0, 10)` da la fecha en UTC.')).toEqual([])
   })
 
+  it('la lista de exentas está vacía en este producto', () => {
+    // 🔴 Un `for` sobre una lista vacía es un test que no puede fallar. Éste
+    // sí: afirma que en este producto NADA está exento, que es la propiedad
+    // que se quiere sostener. El día que alguien agregue una ruta, este assert
+    // lo obliga a mirar esta decisión.
+    expect(EXENTAS).toEqual([])
+  })
+
   it('el detector distingue el recorte a 10 del recorte a 19', () => {
     // `slice(0, 19)` es "un instante sin los milisegundos", no un día. La
     // distinción importa: prohibirlo también habría hecho ruido sobre código
@@ -87,19 +102,29 @@ describe('ningún día del calendario sale de un toISOString', () => {
     expect(fugasEn('  return d.toISOString().slice(0, 19)')).toEqual([])
   })
 
-  it('no queda ninguna fuga en el código del paquete', () => {
+  it('las exenciones son rutas vivas, no comodines olvidados', () => {
+    // 🔴 Una exención que apunta a un archivo que ya no existe no protege nada
+    // y **sigue tapando** todo lo que su patrón alcance. Si alguien renombra o
+    // borra un módulo exento, esto avisa acá en vez de dejar un agujero mudo.
+    for (const ruta of EXENTAS) {
+      expect(existsSync(join(RAIZ, ruta))).toBe(true)
+    }
+  })
+
+  it('no queda ninguna fuga en el código', () => {
     const sitios: string[] = []
     let revisados = 0
     for (const dir of DIRECTORIOS) {
       for (const f of archivos(dir)) {
-        // El módulo canónico es el único que puede tocar `toISOString()` para
-        // sacar un día: ahí el `Date` está anclado al mediodía UTC, así que el
-        // recorte no puede correrse. Es la excepción que hace que la regla se
-        // pueda cumplir en algún lado.
-        if (f.endsWith('fechas.ts')) continue
+        // 🔴 Comparación EXACTA contra la lista, no `endsWith('fechas.ts')`.
+        // Aquel sufijo eximía también al `lib/fechas.ts` de cada producto —el
+        // módulo de presentación, que no tiene ninguna razón para estar
+        // exento— y así el guard tenía un punto ciego del tamaño de un archivo
+        // entero.
+        if (EXENTAS.includes(relative(RAIZ, f))) continue
         revisados += 1
         for (const linea of fugasEn(readFileSync(f, 'utf8'))) {
-          sitios.push(`${f.replace(RAIZ, '')}:${linea}`)
+          sitios.push(`${relative(RAIZ, f)}:${linea}`)
         }
       }
     }
