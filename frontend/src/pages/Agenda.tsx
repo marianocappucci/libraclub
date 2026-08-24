@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { agenda, canchas as apiCanchas } from '@/lib/api'
 import type { Cancha, Semana, Turno } from '@/lib/api'
-import { hora, lunesDeLaSemana, nombreDelDia, pesos } from '@/lib/fechas'
+import { diaYMes, hora, lunesDeLaSemana, nombreDelDia, pesos } from '@/lib/fechas'
 import { useSucursal } from '@/context/SucursalContext'
 import { DialogoDeReserva } from '@/components/DialogoDeReserva'
 import { DetalleDeReserva } from '@/components/DetalleDeReserva'
@@ -136,7 +136,7 @@ export function Agenda() {
               {dias.map((dia) => (
                 <div key={dia} className="w-40 shrink-0">
                   <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    {nombreDelDia(dia)} {dia.slice(8, 10)}/{dia.slice(5, 7)}
+                    {nombreDelDia(dia)} {diaYMes(dia)}
                   </p>
                   <div className="space-y-1">
                     {(semana?.canchas[String(cancha.id)]?.[dia] ?? []).map((t) => (
