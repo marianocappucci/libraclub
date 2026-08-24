@@ -106,7 +106,19 @@ configure(
     # migración corre con el código nuevo mientras la instancia todavía sirve el
     # viejo, y si falla aborta el deploy en vez de dejar código nuevo sobre
     # esquema viejo. Ver `cmd_actualizar` en `libracore.provisioning`.
-    migraciones=("alembic", "upgrade", "head"),
+    # ⚠️ **Anidada, no plana.** Desde LibraCore `v1.51.0` esto es una secuencia
+    # de comandos, no un comando: la forma plana la rechaza el motor con
+    # `TypeError` al importar este módulo. Hasta el 2026-08-24 acá decía
+    # `("alembic", "upgrade", "head")`, que era válido contra el `v1.48.0` que
+    # este repo pineaba — pero el panel del VPS ya tenía instalado el `1.51.0`,
+    # así que el próximo deploy de este producto habría roto el panel entero al
+    # importar: `listar`, `backup` y `actualizar` incluidos.
+    #
+    # Una sola cadena: las revisiones de este repo crean sus 18 tablas propias
+    # —`canchas`, `reservas`, `torneos`, `sucursales`— y ninguna del esquema de
+    # LibraGenda, así que no hay una segunda `alembic_version` que aplicar antes.
+    # Gestiolibra y MedLibra sí la tienen y por eso declaran dos comandos.
+    migraciones=(("alembic", "upgrade", "head"),),
     # `health_path` **no se pasa**: desde hoy este producto sirve `/health`
     # además de `/salud`, que es el default del motor y la ruta de los otros
     # seis. Ver el comentario en `app/routers/salud.py` — con la SPA horneada,
