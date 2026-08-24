@@ -7,6 +7,7 @@ import { DialogoDeReserva } from '@/components/DialogoDeReserva'
 import { DetalleDeReserva } from '@/components/DetalleDeReserva'
 import { buttonVariants } from '@/components/ui/button'
 import { AvisoDeError } from '@/components/listado'
+import { sumarDiasISO } from 'libra-ui/fechas'
 
 /** Los colores por estado. Un solo lugar, para que la leyenda y la grilla no
  *  puedan decir cosas distintas.
@@ -72,7 +73,7 @@ export function Agenda() {
   // Los siete días se derivan de `semana.desde` y no de las claves de la
   // primera cancha: con la primera cancha sin turnos —un feriado cerrado, por
   // ejemplo— la grilla entera se quedaba sin columnas.
-  const dias = semana ? Array.from({ length: 7 }, (_, i) => correr(semana.desde, i)) : []
+  const dias = semana ? Array.from({ length: 7 }, (_, i) => sumarDiasISO(semana.desde, i)) : []
 
   function elegir(cancha: Cancha, turno: Turno) {
     if (turno.libre) setNueva({ cancha, turno })
@@ -91,7 +92,7 @@ export function Agenda() {
       <div className="flex flex-wrap items-center gap-2">
         <button
           className={buttonVariants({ variant: 'outline', size: 'sm' })}
-          onClick={() => setDesde(correr(desde, -7))}
+          onClick={() => setDesde(sumarDiasISO(desde, -7))}
         >
           ← Semana anterior
         </button>
@@ -103,7 +104,7 @@ export function Agenda() {
         </button>
         <button
           className={buttonVariants({ variant: 'outline', size: 'sm' })}
-          onClick={() => setDesde(correr(desde, 7))}
+          onClick={() => setDesde(sumarDiasISO(desde, 7))}
         >
           Semana siguiente →
         </button>
@@ -218,8 +219,3 @@ function Casillero({ turno, onElegir }: { turno: Turno; onElegir: () => void }) 
   )
 }
 
-function correr(iso: string, dias: number): string {
-  const d = new Date(`${iso}T12:00:00Z`)
-  d.setUTCDate(d.getUTCDate() + dias)
-  return d.toISOString().slice(0, 10)
-}

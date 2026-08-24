@@ -7,6 +7,8 @@
  * de ellas queda en UTC sin que nadie lo note.
  */
 
+import { sumarDiasISO } from 'libra-ui/fechas'
+
 export const TZ = 'America/Argentina/Buenos_Aires'
 
 /**
@@ -83,12 +85,11 @@ export function diaISO(valor: string | Date | null | undefined): string {
 /** El lunes de la semana de `valor`, en ISO. La agenda arranca ahí. */
 export function lunesDeLaSemana(valor: string | Date = new Date()): string {
   const iso = diaISO(valor)
-  // Se reconstruye a mediodía UTC para que ningún corrimiento de zona lo mueva
-  // de día mientras se le restan los días.
-  const d = new Date(`${iso}T12:00:00Z`)
-  const offset = (d.getUTCDay() + 6) % 7 // 0 = lunes
-  d.setUTCDate(d.getUTCDate() - offset)
-  return d.toISOString().slice(0, 10)
+  // El anclaje al mediodía UTC —para que ningún corrimiento de zona mueva el
+  // día mientras se restan— lo hace ahora `sumarDiasISO` del paquete, que es
+  // donde vive esa cuenta para toda la familia.
+  const offset = (new Date(`${iso}T12:00:00Z`).getUTCDay() + 6) % 7 // 0 = lunes
+  return sumarDiasISO(iso, -offset)
 }
 
 /** Nombre del día, capitalizado. `2026-09-01` → `Martes`. */
