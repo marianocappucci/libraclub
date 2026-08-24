@@ -29,9 +29,11 @@ from app.schemas.reservas import (
     SerieEntrada,
     SerieSalida,
 )
-from app.servicios import disponibilidad, tarifario
+from app.servicios import cobro_qr, disponibilidad, tarifario
 from app.servicios import facturacion as servicio_facturacion
+from app.servicios import pagos as servicio_pagos
 from app.servicios import reservas as servicio
+from app.servicios.caja import SinTurnoAbierto
 from app.tiempo import TZ, a_local, ahora
 
 router = APIRouter(prefix="/api/reservas", tags=["reservas"])
@@ -243,6 +245,137 @@ def ver_factura(
         total=float(factura["total"]), cae=factura.get("cae") or "",
         cae_vto=factura.get("cae_vto") or "",
     )
+
+
+# ── Cobro con QR de MercadoPago en el mostrador ──────────────────────────
+#
+# 🔑 **Staff y no admin, al revés que facturar.** Cobrar es lo que hace el
+# encargado del mostrador todo el día; a quién se le factura qué es del dueño.
+# La factura que sale sola de este cobro no rompe esa línea: el que decidió que
+# se emita fue el dueño, al prender el toggle en Configuración — el encargado no
+# elige nada.
+
+
+class QrDisponible(BaseModel):
+    #: Si la instancia tiene cargadas las tres credenciales del QR.
+    disponible: bool
+    #: Si al acreditarse el pago se emite la factura sola.
+    auto_facturar: bool
+
+
+@router.get("/mp/estado", response_model=QrDisponible)
+def estado_de_mercadopago(_: object = Depends(require_staff)):
+    """Si este mostrador puede cobrar por QR, y si eso factura solo.
+
+    Lo lee la pantalla para no ofrecer un botón que únicamente puede fallar.
+    **No devuelve ninguna credencial**: son tres booleanos colapsados en uno.
+
+    La ruta va antes que `/{reserva_id}/...` en el archivo por prolijidad, pero
+    no dependen del orden: `mp/estado` son dos segmentos.
+    """
+    return QrDisponible(
+        disponible=cobro_qr.esta_configurado(),
+        auto_facturar=cobro_qr.auto_facturar_prendida(),
+    )
+
+
+class QrPuesto(BaseModel):
+    referencia: str
+    monto: float
+
+
+class QrEstado(BaseModel):
+    #: `aprobado`, `pendiente`, `rechazado`, `sin_orden`.
+    estado: str
+    payment_id: str | None = None
+    #: El comprobante que salió solo, si la automática está prendida.
+    factura_id: int | None = None
+
+
+def _reserva_y_cancha(sesion: Session, reserva_id: int) -> tuple[Reserva, str]:
+    reserva = sesion.get(Reserva, reserva_id)
+    if reserva is None:
+        raise HTTPException(404, "no existe esa reserva")
+    cancha = sesion.get(Cancha, reserva.cancha_id)
+    return reserva, (cancha.nombre if cancha else "cancha")
+
+
+@router.post("/{reserva_id}/mp-qr", response_model=QrPuesto, status_code=201)
+async def poner_en_el_qr(
+    reserva_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    _: object = Depends(require_staff),
+):
+    """Pone el total del turno —cancha más buffet— a cobrar en el QR de la caja.
+
+    No devuelve ninguna imagen: el QR es el cartel impreso del mostrador y no
+    cambia nunca; lo que cambia es cuánto cobra. Ver `servicios/cobro_qr.py`.
+    """
+    reserva, cancha_nombre = _reserva_y_cancha(sesion, reserva_id)
+    try:
+        pago = await cobro_qr.poner_en_el_qr(sesion, reserva, cancha_nombre)
+    except cobro_qr.QrNoConfigurado as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except cobro_qr.SinPrecio as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except servicio_pagos.PagoInvalido as exc:
+        # 409 y no 400: el pedido está bien formado, lo que no admite la
+        # operación es el estado del turno.
+        raise HTTPException(409, str(exc)) from exc
+    except cobro_qr.QrError as exc:
+        # 502: el que falló es MercadoPago, y el mensaje lleva su status y su
+        # cuerpo adentro — que es lo único que le dice al operador si se
+        # equivocó de POS ID o si el problema es de ellos.
+        raise HTTPException(502, str(exc)) from exc
+    sesion.commit()
+    return QrPuesto(referencia=pago.referencia, monto=float(pago.monto))
+
+
+@router.delete("/{reserva_id}/mp-qr", status_code=204)
+async def bajar_del_qr(
+    reserva_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    _: object = Depends(require_staff),
+):
+    """Saca del QR la orden de este turno: el cartel queda sin nada que cobrar.
+
+    🔴 **Sin esto, el próximo que escanee paga el turno anterior.** Idempotente:
+    sin orden pendiente no hace nada.
+    """
+    await cobro_qr.bajar_del_qr(sesion, reserva_id)
+    sesion.commit()
+
+
+@router.get("/{reserva_id}/mp-status", response_model=QrEstado)
+async def estado_del_qr(
+    reserva_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    usuario: dict = Depends(require_staff),
+):
+    """Si el QR de este turno ya se pagó. Lo pollea la pantalla cada 3 segundos.
+
+    🔑 **Es un GET con efectos**, igual que el de Contalibra: acá es donde entran
+    el movimiento de caja y la factura. Es idempotente — el segundo tick sale de
+    lo ya sellado y no vuelve a cobrar nada.
+    """
+    reserva, cancha_nombre = _reserva_y_cancha(sesion, reserva_id)
+    cliente = sesion.get(Cliente, reserva.cliente_id) if reserva.cliente_id else None
+    try:
+        estado = await cobro_qr.estado_del_cobro(
+            sesion, reserva, cliente, cancha_nombre, usuario
+        )
+    except cobro_qr.QrNoConfigurado as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except SinTurnoAbierto as exc:
+        # Cobrar sin turno abierto deja la plata fuera del arqueo. El pago **ya
+        # quedó sellado como aprobado** cuando esto salta, así que el 409 no
+        # pierde nada: el encargado abre el turno y el tick siguiente completa
+        # la caja y la factura.
+        raise HTTPException(409, str(exc)) from exc
+    except cobro_qr.QrError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    sesion.commit()
+    return QrEstado(**estado)
 
 
 @router.post("/series", response_model=SerieCreada, status_code=201)

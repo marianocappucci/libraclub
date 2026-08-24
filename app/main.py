@@ -45,6 +45,7 @@ from app.routers import buffet as buffet_router
 from app.routers import caja as caja_router
 from app.routers import cuenta_corriente as cuenta_corriente_router
 from app.routers import facturacion as facturacion_router
+from app.routers import mercadopago as mercadopago_router
 from app.routers import portal as portal_router
 from app.routers import resumen as resumen_router
 
@@ -258,6 +259,12 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # `GET`/`PUT /config/arca`, la pestaña de ARCA de la pantalla compartida.
     # Sin `/api` a propósito: es el prefijo que consume el kit — ver el módulo.
     app.include_router(facturacion_router.router, dependencies=[Depends(require_admin)])
+
+    # `GET`/`PUT /config/mercadopago`: con qué cuenta cobra el QR del mostrador.
+    # Admin por el mismo motivo que ARCA — quien escriba acá cambia a qué cuenta
+    # va la plata del complejo. El mostrador *usa* el QR sin poder leer esto:
+    # `GET /api/reservas/mp/estado` le dice si está configurado, y nada más.
+    app.include_router(mercadopago_router.router, dependencies=[Depends(require_admin)])
 
     # La caja por turno. Sin `dependencies` acá: cada endpoint declara su rol —
     # el mostrador abre y cobra en su propia caja, el historial es de admin, y

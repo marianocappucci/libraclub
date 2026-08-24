@@ -258,8 +258,29 @@ class EstadoPago(enum.Enum):
     VENCIDO = "vencido"
 
 
+class CanalDePago(enum.Enum):
+    """De dónde salió el pago de MercadoPago, que decide qué pasa al acreditarse.
+
+    Es la misma tabla y el mismo webhook para los dos, pero no el mismo efecto:
+
+    - **`PORTAL`**: el jugador reserva desde el celular y paga. Lo que el pago
+      hace es **confirmar la reserva** — sin pago no hay reserva.
+    - **`MOSTRADOR`**: el encargado pone el total del turno en el QR impreso de
+      la caja. La reserva ya está confirmada; lo que falta es el movimiento de
+      caja y, si la instancia lo tiene prendido, la factura.
+
+    🔑 Es una columna y no el prefijo de la referencia. Distinguirlos leyendo el
+    string sería información de negocio escondida en un identificador: el día
+    que alguien cambie el formato de la referencia, el cobro del mostrador
+    empieza a comportarse como uno del portal y nada lo avisa.
+    """
+
+    PORTAL = "portal"
+    MOSTRADOR = "mostrador"
+
+
 class PagoDeReserva(Base, Auditable):
-    """El pago online que hace efectiva una reserva del portal.
+    """El pago de MercadoPago de una reserva — del portal o del mostrador.
 
     Vive en la base del **dominio** y no en la de LibraCore, a diferencia de los
     movimientos de caja: es parte del ciclo de vida de la reserva —decide si
@@ -297,6 +318,23 @@ class PagoDeReserva(Base, Auditable):
     pagado_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    #: Del portal o del mostrador. Ver `CanalDePago`.
+    canal: Mapped[CanalDePago] = mapped_column(
+        Enum(CanalDePago, name="canal_pago", values_callable=lambda e: [m.value for m in e]),
+        nullable=False,
+        default=CanalDePago.PORTAL,
+    )
+    #: El movimiento de caja de este cobro, **si ya entró**. Es la marca de
+    #: idempotencia del cobro de mostrador.
+    #:
+    #: 🔴 No se apoya en la idempotencia de `create_caja_movimiento`: ese chequeo
+    #: es por `(referencia, factura_id)`, así que un primer intento sin factura
+    #: —porque ARCA estaba caído— y un reintento que sí factura no se ven entre
+    #: sí y entran **dos veces**. El mismo ingreso, contado dos veces en el
+    #: arqueo del turno.
+    #:
+    #: ⚠️ Sin FK: `caja_movimientos` vive en la base de LibraCore, que es otra.
+    caja_movimiento_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     reserva: Mapped[Reserva] = relationship()
 
