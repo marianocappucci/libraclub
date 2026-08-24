@@ -118,3 +118,20 @@ function aDate(valor: string | Date | null | undefined): Date | null {
   const d = valor instanceof Date ? valor : new Date(valor)
   return Number.isNaN(d.getTime()) ? null : d
 }
+
+/**
+ * `dd-mm`, sin año. Es la cabecera de cada columna de la grilla semanal, donde
+ * el año no entra en el ancho de la celda.
+ *
+ * 🔴 Con GUION, como el resto del ecosistema. La cabecera lo armaba a mano con
+ * barra (`22/08`) justo en el producto que sirve de modelo del helper unico:
+ * que el formato sea corto no lo saca de la convencion, y tenerlo suelto en la
+ * vista es como se escapo.
+ *
+ * Se reordena el texto sin construir un `Date`, por lo mismo que `fecha()`: un
+ * `aaaa-mm-dd` es un dia del calendario, no un instante.
+ */
+export function diaYMes(iso: string): string {
+  const m = SOLO_FECHA.exec(iso ?? '')
+  return m ? `${m[3]}-${m[2]}` : (iso ?? '')
+}
