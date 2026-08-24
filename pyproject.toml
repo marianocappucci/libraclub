@@ -18,7 +18,17 @@ dependencies = [
     # Entra en F1 sólo por `respaldo`: una instancia sin backup no se puede
     # poner en produccion. Su alcance crece en F2 (`mp_api`, `pdf_generator`)
     # y F3 (ARCA) — ver ARCHITECTURE.md.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.41.0",
+    #
+    # v1.41.0 -> v1.48.0 (2026-08-24): **el deploy corre las migraciones**. Es
+    # la razón del bump, no un alineamiento de versión: `cmd_actualizar` ahora
+    # ejecuta `ProductConfig.migraciones` con `compose run --rm` antes del
+    # `up -d`, y este producto lo declara en sus dos `configure()`. Sin esta
+    # versión esa clave no existe y `configure()` levanta `TypeError` — o sea
+    # que el pin y la declaración viajan juntos o no viajan.
+    #
+    # 🔑 Lo pidió **este mismo producto**: la revisión `0008` del cobro con QR
+    # llegó a `main` sin nadie en el camino de deploy que la aplicara.
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.48.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
