@@ -62,6 +62,23 @@ configure(
     # pantalla sale de `libracore.respaldo` (ver `build_backup_router` en
     # `app/main.py`).
     backup_zip=True,
+    # 🔴 **El deploy corre las migraciones.** Sin esto, `panel_admin.py
+    # actualizar` mueve la instancia a la imagen nueva y **nadie aplica las
+    # revisiones que viajaron adentro**: los otros `alembic upgrade` del repo
+    # están en `semilla_dev.py`, `reset_demo.sh` y la suite, ninguno en el
+    # camino de deploy. Le pasó a la `0008` del cobro con QR, que llegó a `main`
+    # el 2026-08-24 sin nadie que la corriera.
+    #
+    # LibraCore lo ejecuta con `compose run --rm` **antes** del `up -d`: la
+    # migración corre con el código nuevo mientras la instancia todavía sirve el
+    # viejo, y si falla aborta el deploy en vez de dejar código nuevo sobre
+    # esquema viejo. Ver `cmd_actualizar` en `libracore.provisioning`.
+    #
+    # ⚠️ Va en los DOS scripts a propósito: comparten el `_cfg` global y
+    # `tests/test_provisioning.py` compara las dos configuraciones campo por
+    # campo. Ponerlo en uno solo pone ese test en rojo, que es lo que tiene que
+    # pasar.
+    migraciones=("alembic", "upgrade", "head"),
     # `health_path` **no se pasa**: desde hoy este producto sirve `/health`
     # además de `/salud`, que es el default del motor y la ruta de los otros
     # seis. Ver el comentario en `app/routers/salud.py` — con la SPA horneada,
