@@ -102,6 +102,27 @@ def resumen(turno_id: int) -> dict:
     return db_turnos.get_resumen_turno_caja(turno_id)
 
 
+def registrar_ingreso(usuario: dict, monto: Decimal, concepto: str, medio_pago: str,
+                      referencia: str = "", factura_id: int | None = None) -> int:
+    """El ingreso en el turno abierto de este usuario. Devuelve el id del movimiento.
+
+    Está separado de `cobrar` porque el cobro con QR **necesita ese id**: lo
+    guarda en el pago como marca de que esa plata ya entró (ver
+    `PagoDeReserva.caja_movimiento_id`). `cobrar` devuelve el arqueo, que es lo
+    que la pantalla de Caja quiere mostrar y donde el id no sirve de nada.
+    """
+    if medio_pago not in MEDIOS_PAGO:
+        raise MedioDePagoInvalido(f"Medio de pago desconocido: {medio_pago!r}")
+    turno = turno_abierto(usuario)
+    if turno is None:
+        raise SinTurnoAbierto("No hay una caja abierta. Abrí el turno antes de cobrar.")
+    return db_caja.create_caja_movimiento(
+        date.today().isoformat(), "ingreso", concepto, float(monto),
+        referencia=referencia, factura_id=factura_id,
+        usuario_id=int(usuario["id"]), medio_pago=medio_pago, turno_id=turno["id"],
+    )
+
+
 def cobrar(usuario: dict, monto: Decimal, concepto: str, medio_pago: str,
            referencia: str = "", factura_id: int | None = None) -> dict:
     """Registra un ingreso **en el turno abierto de este usuario**.
@@ -110,17 +131,13 @@ def cobrar(usuario: dict, monto: Decimal, concepto: str, medio_pago: str,
     lo tanto fuera de todo arqueo — plata que entró y que ningún cierre va a
     contar.
     """
-    if medio_pago not in MEDIOS_PAGO:
-        raise MedioDePagoInvalido(f"Medio de pago desconocido: {medio_pago!r}")
-    turno = turno_abierto(usuario)
-    if turno is None:
-        raise SinTurnoAbierto("No hay una caja abierta. Abrí el turno antes de cobrar.")
-    db_caja.create_caja_movimiento(
-        date.today().isoformat(), "ingreso", concepto, float(monto),
+    registrar_ingreso(
+        usuario, monto, concepto, medio_pago,
         referencia=referencia, factura_id=factura_id,
-        usuario_id=int(usuario["id"]), medio_pago=medio_pago, turno_id=turno["id"],
     )
-    return db_turnos.get_resumen_turno_caja(turno["id"])
+    # `turno_abierto` se vuelve a resolver en vez de reusarse: `registrar_ingreso`
+    # ya falló si no había turno, así que acá siempre hay uno.
+    return db_turnos.get_resumen_turno_caja(turno_abierto(usuario)["id"])
 
 
 def cerrar_turno(turno_id: int, monto_declarado: Decimal, notas: str = "") -> dict:

@@ -45,7 +45,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.enums import EstadoReserva
-from app.models.reservas import EstadoPago, PagoDeReserva, Reserva
+from app.models.reservas import CanalDePago, EstadoPago, PagoDeReserva, Reserva
 from app.tiempo import ahora
 
 
@@ -78,6 +78,49 @@ def crear_pago(sesion: Session, reserva: Reserva, monto: Decimal) -> PagoDeReser
         monto=monto,
         estado=EstadoPago.PENDIENTE,
         referencia=nueva_referencia(reserva.id),
+        canal=CanalDePago.PORTAL,
+    )
+    sesion.add(pago)
+    sesion.flush()
+    return pago
+
+
+#: Los estados en los que tiene sentido cobrar un turno en el mostrador.
+#:
+#: `JUGADA` entra a propósito: en un complejo el grupo suele pagar **al
+#: terminar**, y para entonces el turno ya se marcó jugado. Dejarla afuera haría
+#: que el cobro más habitual sea el que el sistema rechaza.
+ESTADOS_COBRABLES = (EstadoReserva.CONFIRMADA, EstadoReserva.JUGADA)
+
+
+def crear_pago_de_mostrador(
+    sesion: Session, reserva: Reserva, monto: Decimal
+) -> PagoDeReserva:
+    """El intento de cobro con QR de un turno ya tomado.
+
+    Es la contracara de `crear_pago`: allá el pago **crea** la reserva —sin pago
+    no hay reserva— y acá la reserva ya existe y lo que falta es la plata. Por
+    eso los estados válidos son los opuestos.
+
+    🔑 **Un turno con un pago aprobado no se vuelve a cobrar.** El índice parcial
+    `uq_pagos_reserva_aprobado` lo impide en la base, pero fallar ahí sería un
+    500; acá sale como un error del dominio que el router traduce a 409. Cubre
+    los dos casos que importan: el que ya pagó por el portal y el que ya pagó
+    por el QR hace un minuto.
+    """
+    if reserva.estado not in ESTADOS_COBRABLES:
+        raise PagoInvalido(
+            f"Sólo se cobra un turno confirmado o jugado (éste está "
+            f"{reserva.estado.value})."
+        )
+    if aprobado_de(sesion, reserva.id) is not None:
+        raise PagoInvalido(f"La reserva {reserva.id} ya tiene un pago aprobado.")
+    pago = PagoDeReserva(
+        reserva_id=reserva.id,
+        monto=monto,
+        estado=EstadoPago.PENDIENTE,
+        referencia=nueva_referencia(reserva.id),
+        canal=CanalDePago.MOSTRADOR,
     )
     sesion.add(pago)
     sesion.flush()
@@ -87,6 +130,32 @@ def crear_pago(sesion: Session, reserva: Reserva, monto: Decimal) -> PagoDeReser
 def por_referencia(sesion: Session, referencia: str) -> PagoDeReserva | None:
     return sesion.scalars(
         select(PagoDeReserva).where(PagoDeReserva.referencia == referencia)
+    ).first()
+
+
+def aprobado_de(sesion: Session, reserva_id: int) -> PagoDeReserva | None:
+    """El pago aprobado de una reserva, si lo hay. Hay a lo sumo uno."""
+    return sesion.scalars(
+        select(PagoDeReserva).where(
+            PagoDeReserva.reserva_id == reserva_id,
+            PagoDeReserva.estado == EstadoPago.APROBADO,
+        )
+    ).first()
+
+
+def ultimo_de_mostrador(sesion: Session, reserva_id: int) -> PagoDeReserva | None:
+    """El último intento de cobro con QR de una reserva.
+
+    El último y no "el pendiente": si el cajero volvió a poner el monto en el
+    QR, el intento vivo es el nuevo y el anterior ya no se consulta.
+    """
+    return sesion.scalars(
+        select(PagoDeReserva)
+        .where(
+            PagoDeReserva.reserva_id == reserva_id,
+            PagoDeReserva.canal == CanalDePago.MOSTRADOR,
+        )
+        .order_by(PagoDeReserva.id.desc())
     ).first()
 
 
@@ -105,6 +174,13 @@ def aplicar_pago_aprobado(
     ahora pondría dos reservas encima. El pago queda registrado como aprobado —la
     plata entró y hay que devolverla— y el turno no. Es un caso raro y ruidoso, y
     ruidoso es lo correcto: alguien tiene que mirarlo.
+
+    🔑 **En un cobro de mostrador no hay nada que confirmar, y por eso alcanza
+    con la misma función.** El turno ya está confirmado (o jugado), así que cae
+    en la rama de arriba y lo único que hace es sellar el pago. Lo que le falta
+    a ese caso —el movimiento de caja y la factura— lo agrega
+    `servicios/cobro_qr.py`, que llama a ésta primero: acá no entra porque
+    necesita saber quién cobra, y el webhook no lo sabe.
     """
     if pago.estado is EstadoPago.APROBADO:
         return False

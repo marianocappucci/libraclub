@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
-import { agenda, buffet, cuentaCorriente, facturacion, TIPO_DE_FACTURA } from '@/lib/api'
-import type { Cancha, Factura, LineaDeConsumo, Turno } from '@/lib/api'
+import {
+  agenda, buffet, cobroQr, cuentaCorriente, facturacion, TIPO_DE_FACTURA,
+} from '@/lib/api'
+import type { Cancha, Factura, LineaDeConsumo, QrDisponible, Turno } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
 import { fecha, hora, pesos } from '@/lib/fechas'
 import { Input } from '@/components/ui/input'
@@ -127,6 +129,12 @@ export function DetalleDeReserva({
             abierto={abierto}
             onCambio={onCambiada}
           />
+          <SeccionDeCobroConQr
+            reservaId={turno.reserva_id}
+            estado={estado}
+            abierto={abierto}
+            onCobrado={onCambiada}
+          />
           <SeccionDeFactura reservaId={turno.reserva_id} abierto={abierto} />
           <SeccionDeCuentaCorriente turno={turno} abierto={abierto} />
 
@@ -171,6 +179,178 @@ export function DetalleDeReserva({
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+
+/** Cobrar el turno con el QR de MercadoPago del mostrador.
+ *
+ * 🔑 **No hay ninguna imagen de QR acá, y no falta nada.** Es el modelo de QR
+ * fijo por punto de venta: el cartel del mostrador no cambia nunca; lo que el
+ * botón cambia es *cuánto cobra* cuando el cliente lo escanea. Lo que se cobra
+ * es el turno entero — la cancha **más** el consumo de buffet.
+ *
+ * 🔴 **Cancelar baja el monto del cartel.** Una orden que queda puesta le sigue
+ * cobrando ese monto a quien escanee, aunque el encargado haya cerrado el
+ * diálogo hace media hora.
+ */
+const POLL_MS = 3000
+/** Cinco minutos: pasado eso el cliente ya se fue del mostrador. */
+const ESPERA_MAXIMA_MS = 5 * 60 * 1000
+
+/** Los estados en los que tiene sentido cobrar. Espeja `ESTADOS_COBRABLES` del
+ *  backend, que es quien decide de verdad: `jugada` entra porque en un complejo
+ *  el grupo suele pagar al terminar. */
+const COBRABLES = ['confirmada', 'jugada']
+
+type EstadoQr = 'idle' | 'poniendo' | 'esperando' | 'cobrado'
+
+function SeccionDeCobroConQr({ reservaId, estado, abierto, onCobrado }: {
+  reservaId: number | null
+  estado: string
+  abierto: boolean
+  onCobrado: () => void
+}) {
+  const [disponible, setDisponible] = useState<QrDisponible | null>(null)
+  const [qr, setQr] = useState<EstadoQr>('idle')
+  const [monto, setMonto] = useState<number | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const pollRef = useRef<number | null>(null)
+
+  const frenarPoll = useCallback(() => {
+    if (pollRef.current !== null) {
+      window.clearInterval(pollRef.current)
+      pollRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!abierto) return
+    setQr('idle')
+    setError(null)
+    setMonto(null)
+    cobroQr.estado()
+      .then(setDisponible)
+      // Sin respuesta, la sección no aparece: cobrar por QR es una forma más
+      // de cobrar, no un requisito para operar el mostrador.
+      .catch(() => setDisponible({ disponible: false, auto_facturar: false }))
+  }, [abierto])
+
+  // Sin esto el poll sigue corriendo contra un turno que ya no está en
+  // pantalla: cada 3 segundos sale un request.
+  useEffect(() => frenarPoll, [frenarPoll])
+
+  if (reservaId === null || !disponible?.disponible || !COBRABLES.includes(estado)) {
+    return null
+  }
+
+  async function bajar() {
+    if (reservaId === null) return
+    try {
+      await cobroQr.bajar(reservaId)
+    } catch {
+      // Si falla, la orden queda en la caja y el encargado puede volver a
+      // ponerla. Hacer fallar una cancelación por esto sería peor.
+    }
+  }
+
+  async function cobrar() {
+    if (reservaId === null) return
+    setError(null)
+    setQr('poniendo')
+    try {
+      setMonto((await cobroQr.poner(reservaId)).monto)
+    } catch (e) {
+      setError((e as Error).message)
+      setQr('idle')
+      return
+    }
+    setQr('esperando')
+    const hasta = Date.now() + ESPERA_MAXIMA_MS
+    pollRef.current = window.setInterval(async () => {
+      let resultado
+      try {
+        resultado = await cobroQr.consultar(reservaId)
+      } catch (e) {
+        frenarPoll()
+        setQr('idle')
+        setError((e as Error).message)
+        return
+      }
+      if (resultado.estado === 'aprobado') {
+        frenarPoll()
+        setQr('cobrado')
+        // Refresca la agenda y, con ella, la sección de la factura que pudo
+        // haber salido sola.
+        onCobrado()
+        return
+      }
+      if (resultado.estado === 'rechazado') {
+        frenarPoll()
+        setQr('idle')
+        setError('El pago fue rechazado o cancelado en MercadoPago.')
+        return
+      }
+      if (Date.now() > hasta) {
+        frenarPoll()
+        void bajar()
+        setQr('idle')
+        setError(
+          'Se agotó la espera y se bajó el monto del QR. Si el cliente pagó '
+          + 'igual, fijate en MercadoPago antes de volver a cobrar.',
+        )
+      }
+    }, POLL_MS)
+  }
+
+  if (qr === 'cobrado') {
+    return (
+      <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm dark:bg-emerald-950/30">
+        <div className="font-medium text-emerald-800 dark:text-emerald-400">
+          Cobrado por QR de MercadoPago
+        </div>
+        {disponible.auto_facturar && (
+          <div className="text-muted-foreground">La factura se emitió sola.</div>
+        )}
+      </div>
+    )
+  }
+
+  if (qr === 'esperando') {
+    return (
+      <div className="space-y-2 rounded-md border px-3 py-2 text-sm">
+        <p>
+          El QR de la caja ya está cobrando{' '}
+          <strong>{monto === null ? '' : pesos(monto)}</strong>. Pedile al
+          cliente que lo escanee.
+        </p>
+        <button
+          type="button"
+          onClick={() => { frenarPoll(); void bajar(); setQr('idle') }}
+          className="text-sm text-red-800 underline underline-offset-2"
+        >
+          Cancelar el cobro por QR
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      <AvisoDeError mensaje={error} />
+      <button
+        type="button"
+        disabled={qr === 'poniendo'}
+        onClick={cobrar}
+        className={buttonVariants({ variant: 'outline' })}
+      >
+        {qr === 'poniendo' ? 'Preparando el QR…' : 'Cobrar con QR'}
+      </button>
+      <p className="text-xs text-muted-foreground">
+        Pone el total del turno —cancha y buffet— en el QR impreso del mostrador
+        {disponible.auto_facturar ? ' y factura solo al acreditarse' : ''}.
+      </p>
+    </div>
   )
 }
 
