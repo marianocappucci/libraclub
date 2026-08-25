@@ -80,9 +80,22 @@ USER libraclub
 
 EXPOSE 8000
 
-# El healthcheck consulta la base: si PostgreSQL no responde, el contenedor no
-# se reporta sano. Falla cerrado a propósito.
+# El healthcheck consulta la base: `/salud` hace un `SELECT 1` antes de
+# contestar, así que si PostgreSQL no responde el contenedor no se reporta sano.
+# Falla cerrado a propósito.
+#
+# 🔴 **Mira el CUERPO, no el código HTTP, y eso no es prolijidad.** Con
+# `curl -fsS` el chequeo **no podía fallar**: `-f` sólo reacciona a un código
+# >= 400, y este backend sirve la SPA con un catch-all, así que cualquier ruta
+# devuelve `200 text/html` mientras uvicorn sirva estáticos. Medido el
+# 2026-08-25 en los contenedores vivos: `curl -fsS` contra una ruta inventada
+# daba **exit 0** en los cinco de estos dos productos.
+#
+# `json.load` sobre el `index.html` revienta, que es exactamente lo que se
+# busca; `isinstance(..., dict)` y no una clave concreta porque el cuerpo
+# difiere entre productos. Es la misma forma que ya usan los seis composes de
+# la familia y el generador de instancias de LibraCore.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -fsS http://localhost:8000/salud || exit 1
+    CMD ["python3", "-c", "import json,urllib.request; assert isinstance(json.load(urllib.request.urlopen('http://localhost:8000/salud', timeout=3)), dict)"]
 
 CMD ["uvicorn", "app.asgi:app", "--host", "0.0.0.0", "--port", "8000"]
