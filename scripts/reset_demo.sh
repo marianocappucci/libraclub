@@ -20,6 +20,10 @@
 set -euo pipefail
 
 CONTENEDOR="libraclub-demo"
+#: La raiz del checkout en el VPS. El script ya la usaba literal en los
+#: `git -C` de mas abajo; ahora tambien la necesitan el compose de la
+#: instancia y el venv del panel, asi que se nombra una sola vez.
+REPO="/root/libraclub"
 CHECKOUT="/root/libraclub"
 URL_PUBLICA="https://demo.libraclub.com.ar"
 
@@ -195,6 +199,64 @@ docker exec "$SIDECAR" sh -c "
 " >/dev/null || { log "ABORTA: no se pudo recrear el schema de $BASE_CORE."; docker start "$CONTENEDOR" >/dev/null; exit 10; }
 log "schema de $BASE_CORE recreado, vacio"
 
+# --- Las cadenas de migracion, ANTES de que arranque la app --------------
+#
+# 🔴 **Hasta el 2026-08-25 esto no existia, y por eso la demo amanecia sin
+# `alembic_version`.** El `DROP SCHEMA` de arriba se la lleva, y el arranque
+# de la app reconstruye las tablas con `create_all()`, que no deja marca. La
+# demo andaba igual, asi que no se veia: el sintoma aparecio del lado del
+# DEPLOY. Desde que `panel_admin.py actualizar` corre las migraciones, el
+# primer comando se encuentra un esquema ya creado y sin version.
+#
+# Con la cadena de LibraCore no se nota, porque su baseline es idempotente.
+# La de LibraGenda hace `CREATE TABLE` crudo y aborta el deploy con
+# `relation "resources" already exists` -- paso el 2026-08-25 en las demos de
+# Gestiolibra y MedLibra, que quedaron sin poder actualizarse.
+#
+# 🔑 **Los comandos NO se escriben aca.** Salen de `migraciones` del propio
+# `configure()` del producto, que es la misma fuente que lee el deploy. Una
+# cuarta copia de la cadena es exactamente como se llega a que el reset y el
+# deploy hagan cosas distintas.
+#
+# Corren con la app PARADA y en un contenedor efimero, igual que
+# `cmd_actualizar`: si la app arrancara antes, su `create_all()` dejaria las
+# tablas puestas y la cadena de LibraGenda volveria a chocar.
+COMPOSE="$REPO/clientes/demo/docker-compose.yml"
+[ -f "$COMPOSE" ] || { log "ABORTA: no encontre $COMPOSE."; docker start "$CONTENEDOR" >/dev/null; exit 11; }
+
+CADENAS=$("$REPO/.venv-scripts/bin/python" - <<PY || true
+import sys
+sys.path.insert(0, "$REPO")
+import scripts.panel_admin  # su configure() deja la ProductConfig del producto
+from libracore.provisioning import get_config
+for comando in get_config().migraciones:
+    print(" ".join(comando))
+PY
+)
+if [ -z "${CADENAS:-}" ]; then
+  # Que no haya migraciones declaradas no es "no hay nada que hacer": es que
+  # el reset dejaria la base a merced del `create_all()` otra vez.
+  log "ABORTA: el producto no declara migraciones en su configure()."
+  docker start "$CONTENEDOR" >/dev/null
+  exit 11
+fi
+
+while IFS= read -r cmd; do
+  [ -z "$cmd" ] && continue
+  log "migraciones: $cmd"
+  # shellcheck disable=SC2086 -- $cmd va sin comillas a proposito: es la
+  # linea de comando completa y tiene que splitearse en argumentos.
+  # 🔴 `-T` y `</dev/null` no son adorno: sin ellos `docker compose run`
+  # abre una TTY y **se come el resto del heredoc** que alimenta este
+  # `while read`. Medido corriendo el script de verdad: de las tres cadenas
+  # corria SOLO la primera y el reset terminaba "bien" con dos migraciones
+  # sin aplicar. Es el mismo filo que `docker exec` sin `-i`.
+  docker compose -p "$CONTENEDOR" -f "$COMPOSE" run --rm -T "$CONTENEDOR" $cmd >/dev/null 2>&1 </dev/null \
+    || { log "ABORTA: fallo \`$cmd\`."; docker start "$CONTENEDOR" >/dev/null; exit 11; }
+done <<CADENAS_EOF
+$CADENAS
+CADENAS_EOF
+
 docker start "$CONTENEDOR" >/dev/null
 
 for _ in $(seq 1 40); do
@@ -209,19 +271,30 @@ if [ "$estado" != "healthy" ]; then
   exit 4
 fi
 
-# --- 3. Las migraciones ---------------------------------------------------
+# --- 3. La postcondicion de las migraciones -------------------------------
 # 🔴 [LIBRACLUB] **El arranque NO las corre**, a diferencia de otros productos
 # de la familia que reconstruyen el esquema solos. Y el healthcheck es
 # `/salud`, que consulta la base pero no mira si hay tablas: el contenedor se
-# reporta **healthy con la base vacia**. Sin este paso, el seed de abajo
+# reporta **healthy con la base vacia**. Sin migraciones, el seed de abajo
 # fallaria contra un esquema inexistente y la demo quedaria en blanco todas las
 # noches, con el chequeo de salud en verde.
-docker exec "$CONTENEDOR" alembic upgrade head >/dev/null 2>&1 \
-  || { log "ABORTA: fallaron las migraciones."; exit 12; }
+#
+# 🔑 **El `alembic upgrade head` que estaba aca se movio ARRIBA**, al bloque
+# que corre con la app parada (2026-08-25). Dos motivos:
+#
+# 1. aca corria SOLO la cadena propia, asi que `libraclub_core` --el esquema
+#    de LibraCore, que vive en otra base-- amanecia sin `alembic_version` y
+#    sin las cuatro columnas de la revision `0002`;
+# 2. y los comandos ahora salen de `migraciones` del `configure()`, que es la
+#    misma fuente que lee el deploy, en vez de estar escritos aca.
+#
+# Lo que queda es la POSTCONDICION, que sigue valiendo: si el bloque de arriba
+# hubiera corrido y no hubiera dejado tablas, el reset tiene que frenar antes
+# de sembrar.
 TABLAS=$(docker exec "$SIDECAR" sh -c '
   psql -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
     -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '"'"'public'"'"'"' 2>/dev/null || echo 0)
-log "migraciones aplicadas: $TABLAS tablas"
+log "tablas del dominio despues de las migraciones: $TABLAS"
 if [ "${TABLAS:-0}" -lt 10 ]; then
   log "ABORTA: quedaron $TABLAS tablas, esperaba al menos 10."
   exit 12
