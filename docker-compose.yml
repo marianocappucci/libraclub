@@ -67,7 +67,21 @@ services:
       # nuevos adentro le complica el `git pull` del próximo deploy. Va después
       # del bind mount a propósito — el montaje más específico gana.
       - libraclub-datos:/app/data
-    command: uvicorn app.asgi:app --host 0.0.0.0 --port 8000 --reload
+    # 🔴 Las migraciones también acá, no sólo en el deploy. `cmd_actualizar`
+    # las corre para las instancias de cliente y la demo, pero ESTA la levanta
+    # el compose del repo y el motor no la toca. Se descubrió el 2026-08-25:
+    # `libracargo-dev` estaba una revisión atrás del código que servía, con el
+    # chequeo de salud en 200, y los cinco productos con Alembic tenían el
+    # mismo hueco.
+    #
+    # Tiene que decir LO MISMO que `migraciones` en los dos scripts de
+    # `scripts/`; hay un test que ata las dos puntas, porque el modo de fallar
+    # de esto es que alguien agregue una cadena allá y se olvide acá.
+    #
+    # `exec` para que uvicorn quede como PID 1 y `docker stop` le llegue. Si la
+    # migración falla el contenedor sale con error, que es mejor que servir
+    # código nuevo sobre un esquema viejo.
+    command: sh -c "alembic upgrade head && exec uvicorn app.asgi:app --host 0.0.0.0 --port 8000 --reload"
     environment:
       # Las tres sin default: la app tiene que fallar al arrancar si falta
       # alguna, no levantar con un secreto de juguete en un dominio público.
