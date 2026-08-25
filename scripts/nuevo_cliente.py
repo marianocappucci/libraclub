@@ -90,7 +90,20 @@ configure(
     # —`canchas`, `reservas`, `torneos`, `sucursales`— y ninguna del esquema de
     # LibraGenda, así que no hay una segunda `alembic_version` que aplicar antes.
     # Gestiolibra y MedLibra sí la tienen y por eso declaran dos comandos.
-    migraciones=(("alembic", "upgrade", "head"),),
+    # 🔴 **DOS cadenas, y la del motor va primero.** El esquema de LibraCore
+    # de este producto vive en `libraclub_core`, una base **aparte** de la del
+    # dominio — `libracore-migrar` la resuelve por
+    # `LIBRACLUB_LIBRACORE_DATABASE_URL` y NO por `DATABASE_URL`, que apunta al
+    # dominio. Ver `libracore.migrar.url_de_core`.
+    #
+    # Hasta el 2026-08-25 esa cadena **no la corría nadie**: las migraciones del
+    # motor no viajaban en el wheel, así que las dos instancias de este producto
+    # tenían `libraclub_core` sin `alembic_version` y sin las cuatro columnas
+    # que la revisión `0002` le agrega a `clients`.
+    migraciones=(
+        ("libracore-migrar", "upgrade", "--prefijo", "libraclub"),
+        ("alembic", "upgrade", "head"),
+    ),
     # `health_path` **no se pasa**: desde hoy este producto sirve `/health`
     # además de `/salud`, que es el default del motor y la ruta de los otros
     # seis. Ver el comentario en `app/routers/salud.py` — con la SPA horneada,

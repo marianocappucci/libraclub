@@ -81,7 +81,7 @@ services:
     # `exec` para que uvicorn quede como PID 1 y `docker stop` le llegue. Si la
     # migración falla el contenedor sale con error, que es mejor que servir
     # código nuevo sobre un esquema viejo.
-    command: sh -c "alembic upgrade head && exec uvicorn app.asgi:app --host 0.0.0.0 --port 8000 --reload"
+    command: sh -c "libracore-migrar upgrade --prefijo libraclub && alembic upgrade head && exec uvicorn app.asgi:app --host 0.0.0.0 --port 8000 --reload"
     environment:
       # Las tres sin default: la app tiene que fallar al arrancar si falta
       # alguna, no levantar con un secreto de juguete en un dominio público.
