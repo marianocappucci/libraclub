@@ -10,7 +10,8 @@ import { Minus, Plus, Trash2 } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
-import { MEDIOS_DE_PAGO, buffet } from '@/lib/api'
+import { buffet } from '@/lib/api'
+import { useMediosDePago } from '@/lib/medios-pago'
 import type { ProductoDeBuffet } from '@/lib/api'
 import { pesos } from '@/lib/fechas'
 import { AvisoDeError } from '@/components/listado'
@@ -32,9 +33,19 @@ export function DialogoDeConsumo({
 }) {
   const [productos, setProductos] = useState<ProductoDeBuffet[]>([])
   const [carrito, setCarrito] = useState<Record<number, number>>({})
-  const [medio, setMedio] = useState<string>(MEDIOS_DE_PAGO[0].valor)
+  const { medios } = useMediosDePago()
+  const [medio, setMedio] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
   const [enviando, setEnviando] = useState(false)
+
+  // 🔴 El medio por defecto **espera a que la lista llegue**. Antes se
+  // inicializaba con `MEDIOS_DE_PAGO[0]`, una constante que estaba siempre; con
+  // la lista pedida al backend eso es imposible hasta que conteste, y dejarlo en
+  // `''` haría que el consumo viaje **sin medio de pago** — entra a la caja como
+  // un movimiento sin medio y el cierre no lo reparte.
+  useEffect(() => {
+    if (!medio && medios.length > 0) setMedio(medios[0].valor)
+  }, [medio, medios])
 
   useEffect(() => {
     if (!abierto) return
@@ -167,7 +178,7 @@ export function DialogoDeConsumo({
                 value={medio}
                 onChange={(e) => setMedio(e.target.value)}
               >
-                {MEDIOS_DE_PAGO.map((m) => (
+                {medios.map((m) => (
                   <option key={m.valor} value={m.valor}>{m.etiqueta}</option>
                 ))}
               </select>

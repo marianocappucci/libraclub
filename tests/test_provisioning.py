@@ -17,6 +17,7 @@ las otras dos.
 """
 
 import importlib
+import pathlib
 
 import pytest
 
@@ -73,6 +74,48 @@ def test_los_dos_scripts_configuran_LO_MISMO():
 
     distintos = {k: (uno[k], otro[k]) for k in uno if uno[k] != otro[k]}
     assert not distintos, f"los dos scripts configuran distinto: {distintos}"
+
+
+@pytest.mark.parametrize("script", ["nuevo_cliente", "panel_admin"])
+def test_el_deploy_declara_las_migraciones_que_este_repo_tiene(script):
+    """Un producto con revisiones de Alembic tiene que declararlas, y bien.
+
+    **Por qué existe.** `migraciones` es opcional y su default es vacío, así
+    que un producto que no la declara no ve ningún paso y su deploy pasa de
+    largo en silencio. Y declararla mal es peor: hasta el 2026-08-24 acá estaba
+    en forma **plana**, válida contra el `v1.48.0` que este repo pineaba pero
+    rechazada con `TypeError` por el `1.51.0` que el panel del VPS ya tenía
+    instalado — o sea que el próximo deploy rompía el panel al importar.
+
+    🔑 **Se aserta lo que el DEPLOY hace con el valor, no el valor.** Comparar
+    lo declarado contra la tupla que uno escribió en el otro archivo se cumple
+    por construcción y no prueba nada.
+    """
+    from libracore.provisioning import get_config
+
+    raiz = pathlib.Path(__file__).parent.parent
+    revisiones = sorted((raiz / "migrations" / "versions").glob("*.py"))
+
+    importlib.reload(importlib.import_module(f"scripts.{script}"))
+    declarados = get_config().migraciones
+
+    if not revisiones:
+        return
+
+    assert declarados, (
+        f"este repo tiene {len(revisiones)} revisiones de Alembic y "
+        f"scripts/{script}.py no declara `migraciones`: el deploy las va a "
+        "saltear en silencio."
+    )
+    # Textualmente lo que hace `cmd_actualizar` por cada comando.
+    for comando in declarados:
+        assert not isinstance(comando, str), (
+            f"scripts/{script}.py declara {declarados!r} en forma PLANA.")
+        " ".join(comando)
+
+    assert any("alembic" in c for c in declarados), (
+        f"scripts/{script}.py declara {declarados!r}, sin el `alembic` de la "
+        "cadena propia de este repo.")
 
 
 def test_el_producto_declara_planes_con_sus_modulos():

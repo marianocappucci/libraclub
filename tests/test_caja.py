@@ -170,3 +170,33 @@ def test_el_historial_es_de_admin(api):
     staff.post("/auth/login", json={"username": "mostrador2", "password": "clave-most"})
     assert staff.get("/api/caja/turnos").status_code == 403
     assert api.get("/api/caja/turnos").status_code == 200
+
+
+# ── Con qué se puede cobrar ───────────────────────────────────────────────
+
+def test_los_medios_de_pago_salen_del_backend(api):
+    """🔴 El frontend tenía su propia lista, con un comentario que decía que
+    *"tiene que coincidir con  del backend — si se agrega uno de un
+    lado y no del otro, el cobro da 422"*. O sea que la divergencia estaba
+    **prevista y aceptada** en vez de cerrada. Y ya había ocurrido: las dos
+    decían , que no existe en el vocabulario de la familia.
+
+    Ahora la pide acá. El resto del vocabulario lo cubre .
+    """
+    from app.servicios import caja as servicio
+
+    r = api.get("/api/caja/medios-pago")
+    assert r.status_code == 200, r.text
+    assert [m["valor"] for m in r.json()] == list(servicio.MEDIOS_PAGO)
+    assert all(m["etiqueta"] for m in r.json()), (
+        "una etiqueta vacía deja una opción en blanco que igual se puede elegir"
+    )
+
+
+def test_los_medios_de_pago_son_de_staff(api):
+    """El mostrador los necesita para cobrar; no es información de admin."""
+    api.post("/api/usuarios", json={
+        "username": "mostrador3", "name": "Mostrador", "password": "clave-m3", "role": "staff"})
+    staff = TestClient(crear_app(_config(_url_core())), base_url="https://testserver")
+    staff.post("/auth/login", json={"username": "mostrador3", "password": "clave-m3"})
+    assert staff.get("/api/caja/medios-pago").status_code == 200

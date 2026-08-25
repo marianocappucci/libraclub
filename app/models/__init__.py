@@ -14,7 +14,6 @@ from app.models.enums import (
     EstadoTorneo,
     EtapaTorneo,
     FormatoTorneo,
-    MedioPago,
     OrigenReserva,
 )
 from app.models.maestros import Cancha, Cliente, Feriado, Sucursal
@@ -45,7 +44,6 @@ __all__ = [
     "Feriado",
     "FormatoTorneo",
     "IntegranteDeCompetidor",
-    "MedioPago",
     "OrigenReserva",
     "ParcialDePartido",
     "PartidoDeTorneo",
