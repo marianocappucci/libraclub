@@ -8,6 +8,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
+from libracore import medios_pago
 from pydantic import BaseModel, Field
 
 from app.auth import get_current_user, require_admin, require_staff
@@ -88,6 +89,26 @@ def abrir(
         return _a_salida(servicio.abrir_turno(usuario, datos.monto_inicial, datos.notas))
     except servicio.TurnoYaAbierto as e:
         raise HTTPException(409, str(e)) from e
+
+
+@router.get("/medios-pago")
+def medios_de_pago(usuario: dict = Depends(require_staff)) -> list[dict]:
+    """`[{valor, etiqueta}]` para los selectores de cobro.
+
+    🔴 **La lista es del backend.** `frontend/src/lib/api.ts` tenía su copia —con
+    un comentario que decía *"tiene que coincidir con `MEDIOS_PAGO` del backend
+    — si se agrega uno de un lado y no del otro, el cobro da 422"*—, o sea que la
+    divergencia estaba **prevista y aceptada** en vez de cerrada. Y ya había
+    ocurrido: las dos decían `tarjeta`, que no existe en el vocabulario de la
+    familia.
+
+    El subconjunto sigue siendo de este producto (`servicios/caja.MEDIOS_PAGO`);
+    lo que se va es la segunda declaración.
+    """
+    return [
+        {"valor": m, "etiqueta": medios_pago.label(m)}
+        for m in servicio.MEDIOS_PAGO
+    ]
 
 
 @router.get("/turnos/actual")

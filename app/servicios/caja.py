@@ -21,14 +21,31 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
+from libracore import medios_pago
 from libracore.db import caja as db_caja
 from libracore.db import core as libracore_core
 from libracore.db import turnos as db_turnos
 
-#: Los medios que ofrece este producto. Es un subconjunto de los del motor: un
-#: complejo de canchas cobra en efectivo, por transferencia o con QR — no tiene
-#: cheques ni retenciones.
-MEDIOS_PAGO = ("efectivo", "transferencia", "mercadopago", "tarjeta")
+#: Los medios que ofrece este producto. Es un **subconjunto deliberado** de los
+#: del motor: un complejo de canchas cobra en efectivo, por transferencia, con
+#: QR o con tarjeta — no tiene cheques, ni cuenta corriente, ni Cuenta DNI.
+#:
+#: 🔴 **El subconjunto se elige, pero las claves no se inventan.** Hasta el
+#: 2026-08-24 esto era una tupla escrita a mano que decía `tarjeta`, y esa clave
+#: no existe en el vocabulario de la familia: ARCA parte la tarjeta en débito y
+#: crédito, que son dos condiciones de venta distintas.
+#:
+#: Cada elemento se valida contra `medios_pago.ELEGIBLES` **al importar el
+#: módulo**, así que un medio inventado revienta el arranque en vez de llegar a
+#: la caja y aparecer en el cierre como un bucket con el nombre crudo.
+#:
+#: Ver `wiki/concepts/medios-de-pago-familia-libra.md`.
+MEDIOS_PAGO = tuple(
+    medios_pago.validar(m) for m in (
+        "efectivo", "transferencia", "mercadopago",
+        "tarjeta_debito", "tarjeta_credito",
+    )
+)
 
 
 class SinTurnoAbierto(RuntimeError):

@@ -45,6 +45,26 @@ vi.mock('@/context/SucursalContext', async (original) => {
   }
 })
 
+// 🔴 La pantalla ahora **pide los medios al backend** en vez de importar una
+// copia. Se stubea el hook y no `fetch`: lo que estos tests miden es lo que la
+// pantalla decide, no el pedido — el endpoint tiene su propio test del lado del
+// backend (`tests/test_medios_pago.py`), que es donde vive el contrato.
+//
+// ⚠️ Con este doble, un cambio en la URL o en la forma de la respuesta **no se
+// ve acá**. Es el límite de estos tests, y está puesto a propósito.
+vi.mock('@/lib/medios-pago', () => ({
+  useMediosDePago: () => ({
+    medios: [
+      { valor: 'efectivo', etiqueta: 'Efectivo' },
+      { valor: 'transferencia', etiqueta: 'Transferencia' },
+      { valor: 'mercadopago', etiqueta: 'Mercado Pago' },
+    ],
+    etiqueta: (v: string) =>
+      ({ efectivo: 'Efectivo', transferencia: 'Transferencia',
+         mercadopago: 'Mercado Pago', tarjeta: 'Tarjeta' })[v] ?? v,
+  }),
+}))
+
 const { Buffet } = await import('./Buffet')
 
 const GASEOSA = {

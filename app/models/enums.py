@@ -82,13 +82,19 @@ class AlcanceDia(enum.Enum):
     FERIADO = "feriado"
 
 
-class MedioPago(enum.Enum):
-    EFECTIVO = "efectivo"
-    TRANSFERENCIA = "transferencia"
-    DEBITO = "debito"
-    CREDITO = "credito"
-    MERCADOPAGO = "mercadopago"
-    OTRO = "otro"
+# 🔴 Aca habia un `MedioPago(enum.Enum)` con un vocabulario propio --`debito`,
+# `credito`, `otro`-- **distinto del que este producto realmente usa**
+# (`servicios/caja.MEDIOS_PAGO`) y distinto del de la familia. Tres
+# vocabularios para lo mismo, en el mismo repo.
+#
+# Era codigo muerto: se exportaba desde `models/__init__.py` y **nadie lo
+# importaba**. No es columna de ninguna tabla ni aparece en ninguna migracion --
+# verificado con un grep sobre todo el repo, no de memoria. O sea que no hay
+# `ALTER TYPE` que hacer ni filas que migrar.
+#
+# Se saca en vez de dejarse: un enum publico con un tercer vocabulario es una
+# invitacion a que el proximo cobro lo use, y ahi si habria datos que migrar.
+# El vocabulario vive en `libracore.medios_pago`.
 
 
 class FormatoTorneo(enum.Enum):

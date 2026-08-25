@@ -376,15 +376,20 @@ export interface ResumenDeCaja {
   efectivo_ventas: number
 }
 
-/** Los medios que cobra un complejo. Es un subconjunto de los del motor: acá no
- *  hay cheques ni retenciones. Tiene que coincidir con `MEDIOS_PAGO` del
- *  backend — si se agrega uno de un lado y no del otro, el cobro da 422. */
-export const MEDIOS_DE_PAGO = [
-  { valor: 'efectivo', etiqueta: 'Efectivo' },
-  { valor: 'transferencia', etiqueta: 'Transferencia' },
-  { valor: 'mercadopago', etiqueta: 'Mercado Pago' },
-  { valor: 'tarjeta', etiqueta: 'Tarjeta' },
-] as const
+// 🔴 Acá había un `MEDIOS_DE_PAGO` escrito a mano, con un comentario que decía
+// que "tiene que coincidir con `MEDIOS_PAGO` del backend — si se agrega uno de
+// un lado y no del otro, el cobro da 422". O sea que la divergencia estaba
+// **prevista y aceptada** en vez de cerrada. Y ya había ocurrido: las dos
+// listas decían `tarjeta`, que no existe en el vocabulario de la familia (ARCA
+// la parte en débito y crédito).
+//
+// Ahora la lista sale de `GET /api/caja/medios-pago`. El subconjunto sigue
+// siendo de este producto —un complejo de canchas no cobra con cheque— pero se
+// declara **una sola vez**, en `app/servicios/caja.py`.
+//
+// Ver `wiki/concepts/medios-de-pago-familia-libra.md`.
+
+export type MedioDePago = { valor: string; etiqueta: string }
 
 export const caja = {
   /** `null` si este usuario no tiene caja abierta. */
