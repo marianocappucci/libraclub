@@ -22,7 +22,8 @@ import { BadgeEstado } from 'libra-ui/badge-estado'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 
-import { MEDIOS_DE_PAGO, cuentaCorriente } from '@/lib/api'
+import { cuentaCorriente } from '@/lib/api'
+import { useMediosDePago } from '@/lib/medios-pago'
 import type { MovimientoDeCuenta, SaldoDeCuenta } from '@/lib/api'
 import { diaISO, fecha as formatearFecha, pesos } from '@/lib/fechas'
 import { AvisoDeError } from '@/components/listado'
@@ -38,13 +39,13 @@ import { Label } from '@/components/ui/label'
 
 type Cuenta = SaldoDeCuenta & { movimientos: MovimientoDeCuenta[] }
 
-const ETIQUETA_DE_MEDIO: Record<string, string> = Object.fromEntries(
-  MEDIOS_DE_PAGO.map((m) => [m.valor, m.etiqueta]),
-)
+// La etiqueta sale del hook, que la pide al backend: acá había un mapa
+// armado sobre la copia local de la lista.
 
 export function CuentaCorrienteDetalle() {
   const { id } = useParams<{ id: string }>()
   const clienteId = Number(id)
+  const { etiqueta: etiquetaDeMedio } = useMediosDePago()
 
   const [cuenta, setCuenta] = useState<Cuenta | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -118,7 +119,7 @@ export function CuentaCorrienteDetalle() {
                 `identidad-visual-suite-libra`. */}
             {row.original.medio && (
               <Badge variant="outline">
-                {ETIQUETA_DE_MEDIO[row.original.medio] ?? row.original.medio}
+                {etiquetaDeMedio(row.original.medio)}
               </Badge>
             )}
           </span>
@@ -256,7 +257,8 @@ function DialogoDePago({ abierto, clienteId, nombre, saldo, onCerrar, onRegistra
   const [monto, setMonto] = useState('')
   const [fecha, setFecha] = useState('')
   const [concepto, setConcepto] = useState('')
-  const [medio, setMedio] = useState<string>(MEDIOS_DE_PAGO[0].valor)
+  const { medios } = useMediosDePago()
+  const [medio, setMedio] = useState<string>('')
   const [referencia, setReferencia] = useState('')
   const [enviando, setEnviando] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -272,7 +274,7 @@ function DialogoDePago({ abierto, clienteId, nombre, saldo, onCerrar, onRegistra
     // y esa es justo la franja en la que un complejo cobra.
     setFecha(diaISO(new Date()))
     setConcepto('')
-    setMedio(MEDIOS_DE_PAGO[0].valor)
+    setMedio(medios[0]?.valor ?? '')
     setReferencia('')
   }, [abierto, saldo])
 
@@ -353,7 +355,7 @@ function DialogoDePago({ abierto, clienteId, nombre, saldo, onCerrar, onRegistra
                 value={medio}
                 onChange={(e) => setMedio(e.target.value)}
               >
-                {MEDIOS_DE_PAGO.map((m) => (
+                {medios.map((m) => (
                   <option key={m.valor} value={m.valor}>
                     {m.etiqueta}
                   </option>

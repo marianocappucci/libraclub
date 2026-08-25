@@ -12,7 +12,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
 import { Wallet } from 'lucide-react'
 
-import { MEDIOS_DE_PAGO, caja } from '@/lib/api'
+import { caja } from '@/lib/api'
+import { useMediosDePago } from '@/lib/medios-pago'
 import type { ResumenDeCaja, TurnoDeCaja } from '@/lib/api'
 import { pesos } from '@/lib/fechas'
 import { AvisoDeError } from '@/components/listado'
@@ -161,9 +162,19 @@ function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
 }) {
   const [monto, setMonto] = useState('')
   const [concepto, setConcepto] = useState('')
-  const [medio, setMedio] = useState<string>(MEDIOS_DE_PAGO[0].valor)
+  const { medios, etiqueta: etiquetaDeMedio } = useMediosDePago()
+  const [medio, setMedio] = useState<string>('')
   const [declarado, setDeclarado] = useState('')
   const [enviando, setEnviando] = useState(false)
+
+  // 🔴 El medio por defecto **espera a que la lista llegue**. Antes se
+  // inicializaba con `MEDIOS_DE_PAGO[0]`, una constante que estaba siempre; con
+  // la lista pedida al backend eso es imposible hasta que conteste, y dejarlo en
+  // `''` haría que el movimiento entre a la caja **sin medio** — el cierre lo
+  // suma al total pero no lo reparte, y el arqueo por medio no cuadra.
+  useEffect(() => {
+    if (!medio && medios.length > 0) setMedio(medios[0].valor)
+  }, [medio, medios])
 
   const esperado = turno.monto_inicial + (resumen?.efectivo_ventas ?? 0)
 
@@ -195,7 +206,7 @@ function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
               value={medio}
               onChange={(e) => setMedio(e.target.value)}
             >
-              {MEDIOS_DE_PAGO.map((m) => (
+              {medios.map((m) => (
                 <option key={m.valor} value={m.valor}>{m.etiqueta}</option>
               ))}
             </select>
@@ -231,7 +242,7 @@ function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
           {Object.entries(resumen?.pagos_por_medio ?? {}).map(([m, total]) => (
             <div key={m} className="flex justify-between">
               <span className="text-muted-foreground">
-                {MEDIOS_DE_PAGO.find((x) => x.valor === m)?.etiqueta ?? m}
+                {etiquetaDeMedio(m)}
               </span>
               <span>{pesos(String(total))}</span>
             </div>
