@@ -114,6 +114,20 @@ def configurar(database_url: str | None) -> bool:
     if not database_url:
         _hay_base = False
         return False
+    # 🔴 **Este producto corre sobre PostgreSQL y nada mas.** La guarda va aca,
+    # en el arranque del producto, y no dentro de `libracore.db.core`: el motor
+    # tiene que poder abrir un SQLite igual, porque de eso vive la herramienta
+    # de diagnostico `python -m libracore.db.schema_dump`, que vuelca el schema
+    # de un archivo viejo o de la base de LibraEdge --- la excepcion permanente
+    # de la familia. La regla "este producto no habla con otro motor" es del
+    # producto.
+    if not libracore_core.es_url_postgres(database_url):
+        raise RuntimeError(
+            f"LibraClub factura solo contra PostgreSQL y recibio "
+            f"{database_url!r}, que es una ruta de archivo. El modo SQLite se "
+            "retiro el 2026-08-12: no chequea las FK, tipa dinamicamente y "
+            "acepta cadenas donde la base pide enteros."
+        )
     _crear_base_si_falta(database_url)
     libracore_core.configure(database_url)
     conexion = libracore_core.get_connection()
