@@ -18,6 +18,7 @@ las otras dos.
 
 import importlib
 import pathlib
+import re
 
 import pytest
 
@@ -137,3 +138,65 @@ def test_el_producto_declara_planes_con_sus_modulos():
     # Todo módulo de un plan tiene nombre para mostrar: el backoffice los lista.
     assert set(plans.MODULOS) == premium
     assert set(plans.MODULO_LABELS) == set(plans.MODULOS)
+
+
+def _bloque_del_servicio_de_dev() -> str:
+    """El bloque del servicio `*-dev` del compose del repo, como texto.
+
+    Sin `yaml`: no es dependencia de este repo ni de sus tests, y sumar una
+    para leer una línea sería peor que recortar el bloque a mano. El corte es
+    por indentación —un servicio arranca con dos espacios y su cuerpo tiene
+    más—, que es exactamente lo que el archivo garantiza.
+    """
+    raiz = pathlib.Path(__file__).parent.parent
+    lineas = (raiz / "docker-compose.yml").read_text(encoding="utf-8").splitlines()
+    servicios = [i for i, linea in enumerate(lineas)
+                 if re.match(r"^  [A-Za-z0-9_.-]+:\s*$", linea)]
+    inicio = next((i for i in servicios
+                   if lineas[i].strip().rstrip(":").endswith("-dev")), None)
+    assert inicio is not None, (
+        "el compose del repo no declara ningún servicio `*-dev`: este test "
+        "está mirando un archivo que ya no tiene la forma que supone.")
+    fin = next((i for i in servicios if i > inicio), len(lineas))
+    return "\n".join(lineas[inicio:fin])
+
+
+@pytest.mark.parametrize("script", ["nuevo_cliente", "panel_admin"])
+def test_la_instancia_de_dev_corre_las_mismas_migraciones_que_el_deploy(script):
+    """El otro camino, el que `cmd_actualizar` no toca.
+
+    🔴 **La declaración de `migraciones` no cubre `dev`.** El motor corre esos
+    comandos al actualizar las instancias de cliente y la demo, que son las que
+    el panel administra. La de `dev` la levanta el `docker-compose.yml` de este
+    repo, y hasta el 2026-08-25 ahí no había ningún paso de Alembic en ninguno
+    de los cinco productos de la familia que usan Alembic. Se descubrió porque
+    `libracargo-dev` apareció con la base una revisión atrás del código, con el
+    chequeo de salud en 200.
+
+    Lo que se aserta es que las dos puntas digan **lo mismo y en el mismo
+    orden**. El modo de fallar de esto no es que alguien borre el `command:`,
+    es que agregue una segunda cadena en `scripts/` y se olvide del compose:
+    ahí `dev` migraría de menos y el error culparía a la revisión equivocada.
+
+    Se lee el compose como texto y no se compara contra un literal escrito acá:
+    un literal sería una tercera copia, con exactamente el mismo problema.
+    """
+    from libracore.provisioning import get_config
+
+    importlib.reload(importlib.import_module(f"scripts.{script}"))
+    declarados = get_config().migraciones
+    if not declarados:
+        return  # sin cadena declarada no hay nada que exigirle al compose
+
+    bloque = _bloque_del_servicio_de_dev()
+    cursor = 0
+    for comando in declarados:
+        texto = " ".join(comando)
+        pos = bloque.find(texto, cursor)
+        assert pos != -1, (
+            f"scripts/{script}.py declara `{texto}` y el servicio de dev del "
+            "compose no lo corre" + (" en ese orden" if cursor else "") + ": "
+            "la instancia de dev va a quedar con el código nuevo sobre el "
+            "esquema viejo, que es lo que le pasó a LibraCargo el 2026-08-25."
+        )
+        cursor = pos + len(texto)
