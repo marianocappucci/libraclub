@@ -161,6 +161,26 @@ def _bloque_del_servicio_de_dev() -> str:
     return "\n".join(lineas[inicio:fin])
 
 
+def _comando_de_arranque_de_dev() -> str:
+    """El **valor** del `command:` del servicio de dev, y nada más.
+
+    🔴 **La primera versión de este test buscaba en el bloque entero, y eso
+    pasaba en verde con el paso de migraciones sacado del `command:` y dejado
+    en un comentario.** Medido el 2026-08-25, no supuesto: un comentario que
+    menciona `alembic upgrade head` no lo corre. Buscar en el bloque también
+    dejaba que un `ports: - "8086:8000"` satisficiera un token del comando de
+    arranque, que es la misma clase de falso verde.
+
+    Un comentario no matchea `^\s+command:` porque el `#` va antes de la clave.
+    """
+    bloque = _bloque_del_servicio_de_dev()
+    m = re.search(r"^\s+command:\s*(\S.*)$", bloque, re.MULTILINE)
+    assert m, (
+        "el servicio de dev del compose no declara `command:`. Si el arranque "
+        "pasó a otra forma, este test hay que reescribirlo — no borrarlo.")
+    return m.group(1).strip()
+
+
 @pytest.mark.parametrize("script", ["nuevo_cliente", "panel_admin"])
 def test_la_instancia_de_dev_corre_las_mismas_migraciones_que_el_deploy(script):
     """El otro camino, el que `cmd_actualizar` no toca.
@@ -188,11 +208,11 @@ def test_la_instancia_de_dev_corre_las_mismas_migraciones_que_el_deploy(script):
     if not declarados:
         return  # sin cadena declarada no hay nada que exigirle al compose
 
-    bloque = _bloque_del_servicio_de_dev()
+    arranque = _comando_de_arranque_de_dev()
     cursor = 0
     for comando in declarados:
         texto = " ".join(comando)
-        pos = bloque.find(texto, cursor)
+        pos = arranque.find(texto, cursor)
         assert pos != -1, (
             f"scripts/{script}.py declara `{texto}` y el servicio de dev del "
             "compose no lo corre" + (" en ese orden" if cursor else "") + ": "
