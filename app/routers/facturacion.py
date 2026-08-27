@@ -45,13 +45,23 @@ def _salida(cfg: dict) -> ConfigArcaSalida:
     )
 
 
-def _exigir_base() -> None:
+def exigir_base() -> None:
     """503 y no 500 si la instancia no tiene base de LibraCore.
 
     🔑 El mensaje dice **qué falta**, porque el síntoma del lado de la pantalla
     es idéntico al de un error cualquiera: sin esto, un complejo sin configurar
     vería "algo falló" y nadie sabría que lo que hay que hacer es agregar una
     variable de entorno.
+
+    Pública —y no `_exigir_base`— porque la comparte `routers/facturas.py`: son
+    los dos routers de la MISMA funcionalidad, partida en dos prefijos
+    (`/config/arca` por el kit, `/api/facturas` por la convención del producto),
+    así que les corresponde el mismo mensaje.
+
+    ⚠️ `buffet.py` y `cuenta_corriente.py` tienen cada uno el suyo y **no hay que
+    unificarlos con éste**: lo único que cambia es el sujeto de la frase —"El
+    buffet", "La cuenta corriente"— y ahí está todo el valor. Un mensaje genérico
+    diría que falta una variable sin decir qué se rompe por no tenerla.
     """
     if not facturacion.hay_base():
         raise HTTPException(
@@ -63,14 +73,14 @@ def _exigir_base() -> None:
 
 @router.get("", response_model=ConfigArcaSalida | None)
 def obtener() -> ConfigArcaSalida | None:
-    _exigir_base()
+    exigir_base()
     cfg = facturacion.obtener_config_arca()
     return _salida(cfg) if cfg else None
 
 
 @router.put("", response_model=ConfigArcaSalida)
 def guardar(datos: ConfigArcaEntrada) -> ConfigArcaSalida:
-    _exigir_base()
+    exigir_base()
     return _salida(
         facturacion.guardar_config_arca(
             datos.cuit, datos.punto_venta, datos.clave_path,

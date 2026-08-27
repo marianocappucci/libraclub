@@ -302,6 +302,40 @@ export const facturacion = {
   // factura a quién es del dueño. Si el rol no alcanza, el backend contesta 403
   // — la pantalla esconde el botón para no ofrecer lo que va a fallar.
   emitir: (reservaId: number) => api.post<Factura>(`/api/reservas/${reservaId}/facturar`, {}),
+  /** El PDF del comprobante. Es una URL y no un `fetch`: la abre un `<a
+   *  target="_blank">`, y la cookie de sesión —`SameSite=Lax`— viaja en una
+   *  navegación GET de nivel superior. Con `fetch` habría que armar un blob
+   *  para nada. */
+  urlDelPdf: (facturaId: number) => `/api/facturas/${facturaId}/pdf`,
+}
+
+/** Una fila del listado de comprobantes. Trae al cliente, que la factura de una
+ *  reserva no necesita —ahí ya se sabe de quién es el turno—. */
+export interface FacturaDeListado extends Factura {
+  cliente_razon: string
+  cliente_cuit: string
+}
+
+export interface PaginaDeFacturas {
+  items: FacturaDeListado[]
+  total: number
+  total_pages: number
+  page: number
+}
+
+/** El listado de comprobantes del complejo. **Todo de admin** — ver
+ *  `app/routers/facturas.py`. */
+export const facturas = {
+  listar: (filtros: { desde?: string; hasta?: string; q?: string; page?: number }) => {
+    const params = new URLSearchParams()
+    // Sólo lo que tiene valor: un `desde=` vacío es un filtro que el backend
+    // igual evalúa, y ensucia la URL que se ve en el navegador.
+    if (filtros.desde) params.set('desde', filtros.desde)
+    if (filtros.hasta) params.set('hasta', filtros.hasta)
+    if (filtros.q) params.set('q', filtros.q)
+    params.set('page', String(filtros.page ?? 1))
+    return api.get<PaginaDeFacturas>(`/api/facturas?${params}`)
+  },
 }
 
 /** Lo que el mostrador necesita saber del QR sin ver ninguna credencial. */

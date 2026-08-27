@@ -394,13 +394,33 @@ function SeccionDeFactura(
     const tipo = TIPO_DE_FACTURA[factura.tipo] ?? factura.tipo
     const numero = `${String(factura.punto_venta).padStart(4, '0')}-${String(factura.numero).padStart(8, '0')}`
     return (
-      <div className="rounded-md border px-3 py-2 text-sm">
-        <div className="font-medium">Factura {tipo} {numero}</div>
-        <div className="text-muted-foreground">
-          {factura.cae
-            ? `CAE ${factura.cae}`
-            : 'Pendiente de CAE — la instancia todavía no tiene certificado de ARCA'}
+      <div className="flex items-start justify-between gap-2 rounded-md border px-3 py-2 text-sm">
+        <div>
+          <div className="font-medium">Factura {tipo} {numero}</div>
+          <div className="text-muted-foreground">
+            {factura.cae
+              ? `CAE ${factura.cae}`
+              : 'Pendiente de CAE — la instancia todavía no tiene certificado de ARCA'}
+          </div>
         </div>
+        {/* El PDF también acá y no sólo en el listado: éste es el momento en que
+            alguien lo quiere —se acaba de facturar el turno y hay que dárselo al
+            cliente—.
+
+            Sólo para admin, por el mismo motivo que el botón de emitir: el
+            endpoint del PDF lleva `require_admin`, así que al encargado el link
+            le daría 403. El bloque de arriba —el número y el CAE— sí lo ve,
+            porque eso viene de `/api/reservas/{id}/factura`, que es de staff. */}
+        {user?.role === 'admin' && (
+          <a
+            href={facturacion.urlDelPdf(factura.id)}
+            target="_blank"
+            rel="noreferrer"
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          >
+            Ver PDF
+          </a>
+        )}
       </div>
     )
   }
