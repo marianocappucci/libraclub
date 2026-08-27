@@ -46,7 +46,6 @@ from app.routers import caja as caja_router
 from app.routers import cuenta_corriente as cuenta_corriente_router
 from app.routers import facturacion as facturacion_router
 from app.routers import facturas as facturas_router
-from app.routers.facturacion import exigir_base
 from app.routers import mercadopago as mercadopago_router
 from app.routers import portal as portal_router
 from app.routers import resumen as resumen_router
@@ -54,6 +53,7 @@ from app.routers import resumen as resumen_router
 # Con alias: más abajo hay una variable local `usuarios` con el repositorio, y
 # sin el alias el import queda pisado.
 from app.routers import usuarios as usuarios_router
+from app.routers.facturacion import exigir_base
 from app.servicios import facturacion
 
 #: Qué entra al log de actividad: `{clase del modelo: nombre legible}`.
