@@ -53,6 +53,7 @@ from app.routers import resumen as resumen_router
 # Con alias: más abajo hay una variable local `usuarios` con el repositorio, y
 # sin el alias el import queda pisado.
 from app.routers import usuarios as usuarios_router
+from app.routers.facturacion import exigir_base
 from app.servicios import facturacion
 
 #: Qué entra al log de actividad: `{clase del modelo: nombre legible}`.
@@ -261,14 +262,32 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # Sin `/api` a propósito: es el prefijo que consume el kit — ver el módulo.
     app.include_router(facturacion_router.router, dependencies=[Depends(require_admin)])
 
-    # `GET /api/facturas` y su PDF: el listado de comprobantes emitidos.
+    # Los comprobantes: los doce endpoints del motor —listado, alta manual,
+    # detalle, duplicar, autorizar, cobrar, mandar por mail, borrar, nota de
+    # crédito y nota de débito— más el PDF, que es de este producto.
     #
-    # Admin también para leer, y es distinto del resto de la facturación: la
-    # factura de SU reserva la ve el mostrador desde el turno
+    # Admin para todo, también para leer, y es distinto del resto de la
+    # facturación: la factura de SU reserva la ve el mostrador desde el turno
     # (`GET /api/reservas/{id}/factura`, `require_staff`). Lo que es de admin es
-    # ver TODO lo facturado por el complejo de una sentada — mismo criterio que
-    # el historial de caja y el log de actividad.
-    app.include_router(facturas_router.router, dependencies=[Depends(require_admin)])
+    # ver TODO lo facturado por el complejo de una sentada, y emitir a mano —
+    # mismo criterio que el historial de caja y el log de actividad.
+    #
+    # 🔑 **Van los DOS**, y el orden no importa: el del motor no tiene ninguna
+    # ruta `/{id}/pdf`, así que no se pisan.
+    # 🔴 `exigir_base` va en el montaje y no adentro del motor: el factory es de
+    # LibraCore, y ahí la base SIEMPRE existe. Acá no —un complejo que todavía no
+    # factura levanta igual—, y sin esta guarda sus doce endpoints contestarían
+    # un error de conexión de psycopg en vez del 503 que nombra la variable que
+    # falta. Lo agarró `test_sin_base_de_libracore_el_listado_lo_DICE`, que se
+    # escribió para el listado hecho a mano y sobrevivió al reemplazo.
+    app.include_router(
+        facturas_router.comprobantes,
+        dependencies=[Depends(require_admin), Depends(exigir_base)],
+    )
+    app.include_router(
+        facturas_router.router,
+        dependencies=[Depends(require_admin), Depends(exigir_base)],
+    )
 
     # `GET`/`PUT /config/mercadopago`: con qué cuenta cobra el QR del mostrador.
     # Admin por el mismo motivo que ARCA — quien escriba acá cambia a qué cuenta

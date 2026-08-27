@@ -166,6 +166,7 @@ def test_una_url_que_no_es_postgres_no_se_acepta(monkeypatch):
 # se pueda facturar dos veces. **El CAE real queda sin verificar** hasta que haya
 # un certificado de homologación.
 
+from datetime import date  # noqa: E402
 from decimal import Decimal  # noqa: E402
 
 from app.servicios import facturacion as servicio  # noqa: E402
@@ -452,3 +453,142 @@ def test_la_ruta_de_la_PANTALLA_no_la_intercepta_la_api(api):
     assert not [
         c for c in caminos if c == "/facturas" or c.startswith("/facturas/")
     ], "la URL de la pantalla no puede ser también una ruta de la API"
+
+
+# ── Los comprobantes del motor: alta manual, notas de crédito y de débito ──
+#
+# Los doce endpoints los arma `libracore.facturas_router`, el mismo módulo que
+# consumen Contalibra y Restolibra. Lo que se prueba acá es **el cableado de
+# este producto**, no el circuito fiscal —que tiene sus 38 tests en el motor—:
+# que emitir a mano funcione con los usuarios en la otra base, que el PDF
+# siga saliendo, y que todo quede detrás del rol de admin.
+
+HOY = date.today().isoformat()
+
+
+def _factura_manual(**extra) -> dict:
+    cuerpo = {
+        "tipo": 11, "punto_venta": 1, "fecha": HOY,
+        "condicion_venta": "Contado", "client_name": "Marcela Gutierrez",
+        "items": [{"description": "Clase particular", "qty": 1, "unit_price": 9000.0}],
+    }
+    cuerpo.update(extra)
+    return cuerpo
+
+
+def test_emitir_a_mano_funciona_con_los_usuarios_en_LA_OTRA_base(api):
+    """🔴 El caso que casi rompe el cableado.
+
+    `facturas.usuario_id` es una FK contra la tabla `usuarios` **de LibraCore**,
+    y en este producto los usuarios viven en la base del dominio, con la forma de
+    `libraauth`. Pasarle el id del usuario del dominio reventaría el INSERT con
+    un `FOREIGN KEY constraint failed` — o, si esa tabla llegara a tener filas,
+    le acreditaría la factura a otra persona, que es peor porque no falla.
+
+    Por eso `_usuario_para_el_motor` lo manda en `None`. Este test es lo que lo
+    sostiene: sin esa decisión, no emite.
+    """
+    r = api.post("/api/facturas", json=_factura_manual())
+    assert r.status_code == 200, r.text
+
+    factura = r.json()
+    assert factura["id"], "la respuesta trae el comprobante pelado, con su id"
+    assert factura["total"] == 9000.0
+    assert factura["cliente_razon"] == "Marcela Gutierrez"
+
+    # Se relee por el listado: lo que importa es que quedó guardada.
+    listado = api.get("/api/facturas").json()
+    assert listado["total"] == 1
+    assert listado["items"][0]["id"] == factura["id"]
+
+
+def test_la_nota_de_credito_anula_una_factura_del_complejo(api, cancha, cliente, tarifa_base):
+    """Anular el comprobante de un turno, que es el caso real: se facturó una
+    reserva y hubo que darla de baja."""
+    reserva = _reserva_facturable(api, cancha, cliente, tarifa_base)
+    emitida = api.post(f"/api/reservas/{reserva['id']}/facturar").json()
+
+    r = api.post(f"/api/facturas/{emitida['id']}/nota-credito")
+    assert r.status_code == 200, r.text
+    nota = r.json()
+
+    assert nota["tipo"] == 13, "una C da una Nota de Crédito C"
+    assert nota["total"] == emitida["total"], "anula el importe exacto"
+    assert nota["cbte_asoc_nro"] == emitida["numero"]
+
+    # Y el detalle de la original la muestra colgando.
+    detalle = api.get(f"/api/facturas/{emitida['id']}").json()
+    assert len(detalle["notas_credito"]) == 1
+
+
+def test_la_nota_de_debito_tambien_existe(api):
+    factura = api.post("/api/facturas", json=_factura_manual()).json()
+    nota = api.post(f"/api/facturas/{factura['id']}/nota-debito").json()
+    assert nota["tipo"] == 12
+
+
+def test_el_PDF_sigue_saliendo_por_el_endpoint_de_este_producto(api):
+    """El factory no trae PDF: lo sirve este producto, y tiene que convivir con
+    las rutas del motor sin pisarse."""
+    factura = api.post("/api/facturas", json=_factura_manual()).json()
+
+    r = api.get(f"/api/facturas/{factura['id']}/pdf")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content.startswith(b"%PDF")
+
+    # Control de que no se pisan: el detalle, que es `/{id}` a secas, sigue
+    # devolviendo JSON.
+    detalle = api.get(f"/api/facturas/{factura['id']}")
+    assert detalle.headers["content-type"].startswith("application/json")
+
+
+def test_todo_el_circuito_es_de_admin(api, engine):
+    """El mostrador ve la factura de SU turno; emitir a mano y anular es del dueño."""
+    api.post("/api/usuarios", json={
+        "username": "mostrador2", "name": "Mostrador", "password": "clave-mostrador",
+        "role": "staff",
+    })
+    staff = TestClient(crear_app(_config(_url_core())), base_url="https://testserver")
+    assert staff.post(
+        "/auth/login", json={"username": "mostrador2", "password": "clave-mostrador"}
+    ).status_code == 200
+
+    assert staff.post("/api/facturas", json=_factura_manual()).status_code == 403
+    assert staff.get("/api/facturas").status_code == 403
+    assert staff.post("/api/facturas/1/nota-credito").status_code == 403
+    # Control: el admin sí, por las mismas rutas.
+    assert api.get("/api/facturas").status_code == 200
+
+
+#: Los campos que la pantalla `Facturas.tsx` lee de cada fila del listado.
+#:
+#: 🔑 Están escritos acá y no deducidos del código: hasta el 2026-08-27 este
+#: listado lo armaba un `response_model` de este producto, y al pasarlo al motor
+#: la respuesta cambió de forma —ahora son las filas crudas de `facturas`, con
+#: más campos—. La pantalla siguió andando porque los que usa están todos, pero
+#: eso hay que **verificarlo**, no suponerlo: el mismo cambio de forma en
+#: `POST /api/facturas` rompió la navegación de Contalibra sin que ninguna de
+#: sus 369 pruebas lo viera.
+CAMPOS_QUE_USA_LA_PANTALLA = (
+    "id", "tipo", "punto_venta", "numero", "fecha", "cliente_razon", "total", "cae",
+)
+
+
+def test_el_listado_trae_lo_que_la_PANTALLA_lee(api, cancha, cliente, tarifa_base):
+    reserva = _reserva_facturable(api, cancha, cliente, tarifa_base)
+    api.post(f"/api/reservas/{reserva['id']}/facturar")
+
+    pagina = api.get("/api/facturas").json()
+    assert set(pagina) >= {"items", "total", "total_pages", "page"}, sorted(pagina)
+
+    fila = pagina["items"][0]
+    faltan = [c for c in CAMPOS_QUE_USA_LA_PANTALLA if c not in fila]
+    assert not faltan, f"la pantalla se rompe sin: {faltan}"
+
+    # Y con los valores que la pantalla espera, no sólo las claves.
+    assert fila["cliente_razon"] == cliente.nombre
+    assert fila["punto_venta"] >= 1
+    assert isinstance(fila["total"], (int, float))
+    # `fecha` se dibuja con `fecha()` del frontend, que espera `aaaa-mm-dd`.
+    assert len(str(fila["fecha"])) == 10, fila["fecha"]
