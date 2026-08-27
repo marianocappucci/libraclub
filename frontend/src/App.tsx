@@ -8,6 +8,7 @@ import { CuentaCorrienteDetalle } from '@/pages/CuentaCorrienteDetalle'
 import { Horarios } from '@/pages/Horarios'
 import { Canchas } from '@/pages/Canchas'
 import { Configuracion } from '@/pages/Configuracion'
+import { Facturas } from '@/pages/Facturas'
 import { Clientes } from '@/pages/Clientes'
 import { Login } from '@/pages/Login'
 import { ForgotPassword, ResetPassword } from '@/pages/PasswordReset'
@@ -110,6 +111,7 @@ function Backoffice() {
             path="/cuenta-corriente/:id"
             element={<CuentaCorrienteDetalle />}
           />
+          <Route path="/facturas" element={<Facturas />} />
           <Route path="/configuracion" element={<Configuracion />} />
           <Route path="/logs" element={<Logs />} />
           {/* Las rutas no llevan guarda de rol: el permiso lo decide el

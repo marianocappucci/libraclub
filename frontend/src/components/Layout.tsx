@@ -13,7 +13,7 @@
 import { Outlet } from 'react-router-dom'
 import { createLayout } from 'libra-ui/Layout'
 import {
-  CalendarDays, Clock, CupSoda, LayoutGrid, MapPin, NotebookText, Repeat, ScrollText, Settings, Tags, Trophy, UserCog, Users, Wallet,
+  CalendarDays, Clock, CupSoda, LayoutGrid, MapPin, NotebookText, Receipt, Repeat, ScrollText, Settings, Tags, Trophy, UserCog, Users, Wallet,
 } from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
@@ -119,6 +119,15 @@ const Cascaron = createLayout<Usuario>({
         // Usuarios sí: el router entero exige admin, así que a un encargado el
         // link le daría 403. Un menú que ofrece lo que no se puede usar es peor
         // que no ofrecerlo.
+        // Acá y no al lado de Caja: la caja es la plata del turno, que el
+        // encargado abre y cierra todos los días; esto es el registro fiscal
+        // del complejo, que el dueño o el contador miran una vez por mes.
+        //
+        // `adminOnly` porque el router entero lleva `require_admin`: a un
+        // encargado el link le daría 403, y un menú que ofrece lo que no se
+        // puede usar es peor que no ofrecerlo. La factura de SU turno la
+        // sigue viendo desde la Agenda, que es de mostrador.
+        { to: '/facturas', label: 'Comprobantes', icon: Receipt, adminOnly: true },
         { to: '/usuarios', label: 'Usuarios', icon: UserCog, adminOnly: true },
         // Junto a Usuarios y no en Configuración: se mira para responder
         // "quién hizo esto", que es una pregunta sobre la gente y no sobre

@@ -278,3 +278,177 @@ def test_facturar_es_de_admin(api, cancha, cliente, tarifa_base, engine):
     assert staff.post(f"/api/reservas/{reserva['id']}/facturar").status_code == 403
     # Control: ver la factura sí puede.
     assert staff.get(f"/api/reservas/{reserva['id']}/factura").status_code == 200
+
+
+# ── El listado y el PDF ───────────────────────────────────────────────────
+#
+# Lo que se prueba acá es la vista de arriba: `GET /api/facturas` y el PDF. El
+# detalle de un comprobante sigue siendo el diálogo de la reserva, que ya tiene
+# sus tests más arriba.
+
+
+def _facturar(api, cancha, cliente, comienza: str) -> dict:
+    """Una reserva con precio, facturada. Devuelve el comprobante."""
+    r = api.post(
+        "/api/reservas",
+        json={"cancha_id": cancha.id, "cliente_id": cliente.id,
+              "comienza_at": comienza, "duracion_min": 90},
+    )
+    assert r.status_code == 201, r.text
+    emitida = api.post(f"/api/reservas/{r.json()['id']}/facturar")
+    assert emitida.status_code == 201, emitida.text
+    return emitida.json()
+
+
+def test_el_listado_trae_las_facturas_emitidas(api, cancha, cliente, tarifa_base):
+    """🔑 **Dos, y no una.** Con una sola factura, un listado que devolviera
+    siempre "la última" —o que ignorara la paginación— pasaría igual.
+
+    Se emiten por la API de reservas, que es el único camino por el que nacen
+    los comprobantes de este producto: sembrarlas escribiendo directo en
+    `facturas` probaría el SELECT contra filas que la aplicación nunca escribió.
+    """
+    assert api.get("/api/facturas").json()["items"] == [], "arranca vacío"
+
+    primera = _facturar(api, cancha, cliente, "2026-09-01T20:00:00-03:00")
+    segunda = _facturar(api, cancha, cliente, "2026-09-02T20:00:00-03:00")
+
+    pagina = api.get("/api/facturas").json()
+    assert pagina["total"] == 2
+    assert pagina["total_pages"] == 1
+    assert pagina["page"] == 1
+
+    numeros = {f["numero"] for f in pagina["items"]}
+    assert numeros == {primera["numero"], segunda["numero"]}
+
+    # El cliente y el importe salen del listado, no del POST: es lo que la
+    # pantalla va a mostrar.
+    fila = next(f for f in pagina["items"] if f["numero"] == primera["numero"])
+    assert fila["cliente_razon"] == cliente.nombre
+    assert fila["total"] == primera["total"]
+    assert fila["tipo"] == servicio.FACTURA_C
+
+
+def test_el_listado_filtra_por_fecha(api, cancha, cliente, tarifa_base):
+    """El filtro corta de verdad.
+
+    Las dos facturas llevan la fecha de HOY —`facturar_reserva` estampa
+    `date.today()`, no la fecha del turno—, así que el corte se prueba contra
+    mañana. El control es la consulta sin filtro: sin él, un `desde` que
+    devuelve cero se cumpliría también si el listado estuviera roto.
+    """
+    from datetime import date, timedelta
+
+    _facturar(api, cancha, cliente, "2026-09-01T20:00:00-03:00")
+    _facturar(api, cancha, cliente, "2026-09-02T20:00:00-03:00")
+    assert api.get("/api/facturas").json()["total"] == 2, "control: sin filtro están"
+
+    hoy = date.today().isoformat()
+    manana = (date.today() + timedelta(days=1)).isoformat()
+    assert api.get(f"/api/facturas?desde={hoy}&hasta={hoy}").json()["total"] == 2
+    assert api.get(f"/api/facturas?desde={manana}").json()["total"] == 0
+
+
+def test_el_listado_busca_por_cliente(api, cancha, cliente, tarifa_base):
+    """⚠️ Con el nombre **tal cual está escrito**.
+
+    `get_facturas_filtradas` usa `LIKE`, y `libracore.db.core` no lo traduce a
+    `ILIKE`: sobre PostgreSQL la búsqueda distingue mayúsculas. No se asierta lo
+    contrario a propósito —un test que exigiera que `juan` no encuentre a `Juan`
+    congelaría el defecto—; el arreglo es del motor y toca también a Contalibra
+    y Restolibra.
+    """
+    _facturar(api, cancha, cliente, "2026-09-01T20:00:00-03:00")
+
+    encontrado = api.get(f"/api/facturas?q={cliente.nombre}").json()
+    assert encontrado["total"] == 1
+    assert encontrado["items"][0]["cliente_razon"] == cliente.nombre
+
+    assert api.get("/api/facturas?q=nadie-con-ese-nombre").json()["total"] == 0
+
+
+def test_el_pdf_del_comprobante_se_genera(api, cancha, cliente, tarifa_base):
+    """200, un PDF de verdad, y el número en el nombre del archivo."""
+    factura = _facturar(api, cancha, cliente, "2026-09-01T20:00:00-03:00")
+
+    r = api.get(f"/api/facturas/{factura['id']}/pdf")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "application/pdf"
+    # Los bytes, no el status: un 200 con un cuerpo vacío o con el `index.html`
+    # de la SPA también daría 200.
+    assert r.content.startswith(b"%PDF"), r.content[:40]
+    assert len(r.content) > 1000, "un PDF con el comprobante adentro no pesa 200 bytes"
+    assert str(factura["numero"]).zfill(8) in r.headers["content-disposition"]
+
+
+def test_el_pdf_de_un_comprobante_que_no_existe_da_404(api):
+    assert api.get("/api/facturas/99999/pdf").status_code == 404
+
+
+def test_el_listado_es_de_admin(api, cancha, cliente, tarifa_base):
+    """El mostrador ve la factura de SU turno; todo lo facturado es del dueño.
+
+    El control es la misma consulta como admin: sin él, un 403 se cumpliría
+    también si la ruta no existiera.
+    """
+    _facturar(api, cancha, cliente, "2026-09-01T20:00:00-03:00")
+    api.post("/api/usuarios", json={
+        "username": "mostrador", "name": "Mostrador", "password": "clave-mostrador",
+        "role": "staff",
+    })
+    staff = TestClient(crear_app(_config(_url_core())), base_url="https://testserver")
+    assert staff.post(
+        "/auth/login", json={"username": "mostrador", "password": "clave-mostrador"}
+    ).status_code == 200
+
+    assert staff.get("/api/facturas").status_code == 403
+    assert staff.get("/api/facturas/1/pdf").status_code == 403
+    # Control: el admin sí, por la misma ruta.
+    assert api.get("/api/facturas").status_code == 200
+
+
+def test_sin_base_de_libracore_el_listado_lo_DICE(engine, sesion, monkeypatch):
+    """503 nombrando la variable, igual que la config de ARCA. Un complejo que
+    todavía no factura tiene que poder entrar a la pantalla y entender por qué
+    está vacía."""
+    monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
+    monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
+    AuthBase.metadata.drop_all(engine)
+    AuthBase.metadata.create_all(engine)
+    cliente = TestClient(crear_app(_config(None)), base_url="https://testserver")
+    assert cliente.post(
+        "/auth/login", json={"username": USUARIO, "password": CLAVE}
+    ).status_code == 200
+
+    r = cliente.get("/api/facturas")
+    assert r.status_code == 503, r.text
+    assert "LIBRACLUB_LIBRACORE_DATABASE_URL" in r.text
+    AuthBase.metadata.drop_all(engine)
+
+
+def test_la_ruta_de_la_PANTALLA_no_la_intercepta_la_api(api):
+    """🔴 El error que ya pasó con el log de actividad, en este mismo producto.
+
+    El router del kit se montaba en `/logs` —que es la URL de la **pantalla**—,
+    y FastAPI resuelve sus rutas antes que el catch-all de la SPA: entrar a
+    `/logs` devolvía el JSON crudo del endpoint en vez del listado. Por eso este
+    producto monta todo bajo `/api`.
+
+    La pantalla de comprobantes vive en `/facturas` y la API en `/api/facturas`.
+    El día que alguien mueva el prefijo "para que quede más corto", esto se pone
+    en rojo antes de que la pantalla desaparezca.
+
+    ⚠️ Se miran los caminos del **esquema OpenAPI** y no `app.routes`: en esta
+    versión de FastAPI un router incluido no se aplana en la lista de rutas
+    —queda como un `_IncludedRouter` sin `.path`—, así que recorrer `app.routes`
+    da una lista corta de la que `/api/facturas` está ausente. Un test escrito
+    así pasaría por el motivo equivocado: no porque la ruta esté bien montada,
+    sino porque no encuentra ninguna.
+    """
+    caminos = set(api.app.openapi()["paths"])
+    # Control positivo: sin él, "no hay ninguna ruta /facturas" se cumpliría
+    # también si el router no estuviera montado en ningún lado.
+    assert "/api/facturas" in caminos, "la API tiene que estar montada"
+    assert not [
+        c for c in caminos if c == "/facturas" or c.startswith("/facturas/")
+    ], "la URL de la pantalla no puede ser también una ruta de la API"

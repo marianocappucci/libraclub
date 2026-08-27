@@ -45,6 +45,7 @@ from app.routers import buffet as buffet_router
 from app.routers import caja as caja_router
 from app.routers import cuenta_corriente as cuenta_corriente_router
 from app.routers import facturacion as facturacion_router
+from app.routers import facturas as facturas_router
 from app.routers import mercadopago as mercadopago_router
 from app.routers import portal as portal_router
 from app.routers import resumen as resumen_router
@@ -259,6 +260,15 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # `GET`/`PUT /config/arca`, la pestaña de ARCA de la pantalla compartida.
     # Sin `/api` a propósito: es el prefijo que consume el kit — ver el módulo.
     app.include_router(facturacion_router.router, dependencies=[Depends(require_admin)])
+
+    # `GET /api/facturas` y su PDF: el listado de comprobantes emitidos.
+    #
+    # Admin también para leer, y es distinto del resto de la facturación: la
+    # factura de SU reserva la ve el mostrador desde el turno
+    # (`GET /api/reservas/{id}/factura`, `require_staff`). Lo que es de admin es
+    # ver TODO lo facturado por el complejo de una sentada — mismo criterio que
+    # el historial de caja y el log de actividad.
+    app.include_router(facturas_router.router, dependencies=[Depends(require_admin)])
 
     # `GET`/`PUT /config/mercadopago`: con qué cuenta cobra el QR del mostrador.
     # Admin por el mismo motivo que ARCA — quien escriba acá cambia a qué cuenta
