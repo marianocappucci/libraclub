@@ -543,7 +543,11 @@ describe('cobrar con MercadoPago', () => {
     // manda a adivinar si la pantalla se rompió.
     estado.qr = { disponible: false, auto_facturar: false }
     await elegirMercadoPago()
-    expect(await screen.findByText(/no tiene MercadoPago configurado/i)).toBeInTheDocument()
+    // El motivo lo pone el componente del QR, que es quien lo sabe.
+    expect(await screen.findByText(/faltan las credenciales de\s+MercadoPago/i))
+      .toBeInTheDocument()
+    // Y la salida la pone la Caja, que es la única que tiene una.
+    expect(screen.getByText(/se puede registrar a mano/i)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Cobrar con QR/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Cobrar y cerrar la cuenta/ })).toBeEnabled()
   })

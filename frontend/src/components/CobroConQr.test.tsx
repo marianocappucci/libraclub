@@ -119,7 +119,15 @@ describe('cuándo se ofrece el cobro con QR', () => {
     expect(screen.queryByRole('button', { name: /Cobrar con QR/ })).toBeNull()
   })
 
-  it('no si la instancia no tiene MercadoPago configurado', async () => {
+  it('🔴 sin MercadoPago configurado no hay botón, y SE DICE POR QUÉ', async () => {
+    // 🔑 **Este test asertaba sólo la ausencia del botón, y por eso el defecto
+    // le pasaba por al lado.** Hasta el 2026-08-28 el componente hacía
+    // `return null` en este caso: el detalle del turno no mostraba **nada** —ni
+    // el botón ni el motivo— y el test, que sólo pedía que el botón no
+    // estuviera, seguía en verde. Es el cero esperado sin su positivo.
+    //
+    // Lo reportó el humano: *"pongo pagar con MercadoPago y no me dirige a
+    // ningún lado"*. Tenía razón literal — la pantalla callaba.
     config.disponible = false
     montar('confirmada')
     expect(await screen.findByText(/Cancha 1/)).toBeInTheDocument()
@@ -127,6 +135,20 @@ describe('cuándo se ofrece el cobro con QR', () => {
       expect(llamadas.some((l) => l.ruta.includes('/mp/estado'))).toBe(true),
     )
     expect(screen.queryByRole('button', { name: /Cobrar con QR/ })).toBeNull()
+    // Lo que faltaba: el motivo, y dónde se arregla.
+    expect(await screen.findByText(/faltan las credenciales de\s+MercadoPago/i))
+      .toBeInTheDocument()
+    expect(screen.getByText(/Configuración . Mercado Pago/i)).toBeInTheDocument()
+  })
+
+  it('🔑 y sobre un turno cancelado NO dice nada, ni siquiera eso', async () => {
+    // El control del control. Sin esto, el arreglo de arriba se puede hacer
+    // poniendo el cartel siempre — y entonces cada turno cancelado del día
+    // llevaría un aviso sobre un cobro que nunca va a existir.
+    config.disponible = false
+    montar('cancelada')
+    expect(await screen.findByText(/Cancha 1/)).toBeInTheDocument()
+    expect(screen.queryByText(/faltan las credenciales/i)).toBeNull()
   })
 })
 
