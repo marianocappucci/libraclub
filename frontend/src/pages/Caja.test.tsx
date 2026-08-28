@@ -17,6 +17,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Caja, partirImporte } from './Caja'
+import type { TurnoPorCobrar } from '@/lib/api'
 
 // La pantalla linkea a `/caja/movimientos`: sin router, `<Link>` tumba el árbol
 // entero con un error de contexto que no dice nada de lo que se está probando.
@@ -44,16 +45,21 @@ const MOVIMIENTOS = [
  * filas del mismo importe, una pantalla que muestre siempre la primera pasaría
  * igual, y con `pendiente === total` no se vería si el cobrado se descuenta.
  */
-const CUENTAS = [
+// 🔑 **Tipado a propósito.** Sin la anotación, TypeScript infiere la forma del
+// literal y el fixture puede quedarse atrás de la API sin que nada avise —
+// justo lo que pasó con `estado`, que se agregó al backend y acá faltaba.
+const CUENTAS: TurnoPorCobrar[] = [
   {
     reserva_id: 41, cancha_id: 1, cancha: 'Cancha 1', deporte: 'padel',
     comienza_at: '2026-08-28T20:00:00-03:00', termina_at: '2026-08-28T21:30:00-03:00',
-    cliente: 'Juan Pérez', total: 14000, cobrado: 0, pendiente: 14000,
+    cliente: 'Juan Pérez', estado: 'confirmada',
+    total: 14000, cobrado: 0, pendiente: 14000,
   },
   {
     reserva_id: 42, cancha_id: 2, cancha: 'Cancha 2', deporte: 'padel',
     comienza_at: '2026-08-28T21:30:00-03:00', termina_at: '2026-08-28T23:00:00-03:00',
-    cliente: 'Ana Gómez', total: 18000, cobrado: 6000, pendiente: 12000,
+    cliente: 'Ana Gómez', estado: 'confirmada',
+    total: 18000, cobrado: 6000, pendiente: 12000,
   },
 ]
 
@@ -63,6 +69,7 @@ const estado = {
   movimientos: MOVIMIENTOS,
   cuentas: CUENTAS,
   consumos: [] as { descripcion: string; cantidad: number; precio_unitario: number; importe: number }[],
+  qr: { disponible: true, auto_facturar: true },
 }
 
 const llamadas: { metodo: string; ruta: string; cuerpo: unknown }[] = []
@@ -89,6 +96,7 @@ beforeEach(() => {
   estado.movimientos = MOVIMIENTOS
   estado.cuentas = CUENTAS
   estado.consumos = []
+  estado.qr = { disponible: true, auto_facturar: true }
   vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
     const u = String(url)
     let cuerpo: unknown = null
@@ -96,14 +104,25 @@ beforeEach(() => {
     llamadas.push({ metodo: init?.method ?? 'GET', ruta: u, cuerpo })
 
     if (u.includes('/api/cajas/medios-disponibles') || u.includes('/api/caja/medios-pago')) {
+      // 🔑 `mercadopago` esta en la lista porque esta en `MEDIOS_PAGO` del
+      // backend: es el medio que dispara el cobro con QR, y sin el en el stub
+      // ese camino no se puede ejercitar.
       return Promise.resolve(json([
         { valor: 'efectivo', etiqueta: 'Efectivo' },
         { valor: 'transferencia', etiqueta: 'Transferencia' },
+        { valor: 'mercadopago', etiqueta: 'MercadoPago' },
       ]))
     }
     if (u.includes('/api/cajas')) return Promise.resolve(json(estado.mostradores))
     if (u.includes('/api/reservas/agenda/por-cobrar')) {
       return Promise.resolve(json(estado.cuentas))
+    }
+    if (u.includes('/api/reservas/mp/estado')) return Promise.resolve(json(estado.qr))
+    if (u.includes('/mp-qr')) {
+      return Promise.resolve(json({ referencia: 'lc-41-abcd', monto: 14000 }, 201))
+    }
+    if (u.includes('/mp-status')) {
+      return Promise.resolve(json({ estado: 'pendiente' }))
     }
     if (u.includes('/consumos')) {
       return Promise.resolve(json({ total: 0, lineas: estado.consumos }))
@@ -462,6 +481,140 @@ describe('dividir la cuenta entre jugadores', () => {
     expect(screen.getByRole('button', { name: /Cobrar y cerrar la cuenta/ })).toBeDisabled()
 
     await user.click(screen.getByRole('button', { name: /Cancelar la división/ }))
+    expect(screen.getByRole('button', { name: /Cobrar y cerrar la cuenta/ })).toBeEnabled()
+  })
+})
+
+describe('cobrar con MercadoPago', () => {
+  // 🔴 Reportado por el humano el 2026-08-28: elegir MercadoPago **anotaba el
+  // ingreso** como si hubiera entrado, sin haber cobrado nada. El flujo del QR
+  // existía entero pero sólo se llegaba desde el detalle del turno.
+  beforeEach(() => {
+    estado.cuentas = [{ ...CUENTAS[0], total: 14000, cobrado: 0, pendiente: 14000 }]
+  })
+
+  async function elegirMercadoPago() {
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: /Cancha 1/ }))
+    await user.selectOptions(await screen.findByLabelText('Medio'), 'mercadopago')
+    return user
+  }
+
+  it('🔴 ofrece el QR y NO el cobro a mano', async () => {
+    await elegirMercadoPago()
+    expect(await screen.findByRole('button', { name: /Cobrar con QR/ })).toBeInTheDocument()
+    // El control: el botón que anotaba el ingreso sin cobrarlo queda apagado.
+    expect(screen.getByRole('button', { name: /Cobrar y cerrar la cuenta/ })).toBeDisabled()
+  })
+
+  it('🔴 apretar el QR pone el monto en el cartel de ESA reserva', async () => {
+    const user = await elegirMercadoPago()
+    await user.click(await screen.findByRole('button', { name: /Cobrar con QR/ }))
+    await waitFor(() => {
+      expect(llamadas.some(
+        (l) => l.metodo === 'POST' && l.ruta.endsWith('/api/reservas/41/mp-qr'),
+      )).toBe(true)
+    })
+  })
+
+  it('🔑 dice cuánto va a cobrar el QR, y que factura solo', async () => {
+    // El monto lo decide el backend —el pendiente—, así que la pantalla tiene
+    // que decirlo: si no, el operador cree que cobra lo que tiene tipeado.
+    await elegirMercadoPago()
+    // El número lo pone la Caja, que es la que lo tiene.
+    expect(await screen.findByText(/Son .* de una sola vez/)).toBeInTheDocument()
+    // Y qué se cobra y que factura solo, el componente del QR — una sola vez:
+    // la misma frase dos veces en la misma tarjeta es ruido.
+    expect(screen.getAllByText(/factura solo al acreditarse/)).toHaveLength(1)
+  })
+
+  it('🔴 con MercadoPago no se ofrece fraccionar ni dividir', async () => {
+    // El QR cobra el pendiente entero y una sola vez —la base admite un pago
+    // aprobado por reserva—, así que ofrecerlo sería prometer lo que el modelo
+    // no puede cumplir.
+    await elegirMercadoPago()
+    expect(screen.queryByLabelText('Jugadores')).not.toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: /Alquiler/ })).toBeDisabled()
+  })
+
+  it('🔑 sin credenciales lo DICE, y deja registrar el cobro a mano', async () => {
+    // «MercadoPago» también es una transferencia que se anota. Un hueco mudo
+    // manda a adivinar si la pantalla se rompió.
+    estado.qr = { disponible: false, auto_facturar: false }
+    await elegirMercadoPago()
+    expect(await screen.findByText(/no tiene MercadoPago configurado/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Cobrar con QR/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Cobrar y cerrar la cuenta/ })).toBeEnabled()
+  })
+
+  it('🔴 cambiar de cancha resetea el QR, no arrastra el de la anterior', async () => {
+    // 🔑 **Esto no se podía romper en el diálogo del turno** —un diálogo, una
+    // reserva— y sí acá: en la Caja se cambia de cancha sin cerrar nada. Sin el
+    // reset, el estado del QR de la cancha anterior queda en pantalla y el poll
+    // sigue preguntando por la reserva que ya no se está mirando: se ve
+    // «Cobrado por QR» sobre una cancha que no cobró nada.
+    estado.cuentas = [
+      { ...CUENTAS[0], total: 14000, cobrado: 0, pendiente: 14000 },
+      { ...CUENTAS[1] },
+    ]
+    const user = await elegirMercadoPago()
+    await user.click(await screen.findByRole('button', { name: /Cobrar con QR/ }))
+    // La orden quedó puesta: la pantalla pasa a esperar el escaneo.
+    expect(await screen.findByText(/Pedile al cliente que lo escanee/i)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /Cancha 2/ }))
+    await waitFor(() => {
+      expect(screen.queryByText(/Pedile al cliente que lo escanee/i)).not.toBeInTheDocument()
+    })
+  })
+
+  it('🔴 y el poll de la cancha anterior se FRENA', async () => {
+    // 🔑 **La mutación lo delató.** El test de arriba —que la pantalla se
+    // resetee— pasaba en verde con el `frenarPoll()` sacado: lo que se ve
+    // desaparece, pero el `setInterval` sigue vivo preguntando por la reserva
+    // anterior. Si ese pago se acredita, la Caja anuncia «cobrado» y refresca
+    // sobre una cancha que no cobró nada.
+    //
+    // Se mide con timers falsos porque el poll corre cada 3 segundos: sin
+    // adelantarlos, el test termina antes de que salga el primer request y las
+    // dos ramas dan cero.
+    // `shouldAdvanceTime`: sin eso, el `waitFor` de testing-library —que espera
+    // con timers— nunca avanza y todo el test se cuelga hasta el timeout.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      estado.cuentas = [
+        { ...CUENTAS[0], total: 14000, cobrado: 0, pendiente: 14000 },
+        { ...CUENTAS[1] },
+      ]
+      montar()
+      await user.click(await screen.findByRole('button', { name: /Cancha 1/ }))
+      await user.selectOptions(await screen.findByLabelText('Medio'), 'mercadopago')
+      await user.click(await screen.findByRole('button', { name: /Cobrar con QR/ }))
+      await screen.findByText(/Pedile al cliente que lo escanee/i)
+
+      await vi.advanceTimersByTimeAsync(3500)
+      // El control: hasta acá SÍ estaba polleando. Sin esto, el assert de abajo
+      // pasaría con un componente que nunca polea.
+      expect(llamadas.filter((l) => l.ruta.includes('/mp-status')).length)
+        .toBeGreaterThan(0)
+
+      await user.click(screen.getByRole('button', { name: /Cancha 2/ }))
+      llamadas.length = 0
+      await vi.advanceTimersByTimeAsync(10000)
+      expect(llamadas.filter((l) => l.ruta.includes('/mp-status'))).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('🔑 el control: con efectivo nada de esto aparece', async () => {
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: /Cancha 1/ }))
+    expect(await screen.findByLabelText('Medio')).toHaveValue('efectivo')
+    expect(screen.queryByRole('button', { name: /Cobrar con QR/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Cobrar y cerrar la cuenta/ })).toBeEnabled()
   })
 })
