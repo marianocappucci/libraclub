@@ -755,31 +755,33 @@ function CierreDeCuenta({ turno, medios, sucursalId, onCobrado, onError }: {
        * funciona porque el QR ahora pone lo que falta y no el total.
        */}
       {porQr ? (
-        qrDeLaInstancia?.disponible ? (
-          <div className="space-y-2 border-t pt-3">
-            <SeccionDeCobroConQr
-              reservaId={turno.reserva_id}
-              estado={turno.estado}
-              abierto
-              onCobrado={onCobrado}
-            />
-            {/* Lo que agrega esta línea sobre el texto del componente es **el
-                número**: el componente dice qué cobra, y acá se sabe cuánto.
-                Repetir lo de la factura automática pondría la misma frase dos
-                veces en la misma tarjeta. */}
+        <div className="space-y-2 border-t pt-3">
+          {/* 🔑 **El mensaje de «no hay credenciales» lo pone el componente**, que
+              es quien lo sabe. Acá estaba duplicado y es cómo una copia termina
+              diciendo una cosa y la otra otra. */}
+          <SeccionDeCobroConQr
+            reservaId={turno.reserva_id}
+            estado={turno.estado}
+            abierto
+            onCobrado={onCobrado}
+          />
+          {qrDeLaInstancia?.disponible ? (
+            // Lo que agrega esta línea sobre el texto del componente es **el
+            // número**: el componente dice qué cobra, y acá se sabe cuánto.
             <p className="text-xs text-muted-foreground">
               Son {pesos(turno.pendiente)}, de una sola vez.
             </p>
-          </div>
-        ) : (
-          // Sin credenciales cargadas no hay QR que ofrecer, y decirlo es mejor
-          // que un hueco: el operador ve el medio en la lista y espera algo.
-          <p className="border-t pt-3 text-sm text-muted-foreground">
-            Esta instancia no tiene MercadoPago configurado, así que el cobro se
-            registra a mano. Cargá las credenciales en Configuración para cobrar
-            con el QR del mostrador.
-          </p>
-        )
+          ) : (
+            // Y lo que agrega de este lado cuando NO se puede: que el cobro
+            // igual se puede anotar a mano. Eso es propio de la Caja —en el
+            // detalle del turno no hay dónde anotarlo— así que no va al
+            // componente.
+            <p className="text-xs text-muted-foreground">
+              Mientras tanto, el cobro se puede registrar a mano con el botón de
+              abajo.
+            </p>
+          )}
+        </div>
       ) : null}
 
       {/* 🔑 **Dividir entre jugadores.** En una cancha de pádel lo normal no es

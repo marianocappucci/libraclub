@@ -77,8 +77,27 @@ export function SeccionDeCobroConQr({ reservaId, estado, abierto, onCobrado }: {
   // pantalla: cada 3 segundos sale un request.
   useEffect(() => frenarPoll, [frenarPoll])
 
-  if (reservaId === null || !disponible?.disponible || !COBRABLES.includes(estado)) {
-    return null
+  if (reservaId === null || !COBRABLES.includes(estado)) return null
+
+  // Todavía preguntando. No se dice nada: un cartel que aparece y desaparece
+  // en cada apertura es peor que el medio segundo de nada.
+  if (disponible === null) return null
+
+  // 🔴 **Acá había un `return null` y ese era el bug.** Sin credenciales el
+  // detalle del turno no mostraba **nada**: ni el botón ni el motivo. El humano
+  // lo reportó el 2026-08-28 —*"pongo pagar con MercadoPago y no me dirige a
+  // ningún lado"*— y tenía razón literal: la pantalla callaba.
+  //
+  // El mensaje vive acá y no en cada pantalla que use el componente: es este
+  // módulo el que sabe si la instancia puede cobrar por QR, y dos copias del
+  // texto es cómo una termina diciendo una cosa y la otra otra.
+  if (!disponible.disponible) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Para cobrar con el QR del mostrador faltan las credenciales de
+        MercadoPago. Se cargan en Configuración → Mercado Pago.
+      </p>
+    )
   }
 
   async function bajar() {
