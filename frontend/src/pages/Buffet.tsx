@@ -110,37 +110,42 @@ export function Buffet() {
           </span>
         ),
       },
+      // 🔑 **Una sola columna de acciones, con su título y los dos botones con
+      // borde.** Hasta el 2026-08-28 eran DOS columnas —`reponer` y `editar`—,
+      // las dos sin encabezado y con distinta variante: «Reponer» con borde y
+      // «Editar» sin, uno al lado del otro en la misma fila. Es el caso más
+      // visible de lo que el humano reportó el 2026-08-28.
+      //
+      // «Editar» sigue apareciendo sólo con permiso de escritura; lo que cambió
+      // es que ahora comparte columna con «Reponer» en vez de agregar una
+      // segunda sin nombre.
       {
-        id: 'reponer',
-        header: '',
+        id: 'acciones',
+        header: () => <div className="text-right">Acciones</div>,
+        enableSorting: false,
         cell: ({ row }) => (
-          <Button variant="outline" size="sm" onClick={() => reponer(row.original)}>
-            Reponer
-          </Button>
+          <div className="flex justify-end gap-1">
+            <Button variant="outline" size="sm" onClick={() => reponer(row.original)}>
+              Reponer
+            </Button>
+            {puedeEscribir && (
+              <Button
+                variant="outline"
+                size="sm"
+                aria-label={`Editar ${row.original.nombre}`}
+                onClick={() => {
+                  setEditando(row.original)
+                  setAbierto(true)
+                }}
+              >
+                Editar
+              </Button>
+            )}
+          </div>
         ),
       },
     ]
-    if (!puedeEscribir) return base
-    return [
-      ...base,
-      {
-        id: 'editar',
-        header: '',
-        cell: ({ row }) => (
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label={`Editar ${row.original.nombre}`}
-            onClick={() => {
-              setEditando(row.original)
-              setAbierto(true)
-            }}
-          >
-            Editar
-          </Button>
-        ),
-      },
-    ]
+    return base
   }, [puedeEscribir, reponer])
 
   if (actual === null) {

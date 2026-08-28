@@ -146,7 +146,7 @@ export function FacturaNueva() {
   }
 
   return (
-    <div className="grid max-w-4xl gap-4">
+    <div className="grid gap-4">
       <EncabezadoDePantalla titulo={<TituloPantalla icono={Receipt}>Nueva factura</TituloPantalla>}>
         {/* El borrador abre en una pestaña: es para mirar el comprobante ANTES
             de quemarle un número a la numeración fiscal, que no se devuelve. */}
@@ -181,7 +181,7 @@ export function FacturaNueva() {
             <div className="grid gap-2">
               <Label>Tipo</Label>
               <select
-                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs w-48"
+                className="h-9 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs w-48"
                 aria-label="Tipo de comprobante"
                 value={tipo}
                 onChange={(e) => setTipo(e.target.value)}
@@ -199,7 +199,7 @@ export function FacturaNueva() {
             <div className="grid gap-2">
               <Label>Condición de venta</Label>
               <select
-                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs w-52"
+                className="h-9 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs w-52"
                 aria-label="Condición de venta"
                 value={condicion}
                 onChange={(e) => setCondicion(e.target.value)}
@@ -213,7 +213,7 @@ export function FacturaNueva() {
             <div className="grid gap-2">
               <Label>Cliente del complejo</Label>
               <select
-                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs w-64"
+                className="h-9 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs w-64"
                 aria-label="Elegir un cliente del complejo"
                 defaultValue=""
                 onChange={(e) => elegirCliente(e.target.value)}

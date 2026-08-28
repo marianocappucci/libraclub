@@ -24,16 +24,14 @@ describe('el icono del título sale del sidebar', () => {
   it('🔴 ninguna pantalla del menú tiene el título sin icono', () => {
     // La lista es EXACTA y no un "contiene": una pantalla nueva sin icono hace
     // fallar esto igual, que es lo que el guard viene a cuidar.
-    expect(describirDesajustes(auditarTitulos(SRC).sinIcono)).toEqual([
-      // 🔑 La agenda **no tiene título de pantalla**. Su único `<h2>` es el
-      // encabezado de cada cancha, adentro de un `.map()`, y el auditor —que
-      // busca el primer `<h1>`/`<h2>` del archivo— lo toma por el título.
-      // Ponerle un `TituloPantalla` sería AGREGAR un título, no darle el icono
-      // al que ya hay, que no es lo que se pidió. Queda documentado acá en vez
-      // de silenciado adentro del auditor: si algún día la agenda estrena
-      // título propio, esta línea falla y obliga a mirarlo.
-      '/agenda (Agenda): título=título SIN icono, sidebar=CalendarDays',
-    ])
+    // ✅ **La lista quedó vacía el 2026-08-28.** Tenía una sola excepción, la
+    // agenda: su único `<h2>` era el encabezado de cada cancha, adentro de un
+    // `.map()`, y el auditor lo tomaba por el título. La nota de entonces decía
+    // que ponerle un `TituloPantalla` sería *agregar* un título y no darle el
+    // icono al que ya había — que es exactamente lo que el humano pidió el
+    // 2026-08-28. Al estrenarlo, esta línea falló y obligó a mirarlo, que era
+    // para lo que estaba escrita.
+    expect(describirDesajustes(auditarTitulos(SRC).sinIcono)).toEqual([])
   })
 
   it('🔴 el control — el guard midió algo', () => {
