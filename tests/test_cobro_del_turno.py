@@ -81,20 +81,17 @@ def _reserva(api, cancha, cliente, hora="20:00:00"):
     return r.json()
 
 
-def _abrir_caja(api):
-    assert api.post("/api/caja/turnos", json={"monto_inicial": "0"}).status_code == 201
-
 
 # ── Lo que se cobra, y contra qué queda ───────────────────────────────────
 
 
 def test_cobrar_un_turno_ya_facturado_ata_el_movimiento_al_comprobante(
-    api, cancha, cliente, tarifa_base
+    api, cancha, cliente, tarifa_base, abrir_caja, sucursal,
 ):
     """El orden fácil: primero la factura, después la plata."""
     reserva = _reserva(api, cancha, cliente)
     factura = api.post(f"/api/reservas/{reserva['id']}/facturar").json()
-    _abrir_caja(api)
+    abrir_caja(api, sucursal)
 
     r = api.post(
         f"/api/reservas/{reserva['id']}/cobros",
@@ -110,7 +107,7 @@ def test_cobrar_un_turno_ya_facturado_ata_el_movimiento_al_comprobante(
 
 
 def test_cobrar_ANTES_de_facturar_y_el_vinculo_se_completa_al_emitir(
-    api, cancha, cliente, tarifa_base
+    api, cancha, cliente, tarifa_base, abrir_caja, sucursal,
 ):
     """🔴 El orden real de un mostrador, y el que nadie resolvía.
 
@@ -119,7 +116,7 @@ def test_cobrar_ANTES_de_facturar_y_el_vinculo_se_completa_al_emitir(
     cobrar» sobre plata que ya entró.
     """
     reserva = _reserva(api, cancha, cliente)
-    _abrir_caja(api)
+    abrir_caja(api, sucursal)
 
     cobro = api.post(
         f"/api/reservas/{reserva['id']}/cobros",
@@ -137,7 +134,9 @@ def test_cobrar_ANTES_de_facturar_y_el_vinculo_se_completa_al_emitir(
     )
 
 
-def test_una_sena_y_el_saldo_son_DOS_movimientos(api, cancha, cliente, tarifa_base):
+def test_una_sena_y_el_saldo_son_DOS_movimientos(
+    api, cancha, cliente, tarifa_base, abrir_caja, sucursal,
+):
     """🔴 El caso que una referencia fija por reserva perdería en silencio.
 
     `create_caja_movimiento` descarta un movimiento con la misma referencia y la
@@ -147,7 +146,7 @@ def test_una_sena_y_el_saldo_son_DOS_movimientos(api, cancha, cliente, tarifa_ba
     """
     reserva = _reserva(api, cancha, cliente)
     api.post(f"/api/reservas/{reserva['id']}/facturar")
-    _abrir_caja(api)
+    abrir_caja(api, sucursal)
 
     api.post(f"/api/reservas/{reserva['id']}/cobros",
              json={"monto": "2000", "medio_pago": "efectivo"})
@@ -162,7 +161,9 @@ def test_una_sena_y_el_saldo_son_DOS_movimientos(api, cancha, cliente, tarifa_ba
     assert len({c["factura_id"] for c in estado["cobros"]}) == 1
 
 
-def test_los_cobros_de_OTRA_reserva_no_se_cuentan(api, cancha, cliente, tarifa_base):
+def test_los_cobros_de_OTRA_reserva_no_se_cuentan(
+    api, cancha, cliente, tarifa_base, abrir_caja, sucursal,
+):
     """🔴 El control del `LIKE`, y hay que elegir bien los ids.
 
     Las referencias son `reserva-<id>-<azar>` y se buscan con `LIKE
@@ -175,7 +176,7 @@ def test_los_cobros_de_OTRA_reserva_no_se_cuentan(api, cancha, cliente, tarifa_b
     crean **diez** reservas y se comparan la 1 y la 10, que es el único par donde
     un id es prefijo del otro.
     """
-    _abrir_caja(api)
+    abrir_caja(api, sucursal)
     # Diez turnos **encadenados** en la misma cancha: los ids salen 1..10 porque
     # la tabla se trunca con RESTART IDENTITY antes de cada test.
     #
@@ -246,10 +247,10 @@ def test_el_pendiente_incluye_el_buffet(api, cancha, cliente, tarifa_base, sucur
 
 
 def test_cobrar_de_mas_no_deja_el_pendiente_en_negativo(
-    api, cancha, cliente, tarifa_base
+    api, cancha, cliente, tarifa_base, abrir_caja, sucursal,
 ):
     reserva = _reserva(api, cancha, cliente)
-    _abrir_caja(api)
+    abrir_caja(api, sucursal)
     total = api.get(f"/api/reservas/{reserva['id']}/cobros").json()["total"]
 
     api.post(f"/api/reservas/{reserva['id']}/cobros",
@@ -274,17 +275,19 @@ def test_sin_caja_abierta_no_se_cobra(api, cancha, cliente, tarifa_base):
     assert "caja abierta" in r.text.lower()
 
 
-def test_un_medio_de_pago_inventado_se_rechaza(api, cancha, cliente, tarifa_base):
+def test_un_medio_de_pago_inventado_se_rechaza(
+    api, cancha, cliente, tarifa_base, abrir_caja, sucursal,
+):
     reserva = _reserva(api, cancha, cliente)
-    _abrir_caja(api)
+    abrir_caja(api, sucursal)
 
     r = api.post(f"/api/reservas/{reserva['id']}/cobros",
                  json={"monto": "1000", "medio_pago": "criptomonedas"})
     assert r.status_code == 422, r.text
 
 
-def test_cobrar_una_reserva_que_no_existe_da_404(api):
-    _abrir_caja(api)
+def test_cobrar_una_reserva_que_no_existe_da_404(api, abrir_caja, sucursal):
+    abrir_caja(api, sucursal)
     r = api.post("/api/reservas/999999/cobros",
                  json={"monto": "1000", "medio_pago": "efectivo"})
     assert r.status_code == 404

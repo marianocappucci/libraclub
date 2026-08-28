@@ -133,11 +133,6 @@ def _configurar_mp(api, auto_facturar=False):
     return r.json()
 
 
-def _abrir_turno(api):
-    r = api.post("/api/caja/turnos", json={"monto_inicial": "0"})
-    assert r.status_code == 201, r.text
-    return r.json()
-
 
 def _reserva(api, cancha, cliente, precio="10000.00", **extra):
     datos = {
@@ -292,9 +287,11 @@ def test_mientras_nadie_escanee_el_poll_dice_pendiente(api, cancha, cliente, tar
     assert r.json() == {"estado": "pendiente", "payment_id": None, "factura_id": None}
 
 
-def test_un_pago_rechazado_no_acredita_nada(api, cancha, cliente, tarifa_base, mp):
+def test_un_pago_rechazado_no_acredita_nada(
+    api, cancha, cliente, tarifa_base, mp, abrir_caja, sucursal,
+):
     _configurar_mp(api)
-    _abrir_turno(api)
+    abrir_caja(api, sucursal)
     reserva = _reserva(api, cancha, cliente)
     referencia = api.post(f"/api/reservas/{reserva['id']}/mp-qr").json()["referencia"]
     mp.pago = {"id": 999, "status": "rejected", "external_reference": referencia}
@@ -305,10 +302,10 @@ def test_un_pago_rechazado_no_acredita_nada(api, cancha, cliente, tarifa_base, m
 
 
 def test_al_acreditarse_entra_a_la_caja_del_turno(
-    api, sucursal, cancha, cliente, tarifa_base, gaseosa, mp,
+    api, sucursal, cancha, cliente, tarifa_base, gaseosa, mp, abrir_caja,
 ):
     _configurar_mp(api)
-    _abrir_turno(api)
+    abrir_caja(api, sucursal)
     reserva = _reserva(api, cancha, cliente, precio="10000.00")
     _consumir_en_la_cancha(api, sucursal, reserva["id"], gaseosa["item_id"], "2")
     referencia = api.post(f"/api/reservas/{reserva['id']}/mp-qr").json()["referencia"]
@@ -324,12 +321,12 @@ def test_al_acreditarse_entra_a_la_caja_del_turno(
 
 
 def test_el_poll_repetido_no_cobra_dos_veces(
-    api, cancha, cliente, tarifa_base, mp,
+    api, cancha, cliente, tarifa_base, mp, abrir_caja, sucursal,
 ):
     """🔴 La pantalla pollea cada 3 segundos. Sin la marca de
     `caja_movimiento_id`, cada tick sería otro ingreso en el arqueo."""
     _configurar_mp(api)
-    _abrir_turno(api)
+    abrir_caja(api, sucursal)
     reserva = _reserva(api, cancha, cliente, precio="10000.00")
     referencia = api.post(f"/api/reservas/{reserva['id']}/mp-qr").json()["referencia"]
     mp.aprobado(referencia)
@@ -344,12 +341,12 @@ def test_el_poll_repetido_no_cobra_dos_veces(
 
 
 def test_un_turno_ya_pagado_no_se_vuelve_a_poner_en_el_qr(
-    api, cancha, cliente, tarifa_base, mp,
+    api, cancha, cliente, tarifa_base, mp, abrir_caja, sucursal,
 ):
     """Volver a poner el monto dejaría el pago ya cobrado sin nada que lo ate al
     turno: la referencia nueva no lo encuentra y la vieja ya no se consulta."""
     _configurar_mp(api)
-    _abrir_turno(api)
+    abrir_caja(api, sucursal)
     reserva = _reserva(api, cancha, cliente)
     referencia = api.post(f"/api/reservas/{reserva['id']}/mp-qr").json()["referencia"]
     mp.aprobado(referencia)
@@ -360,7 +357,9 @@ def test_un_turno_ya_pagado_no_se_vuelve_a_poner_en_el_qr(
     assert len(mp.ordenes) == 1
 
 
-def test_sin_turno_abierto_el_cobro_no_se_pierde(api, cancha, cliente, tarifa_base, mp):
+def test_sin_turno_abierto_el_cobro_no_se_pierde(
+    api, cancha, cliente, tarifa_base, mp, abrir_caja, sucursal,
+):
     """🔑 El pago **ya está acreditado** cuando esto salta.
 
     Cobrar sin turno dejaría la plata fuera del arqueo, así que el poll corta
@@ -375,7 +374,7 @@ def test_sin_turno_abierto_el_cobro_no_se_pierde(api, cancha, cliente, tarifa_ba
     r = api.get(f"/api/reservas/{reserva['id']}/mp-status")
     assert r.status_code == 409, r.text
 
-    _abrir_turno(api)
+    abrir_caja(api, sucursal)
     r = api.get(f"/api/reservas/{reserva['id']}/mp-status")
     assert r.status_code == 200, r.text
     assert r.json()["estado"] == "aprobado"
@@ -388,10 +387,10 @@ def test_sin_turno_abierto_el_cobro_no_se_pierde(api, cancha, cliente, tarifa_ba
 
 
 def test_con_la_automatica_prendida_el_turno_sale_facturado(
-    api, sucursal, cancha, cliente, tarifa_base, gaseosa, mp,
+    api, sucursal, cancha, cliente, tarifa_base, gaseosa, mp, abrir_caja,
 ):
     _configurar_mp(api, auto_facturar=True)
-    _abrir_turno(api)
+    abrir_caja(api, sucursal)
     reserva = _reserva(api, cancha, cliente, precio="10000.00")
     _consumir_en_la_cancha(api, sucursal, reserva["id"], gaseosa["item_id"], "2")
     referencia = api.post(f"/api/reservas/{reserva['id']}/mp-qr").json()["referencia"]
@@ -407,12 +406,12 @@ def test_con_la_automatica_prendida_el_turno_sale_facturado(
 
 
 def test_sin_la_automatica_el_mismo_cobro_no_factura(
-    api, cancha, cliente, tarifa_base, mp,
+    api, cancha, cliente, tarifa_base, mp, abrir_caja, sucursal,
 ):
     """El control negativo del test de arriba: sin esto, un `facturar` sin
     condición pasaría los dos."""
     _configurar_mp(api, auto_facturar=False)
-    _abrir_turno(api)
+    abrir_caja(api, sucursal)
     reserva = _reserva(api, cancha, cliente, precio="10000.00")
     referencia = api.post(f"/api/reservas/{reserva['id']}/mp-qr").json()["referencia"]
     mp.aprobado(referencia)
@@ -422,12 +421,12 @@ def test_sin_la_automatica_el_mismo_cobro_no_factura(
 
 
 def test_la_automatica_no_reemite_sobre_un_turno_ya_facturado(
-    api, cancha, cliente, tarifa_base, mp,
+    api, cancha, cliente, tarifa_base, mp, abrir_caja, sucursal,
 ):
     """Dos comprobantes por el mismo turno son dos veces el mismo ingreso ante
     ARCA, y no hay forma de anular uno sin nota de crédito."""
     _configurar_mp(api, auto_facturar=True)
-    _abrir_turno(api)
+    abrir_caja(api, sucursal)
     reserva = _reserva(api, cancha, cliente, precio="10000.00")
     a_mano = api.post(f"/api/reservas/{reserva['id']}/facturar")
     assert a_mano.status_code == 201, a_mano.text
@@ -449,7 +448,7 @@ def _firmar(payment_id: str, request_id: str, secreto: str) -> str:
 
 
 def test_el_webhook_sella_el_pago_del_mostrador_pero_no_toca_la_caja(
-    api, cancha, cliente, tarifa_base, mp,
+    api, cancha, cliente, tarifa_base, mp, abrir_caja, sucursal,
 ):
     """🔑 **El movimiento de caja va contra el turno de QUIEN COBRA**, y el
     webhook no sabe quién es: llega de MercadoPago, sin sesión. Un ingreso sin
@@ -461,7 +460,7 @@ def test_el_webhook_sella_el_pago_del_mostrador_pero_no_toca_la_caja(
     y que **no** haya cobrado nada por su cuenta.
     """
     _configurar_mp(api)
-    _abrir_turno(api)
+    abrir_caja(api, sucursal)
     reserva = _reserva(api, cancha, cliente, precio="10000.00")
     referencia = api.post(f"/api/reservas/{reserva['id']}/mp-qr").json()["referencia"]
     mp.aprobado(referencia)

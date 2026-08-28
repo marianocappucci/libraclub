@@ -489,6 +489,18 @@
    * sí se adapta sola, porque compone contra `--background`. */
   background-color: #edf4f0;
   border-bottom-color: #abc5b5;
+
+  /* 🔑 **Las esquinas de arriba, redondeadas.** El encabezado es el primer hijo
+   * de una `<section>` con `rounded-lg`, así que su fondo pintaba cuadrado
+   * dentro de una caja redondeada: se veían dos picos verdes asomando en las
+   * esquinas superiores. Reportado el 2026-08-28.
+   *
+   * `calc(var(--radius) - 1px)` y no `var(--radius)` a secas: el encabezado va
+   * **adentro** del borde de 1px de la sección, así que su curva tiene que ser
+   * un píxel más chica para quedar concéntrica. Con el mismo radio queda un
+   * hilo de fondo asomando por fuera de la curva. */
+  border-top-left-radius: calc(var(--radius) - 1px);
+  border-top-right-radius: calc(var(--radius) - 1px);
 }
 
 @supports (color: color-mix(in oklab, red, red)) {

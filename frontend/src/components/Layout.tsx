@@ -99,6 +99,10 @@ const Cascaron = createLayout<Usuario>({
         { to: '/clientes', label: 'Clientes', icon: Users },
         { to: '/canchas', label: 'Canchas', icon: LayoutGrid },
         { to: '/tarifas', label: 'Tarifas', icon: Tags },
+        // 🔑 Los mostradores son configuración, como las canchas y las tarifas:
+        // se dan de alta al abrir el complejo y no se tocan más. Lo que se toca
+        // todos los días es el turno, que está en Caja.
+        { to: '/cajas', label: 'Cajas', icon: Wallet },
         // 🔑 **El buffet es mantenimiento, no operación.** Estuvo con la Caja
         // hasta el 2026-08-28 con el argumento de que "es lo que se toca durante
         // el turno", y era falso: el consumo se carga **desde el turno**, en el

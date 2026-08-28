@@ -241,3 +241,32 @@ def _terminos_ya_aceptados(request):
     mp.setattr(TerminosRepository, "esta_aceptada", lambda self: True)
     yield
     mp.undo()
+
+
+@pytest.fixture
+def abrir_caja():
+    """Abre el turno **sobre una caja**, creándola si esa sede no tiene ninguna.
+
+    🔑 Desde el 2026-08-28 el turno se abre sobre un mostrador: el arqueo del
+    cierre es el de ESE cajón. El helper existe para que los tests que sólo
+    querían "un turno abierto" no tengan que repetir el alta de la caja — pero
+    la crea **por la API**, no por el servicio, así el camino que ejercitan es
+    el real.
+
+    Devuelve la respuesta del POST, para que los tests que miran el código de
+    estado —el 409 de la segunda apertura— sigan pudiendo.
+    """
+    def _abrir(api, sucursal, monto_inicial="0", notas=""):
+        sid = getattr(sucursal, "id", sucursal)
+        cajas = api.get(f"/api/cajas?sucursal_id={sid}").json()
+        if not cajas:
+            alta = api.post("/api/cajas", json={
+                "nombre": "Mostrador", "sucursal_id": sid,
+            })
+            assert alta.status_code == 201, alta.text
+            cajas = [alta.json()]
+        return api.post("/api/caja/turnos", json={
+            "monto_inicial": monto_inicial, "notas": notas, "caja_id": cajas[0]["id"],
+        })
+
+    return _abrir

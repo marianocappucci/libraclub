@@ -7,6 +7,7 @@ el primer import y un test que quiera otra base ya llega tarde.
 
 from __future__ import annotations
 
+import logging
 import os
 
 from fastapi import Depends, FastAPI
@@ -39,10 +40,12 @@ from libracore.respaldo import Instancia
 from app import db
 from app.auth import UserRepository, construir_session_auth, require_admin
 from app.config import Config
+from app.models.maestros import Sucursal
 from app.routers import admin, disponibilidad, maestros, reservas, salud, torneos
 from app.routers import auth as auth_router
 from app.routers import buffet as buffet_router
 from app.routers import caja as caja_router
+from app.routers import cajas as cajas_router
 from app.routers import cuenta_corriente as cuenta_corriente_router
 from app.routers import facturacion as facturacion_router
 from app.routers import facturas as facturas_router
@@ -55,7 +58,11 @@ from app.routers import resumen as resumen_router
 # sin el alias el import queda pisado.
 from app.routers import usuarios as usuarios_router
 from app.routers.facturacion import exigir_base
+from app.servicios import caja as servicio_caja
 from app.servicios import facturacion
+from app.servicios import facturacion as servicio_facturacion
+
+_log = logging.getLogger(__name__)
 
 #: Qué entra al log de actividad: `{clase del modelo: nombre legible}`.
 #:
@@ -159,6 +166,26 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # no alcanza — la ruta y la siembra las conecta el producto, cada una por
     # su lado, y ninguna de las dos delata que falta la otra.
     ensure_demo_user(usuarios)
+
+    # Una caja por sucursal, para las instancias que ya venían andando.
+    #
+    # 🔑 **Sin esto, subir esta versión deja al mostrador sin poder abrir el
+    # turno**: desde ahora el turno se abre SOBRE una caja, no habría ninguna
+    # para elegir, y crearla es de admin. Es idempotente — en el segundo
+    # arranque no crea nada.
+    #
+    # Va detrás de `hay_base()` porque las cajas viven en LibraCore: una
+    # instancia sin facturación configurada arranca igual, sin cajas y sin caja
+    # que abrir, exactamente como antes de este cambio.
+    if servicio_facturacion.hay_base():
+        with db.fabrica_de_sesiones()() as sesion_bootstrap:
+            sedes = [
+                (fila.id, fila.nombre)
+                for fila in sesion_bootstrap.query(Sucursal).filter_by(activa=True).all()
+            ]
+        creadas = servicio_caja.asegurar_cajas_de_todas(sedes)
+        if creadas:
+            _log.info("Se crearon %s cajas iniciales, una por sucursal", creadas)
 
     app = FastAPI(
         title="LibraClub",
@@ -313,6 +340,11 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # cerrar depende del turno, no sólo de quién pide.
 
     app.include_router(caja_router.router)
+
+    # Las cajas: los mostradores de cada sucursal. Cada endpoint declara su
+    # rol — el listado lo lee el mostrador para elegir dónde abrir el turno;
+    # el alta, la edición y la baja son de admin.
+    app.include_router(cajas_router.router)
 
     # La cuenta corriente. Mismo criterio que la caja: el mostrador fía y cobra
     # —es quien está frente al cliente—, y la lista de deudores es de admin.

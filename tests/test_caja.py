@@ -61,7 +61,7 @@ def api(engine, sesion, monkeypatch, base_de_libracore):
     AuthBase.metadata.drop_all(engine)
 
 
-def test_abrir_la_caja_espeja_al_usuario_en_libracore(api):
+def test_abrir_la_caja_espeja_al_usuario_en_libracore(api, abrir_caja, sucursal):
     """🔴 El arreglo que hace falta porque las dos bases están al revés.
 
     `turnos_caja.usuario_id` tiene una FK a `usuarios` **de LibraCore**, y en
@@ -69,15 +69,15 @@ def test_abrir_la_caja_espeja_al_usuario_en_libracore(api):
     un turno falla con una violación de clave foránea — la FK se aplica de
     verdad en PostgreSQL, está verificado.
     """
-    r = api.post("/api/caja/turnos", json={"monto_inicial": "5000"})
+    r = abrir_caja(api, sucursal, "5000")
     assert r.status_code == 201, r.text
     assert r.json()["estado"] == "abierto"
     assert r.json()["monto_inicial"] == 5000.0
 
 
-def test_no_se_abren_dos_cajas_a_la_vez(api):
-    assert api.post("/api/caja/turnos", json={"monto_inicial": "0"}).status_code == 201
-    assert api.post("/api/caja/turnos", json={"monto_inicial": "0"}).status_code == 409
+def test_no_se_abren_dos_cajas_a_la_vez(api, abrir_caja, sucursal):
+    assert abrir_caja(api, sucursal, "0").status_code == 201
+    assert abrir_caja(api, sucursal, "0").status_code == 409
 
 
 def test_sin_turno_abierto_no_se_puede_cobrar(api):
@@ -89,22 +89,22 @@ def test_sin_turno_abierto_no_se_puede_cobrar(api):
     assert r.status_code == 409, r.text
 
 
-def test_un_medio_de_pago_desconocido_no_entra(api):
-    api.post("/api/caja/turnos", json={"monto_inicial": "0"})
+def test_un_medio_de_pago_desconocido_no_entra(api, abrir_caja, sucursal):
+    abrir_caja(api, sucursal, "0")
     r = api.post("/api/caja/cobros", json={
         "monto": "1000", "concepto": "Seña", "medio_pago": "cheque",
     })
     assert r.status_code == 422, r.text
 
 
-def test_el_arqueo_cuenta_el_efectivo_y_NO_lo_demas(api):
+def test_el_arqueo_cuenta_el_efectivo_y_NO_lo_demas(api, abrir_caja, sucursal):
     """🔑 El esperado es lo que tiene que haber **en el cajón**.
 
     Una transferencia entró, pero no en efectivo: contarla en el esperado haría
     que toda caja con transferencias cierre con faltante. Lo que no es efectivo
     queda en el resumen de la terminal o del banco.
     """
-    api.post("/api/caja/turnos", json={"monto_inicial": "1000"})
+    abrir_caja(api, sucursal, "1000")
     api.post("/api/caja/cobros", json={
         "monto": "5000", "concepto": "Cancha 1", "medio_pago": "efectivo"})
     api.post("/api/caja/cobros", json={
@@ -120,10 +120,10 @@ def test_el_arqueo_cuenta_el_efectivo_y_NO_lo_demas(api):
     assert c["diferencia_de_caja"] == 0.0
 
 
-def test_la_diferencia_se_guarda_y_no_se_corrige(api):
+def test_la_diferencia_se_guarda_y_no_se_corrige(api, abrir_caja, sucursal):
     """Un cierre que no cuadra es un dato: faltó plata, sobró, o alguien no
     cargó un cobro. Ajustarlo al esperado borraría lo que hay que mirar."""
-    api.post("/api/caja/turnos", json={"monto_inicial": "1000"})
+    abrir_caja(api, sucursal, "1000")
     api.post("/api/caja/cobros", json={
         "monto": "5000", "concepto": "Cancha 1", "medio_pago": "efectivo"})
     turno = api.get("/api/caja/turnos/actual").json()["turno"]
@@ -134,8 +134,8 @@ def test_la_diferencia_se_guarda_y_no_se_corrige(api):
     assert c["diferencia_de_caja"] == -500.0, "faltaron 500 y tiene que quedar escrito"
 
 
-def test_un_turno_cerrado_no_se_cierra_de_nuevo(api):
-    api.post("/api/caja/turnos", json={"monto_inicial": "0"})
+def test_un_turno_cerrado_no_se_cierra_de_nuevo(api, abrir_caja, sucursal):
+    abrir_caja(api, sucursal, "0")
     turno = api.get("/api/caja/turnos/actual").json()["turno"]
     assert api.post(f"/api/caja/turnos/{turno['id']}/cerrar",
                     json={"monto_declarado": "0"}).status_code == 200
@@ -143,10 +143,10 @@ def test_un_turno_cerrado_no_se_cierra_de_nuevo(api):
                     json={"monto_declarado": "0"}).status_code == 409
 
 
-def test_nadie_cierra_la_caja_de_otro(api, engine):
+def test_nadie_cierra_la_caja_de_otro(api, engine, abrir_caja, sucursal):
     """🔴 Un operador cerrándole la caja a otro deja un arqueo con el nombre
     equivocado: el que contó la plata no es el que figura."""
-    api.post("/api/caja/turnos", json={"monto_inicial": "1000"})
+    abrir_caja(api, sucursal, "1000")
     turno = api.get("/api/caja/turnos/actual").json()["turno"]
 
     api.post("/api/usuarios", json={

@@ -62,6 +62,19 @@ class MedioDePagoInvalido(ValueError):
     pass
 
 
+class MotivoInvalido(ValueError):
+    """Un egreso sin motivo de la lista. Ver `MOTIVOS_DE_EGRESO`."""
+
+
+class MovimientoAjeno(ValueError):
+    """Se quiso anular un movimiento que no es del turno abierto de quien pide."""
+
+
+class SinCajaEnLaSucursal(RuntimeError):
+    """La sucursal no tiene ninguna caja dada de alta, así que no hay dónde
+    abrir el turno. Se resuelve dando de alta una, no inventando la caja."""
+
+
 def espejar_usuario(usuario: dict) -> int:
     """Copia el usuario de `libraauth` a la tabla `usuarios` de LibraCore.
 
@@ -103,12 +116,22 @@ def espejar_usuario(usuario: dict) -> int:
     return int(usuario["id"])
 
 
-def abrir_turno(usuario: dict, monto_inicial: Decimal, notas: str = "") -> dict:
-    """Abre la caja de este usuario con el efectivo con el que arranca."""
+def abrir_turno(usuario: dict, monto_inicial: Decimal, notas: str = "",
+                caja_id: int | None = None) -> dict:
+    """Abre el turno de este usuario **sobre un mostrador**, con su efectivo.
+
+    🔑 `caja_id` dice en qué cajón está parado. El arqueo del cierre es el de
+    ESE mostrador: sin la caja, dos personas en dos sedes distintas arquean
+    contra el mismo montón y ningún reporte por sede es posible.
+
+    Sigue siendo opcional en el motor —los otros cinco productos abren el turno
+    suelto— pero en este producto lo exige el router: acá siempre se está parado
+    en una sucursal.
+    """
     usuario_id = espejar_usuario(usuario)
     if db_turnos.get_turno_activo(usuario_id) is not None:
         raise TurnoYaAbierto("Ya tenés una caja abierta.")
-    tid = db_turnos.create_turno(usuario_id, float(monto_inicial), notas)
+    tid = db_turnos.create_turno(usuario_id, float(monto_inicial), notas, caja_id=caja_id)
     return db_turnos.get_turno(tid)
 
 
@@ -120,6 +143,85 @@ def resumen(turno_id: int) -> dict:
     return db_turnos.get_resumen_turno_caja(turno_id)
 
 
+def registrar_movimiento(usuario: dict, tipo: str, monto: Decimal, concepto: str,
+                         medio_pago: str, referencia: str = "",
+                         factura_id: int | None = None) -> int:
+    """Un movimiento en el turno abierto: plata que entra o que sale.
+
+    🔑 **El `caja_id` sale del turno, no del pedido.** La pantalla no lo elige:
+    ya eligió el mostrador al abrir. Dejarlo en el payload permitiría cargar un
+    movimiento en la caja de otra sede desde la sesión de ésta.
+
+    🔴 **Sin turno abierto no se registra nada**, ni ingreso ni egreso: el
+    movimiento quedaría sin `turno_id` y por lo tanto fuera de todo arqueo.
+    """
+    if tipo not in ("ingreso", "egreso"):
+        raise ValueError(f"tipo de movimiento desconocido: {tipo!r}")
+    if medio_pago not in MEDIOS_PAGO:
+        raise MedioDePagoInvalido(f"Medio de pago desconocido: {medio_pago!r}")
+    turno = turno_abierto(usuario)
+    if turno is None:
+        raise SinTurnoAbierto("No hay una caja abierta. Abrí el turno antes de cobrar.")
+    return db_caja.create_caja_movimiento(
+        date.today().isoformat(), tipo, concepto, float(monto),
+        referencia=referencia, factura_id=factura_id,
+        usuario_id=int(usuario["id"]), medio_pago=medio_pago, turno_id=turno["id"],
+        caja_id=turno.get("caja_id"),
+    )
+
+
+#: Por qué sale plata del cajón. Lista corta y cerrada: un motivo libre convierte
+#: el arqueo en algo que no se puede sumar por categoría, y "varios" termina
+#: siendo la mitad de los egresos.
+MOTIVOS_DE_EGRESO = (
+    "Pago a proveedor",
+    "Retiro a banco",
+    "Sueldos y honorarios",
+    "Gasto del complejo",
+    "Vuelto / diferencia",
+)
+
+
+def registrar_egreso(usuario: dict, monto: Decimal, motivo: str, detalle: str,
+                     medio_pago: str) -> dict:
+    """Plata que **sale** del cajón, con su motivo.
+
+    🔴 **Existe porque sin esto el arqueo sólo podía subir.** El resumen del
+    motor ya netea los egresos —`SUM(CASE WHEN tipo='egreso' THEN -monto ELSE
+    monto END)`— y este producto no tenía forma de registrar uno: sacar plata
+    dejaba el cierre con un faltante sin explicación, indistinguible de un error
+    de conteo o de un robo.
+    """
+    if motivo not in MOTIVOS_DE_EGRESO:
+        raise MotivoInvalido(f"Motivo de egreso desconocido: {motivo!r}")
+    concepto = f"{motivo}{f' — {detalle}' if detalle.strip() else ''}"
+    registrar_movimiento(usuario, "egreso", monto, concepto, medio_pago)
+    return db_turnos.get_resumen_turno_caja(turno_abierto(usuario)["id"])
+
+
+def anular_movimiento(usuario: dict, movimiento_id: int) -> dict:
+    """Borra un movimiento **del turno abierto de quien lo pide**.
+
+    🔴 **Sólo del turno abierto, y sólo del propio.** Un arqueo cerrado es un
+    hecho: borrarle un movimiento después reescribe una diferencia que alguien
+    ya firmó. Y el turno de otra persona no es de quien pide.
+
+    Se borra en vez de contra-asentar porque el caso real es el error de tipeo
+    de hace treinta segundos, no la corrección contable de un movimiento válido.
+    """
+    turno = turno_abierto(usuario)
+    if turno is None:
+        raise SinTurnoAbierto("No hay una caja abierta.")
+    movimientos = db_turnos.get_resumen_turno_caja(turno["id"])["movimientos"]
+    if not any(m["id"] == movimiento_id for m in movimientos):
+        raise MovimientoAjeno(
+            "Ese movimiento no es de tu turno abierto: sólo se puede anular lo "
+            "que se cargó en la caja que está abierta ahora."
+        )
+    db_caja.delete_caja_movimiento(movimiento_id)
+    return db_turnos.get_resumen_turno_caja(turno["id"])
+
+
 def registrar_ingreso(usuario: dict, monto: Decimal, concepto: str, medio_pago: str,
                       referencia: str = "", factura_id: int | None = None) -> int:
     """El ingreso en el turno abierto de este usuario. Devuelve el id del movimiento.
@@ -129,15 +231,12 @@ def registrar_ingreso(usuario: dict, monto: Decimal, concepto: str, medio_pago: 
     `PagoDeReserva.caja_movimiento_id`). `cobrar` devuelve el arqueo, que es lo
     que la pantalla de Caja quiere mostrar y donde el id no sirve de nada.
     """
-    if medio_pago not in MEDIOS_PAGO:
-        raise MedioDePagoInvalido(f"Medio de pago desconocido: {medio_pago!r}")
-    turno = turno_abierto(usuario)
-    if turno is None:
-        raise SinTurnoAbierto("No hay una caja abierta. Abrí el turno antes de cobrar.")
-    return db_caja.create_caja_movimiento(
-        date.today().isoformat(), "ingreso", concepto, float(monto),
+    # Delega: la escritura es una sola, y así el ingreso también hereda el
+    # `caja_id` del turno. Tener dos INSERT es cómo uno de los dos se queda sin
+    # una columna nueva y nadie se entera hasta que falta en un reporte.
+    return registrar_movimiento(
+        usuario, "ingreso", monto, concepto, medio_pago,
         referencia=referencia, factura_id=factura_id,
-        usuario_id=int(usuario["id"]), medio_pago=medio_pago, turno_id=turno["id"],
     )
 
 
@@ -286,3 +385,83 @@ def vincular_cobros_a_factura(reserva_id: int, factura_id: int) -> int:
         return cursor.rowcount or 0
     finally:
         conexion.close()
+
+
+# ── Las cajas, como mostradores de una sucursal ────────────────────────────
+
+
+def cajas_de(sucursal_id: int) -> list[dict]:
+    """Los mostradores de esa sede. Puede haber más de uno."""
+    return db_caja.get_all_cajas(sucursal_id=sucursal_id)
+
+
+def caja_de(caja_id: int) -> dict | None:
+    return db_caja.get_caja_config(caja_id)
+
+
+def crear_caja(nombre: str, descripcion: str, medios: list[str], sucursal_id: int) -> dict:
+    """Da de alta un mostrador en una sede.
+
+    Los medios se validan contra los de **este producto** y no contra los del
+    motor: un complejo no cobra con cheque ni con Cuenta DNI, y ofrecer un medio
+    que después el cobro rechaza con un 422 es peor que no ofrecerlo.
+    """
+    for m in medios:
+        if m not in MEDIOS_PAGO:
+            raise MedioDePagoInvalido(f"Medio de pago desconocido: {m!r}")
+    cid = db_caja.create_caja_config(nombre, descripcion, list(medios), sucursal_id=sucursal_id)
+    return db_caja.get_caja_config(cid)
+
+
+def actualizar_caja(caja_id: int, nombre: str, descripcion: str,
+                    medios: list[str], activo: bool) -> dict:
+    for m in medios:
+        if m not in MEDIOS_PAGO:
+            raise MedioDePagoInvalido(f"Medio de pago desconocido: {m!r}")
+    db_caja.update_caja_config(caja_id, nombre, descripcion, list(medios), 1 if activo else 0)
+    return db_caja.get_caja_config(caja_id)
+
+
+def borrar_caja(caja_id: int) -> None:
+    db_caja.delete_caja_config(caja_id)
+
+
+#: Cómo se llama la caja que se crea sola para una sucursal que no tenía
+#: ninguna. Se puede renombrar desde la pantalla; el nombre sólo importa la
+#: primera vez.
+NOMBRE_DE_LA_PRIMERA_CAJA = "Mostrador"
+
+
+def asegurar_caja_de(sucursal_id: int, nombre_sucursal: str = "") -> dict:
+    """La caja de esa sede, creándola si todavía no tiene ninguna. Idempotente.
+
+    🔑 **Existe porque el turno ahora se abre sobre una caja.** Sin esto, una
+    instancia que ya venía andando se queda sin poder abrir el turno el día que
+    sube: el mostrador entra, no hay ninguna caja para elegir, y no tiene forma
+    de crear una porque el alta es de admin.
+
+    Devuelve la primera de la sede si ya hay — **no** la "correcta": con dos
+    mostradores cuál es cuál lo decide el operador al abrir, no esta función.
+    """
+    existentes = cajas_de(sucursal_id)
+    if existentes:
+        return existentes[0]
+    nombre = (
+        f"{NOMBRE_DE_LA_PRIMERA_CAJA} {nombre_sucursal}".strip()
+        if nombre_sucursal else NOMBRE_DE_LA_PRIMERA_CAJA
+    )
+    return crear_caja(nombre, "", list(MEDIOS_PAGO), sucursal_id)
+
+
+def asegurar_cajas_de_todas(sucursales: list[tuple[int, str]]) -> int:
+    """Una caja para cada sucursal que no tenga. Devuelve cuántas creó.
+
+    Corre al arrancar la app. Es la migración de datos de las instancias que ya
+    venían andando, y es idempotente: en el segundo arranque no crea nada.
+    """
+    creadas = 0
+    for sid, nombre in sucursales:
+        if not cajas_de(sid):
+            asegurar_caja_de(sid, nombre)
+            creadas += 1
+    return creadas
