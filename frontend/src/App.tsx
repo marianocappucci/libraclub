@@ -6,6 +6,7 @@ import { Caja } from '@/pages/Caja'
 import { CuentaCorriente } from '@/pages/CuentaCorriente'
 import { CuentaCorrienteDetalle } from '@/pages/CuentaCorrienteDetalle'
 import { Horarios } from '@/pages/Horarios'
+import { Cajas } from '@/pages/Cajas'
 import { Canchas } from '@/pages/Canchas'
 import { Configuracion } from '@/pages/Configuracion'
 import { FacturaDetalle } from '@/pages/FacturaDetalle'
@@ -106,6 +107,7 @@ function Backoffice() {
           <Route path="/sucursales" element={<Sucursales />} />
           <Route path="/usuarios" element={<Usuarios />} />
           <Route path="/caja" element={<Caja />} />
+          <Route path="/cajas" element={<Cajas />} />
           <Route path="/buffet" element={<Buffet />} />
           <Route path="/cuenta-corriente" element={<CuentaCorriente />} />
           {/* Mismo criterio que el detalle de torneo: al lado del listado y no

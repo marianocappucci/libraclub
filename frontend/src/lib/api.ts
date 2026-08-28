@@ -49,7 +49,9 @@ export const api = {
     pedir<T>(ruta, { method: 'POST', body: JSON.stringify(cuerpo) }),
   put: <T>(ruta: string, cuerpo: unknown) =>
     pedir<T>(ruta, { method: 'PUT', body: JSON.stringify(cuerpo) }),
-  del: (ruta: string) => pedir<void>(ruta, { method: 'DELETE' }),
+  // `T = void` para que los DELETE de siempre no cambien: los que devuelven
+  // algo —anular un movimiento contesta el resumen del turno— lo declaran.
+  del: <T = void>(ruta: string) => pedir<T>(ruta, { method: 'DELETE' }),
 }
 
 export interface Sucursal {
@@ -352,6 +354,32 @@ export const NOMBRE_DE_DEPORTE: Record<string, string> = {
   otro: 'Otro',
 }
 
+/** Los mostradores de cada sucursal.
+ *
+ * 🔑 El listado lo lee el **mostrador** —es lo que elige al abrir el turno— y el
+ * alta, la edición y la baja son de **admin**: dar de alta un cajón es
+ * configurar el complejo, no operarlo.
+ */
+export const cajas = {
+  deLaSucursal: (sucursalId: number) =>
+    api.get<CajaDeMostrador[]>(`/api/cajas?sucursal_id=${sucursalId}`),
+  mediosDisponibles: () =>
+    api.get<{ valor: string; etiqueta: string }[]>('/api/cajas/medios-disponibles'),
+  crear: (datos: {
+    nombre: string
+    descripcion?: string
+    medios_pago?: string[]
+    sucursal_id: number
+  }) => api.post<CajaDeMostrador>('/api/cajas', datos),
+  editar: (id: number, datos: {
+    nombre: string
+    descripcion?: string
+    medios_pago?: string[]
+    activo: boolean
+  }) => api.put<CajaDeMostrador>(`/api/cajas/${id}`, datos),
+  borrar: (id: number) => api.del<void>(`/api/cajas/${id}`),
+}
+
 export const facturacion = {
   /** `null` si todavía no se facturó. Lo puede ver el mostrador. */
   ver: (reservaId: number) => api.get<Factura | null>(`/api/reservas/${reservaId}/factura`),
@@ -480,6 +508,10 @@ export const configMercadoPago = {
 export interface TurnoDeCaja {
   id: number
   usuario_id: number
+  /** El mostrador sobre el que se abrió. `null` en los turnos anteriores al
+   *  2026-08-28, que nacieron sin caja. */
+  caja_id: number | null
+  caja_nombre: string
   apertura: string
   cierre: string | null
   monto_inicial: number
@@ -489,8 +521,29 @@ export interface TurnoDeCaja {
   notas: string
 }
 
+/** Un mostrador de una sucursal. Una sede puede tener más de uno. */
+export interface CajaDeMostrador {
+  id: number
+  nombre: string
+  descripcion: string
+  medios_pago: string[]
+  activo: boolean
+  es_default: boolean
+  sucursal_id: number | null
+}
+
 export interface ResumenDeCaja {
-  movimientos: { id: number; fecha: string; concepto: string; monto: number; medio_pago: string }[]
+  // 🔑 `tipo` viene desde siempre en la consulta del motor y este tipo no lo
+  // declaraba: sin él la pantalla no puede distinguir un ingreso de un
+  // egreso, que es lo que hace que la lista se pueda sumar de arriba abajo.
+  movimientos: {
+    id: number
+    fecha: string
+    tipo: 'ingreso' | 'egreso'
+    concepto: string
+    monto: number
+    medio_pago: string
+  }[]
   pagos_por_medio: Record<string, number>
   total_ventas: number
   efectivo_ventas: number
@@ -514,8 +567,18 @@ export type MedioDePago = { valor: string; etiqueta: string }
 export const caja = {
   /** `null` si este usuario no tiene caja abierta. */
   actual: () => api.get<{ turno: TurnoDeCaja; resumen: ResumenDeCaja } | null>('/api/caja/turnos/actual'),
-  abrir: (monto_inicial: string, notas = '') =>
-    api.post<TurnoDeCaja>('/api/caja/turnos', { monto_inicial, notas }),
+  /** Por qué puede salir plata del cajón. Lista cerrada del backend. */
+  motivosDeEgreso: () => api.get<string[]>('/api/caja/motivos-de-egreso'),
+  /** Plata que **sale**. Devuelve el resumen al momento, como el cobro. */
+  egreso: (datos: { monto: string; motivo: string; detalle?: string; medio_pago: string }) =>
+    api.post<ResumenDeCaja>('/api/caja/egresos', datos),
+  /** Anula un movimiento **del turno abierto**. Un arqueo cerrado no se toca. */
+  anular: (movimientoId: number) =>
+    api.del<ResumenDeCaja>(`/api/caja/movimientos/${movimientoId}`),
+  /** El turno se abre **sobre un mostrador**: el arqueo del cierre es el de ESE
+   *  cajón. `caja_id` es obligatorio del lado del backend. */
+  abrir: (monto_inicial: string, notas = '', caja_id?: number) =>
+    api.post<TurnoDeCaja>('/api/caja/turnos', { monto_inicial, notas, caja_id }),
   cobrar: (cuerpo: { monto: string; concepto: string; medio_pago: string }) =>
     api.post<ResumenDeCaja>('/api/caja/cobros', cuerpo),
   cerrar: (turnoId: number, monto_declarado: string, notas = '') =>

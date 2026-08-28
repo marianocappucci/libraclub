@@ -129,7 +129,9 @@ def test_un_bloqueo_no_se_puede_fiar(api, cancha):
     assert "cliente" in r.json()["detail"], r.text
 
 
-def test_un_pago_a_cuenta_baja_el_saldo_y_entra_a_la_caja(api, cancha, cliente, tarifa_base):
+def test_un_pago_a_cuenta_baja_el_saldo_y_entra_a_la_caja(
+    api, cancha, cliente, tarifa_base, abrir_caja, sucursal,
+):
     """🔑 Los dos libros: el cajón y la cuenta del cliente.
 
     `caja_movimientos` es lo que se arquea al cerrar el turno; `cc_pagos` es lo
@@ -141,7 +143,7 @@ def test_un_pago_a_cuenta_baja_el_saldo_y_entra_a_la_caja(api, cancha, cliente, 
     deuda = api.post(
         f"/api/cuenta-corriente/reservas/{reserva['id']}/cargar").json()["saldo"]
 
-    api.post("/api/caja/turnos", json={"monto_inicial": "0"})
+    abrir_caja(api, sucursal, "0")
     r = api.post(f"/api/cuenta-corriente/clientes/{cliente.id}/pagos",
                  json={"monto": "1000", "medio_pago": "efectivo"})
     assert r.status_code == 200, r.text
@@ -152,7 +154,7 @@ def test_un_pago_a_cuenta_baja_el_saldo_y_entra_a_la_caja(api, cancha, cliente, 
 
 
 def test_dos_pagos_del_mismo_cliente_el_mismo_dia_entran_los_dos(
-    api, cancha, cliente, tarifa_base
+    api, cancha, cliente, tarifa_base, abrir_caja, sucursal,
 ):
     """🔴 La trampa de darle `referencia` al movimiento de caja.
 
@@ -163,7 +165,7 @@ def test_dos_pagos_del_mismo_cliente_el_mismo_dia_entran_los_dos(
     """
     reserva = _reserva(api, cancha, cliente)
     api.post(f"/api/cuenta-corriente/reservas/{reserva['id']}/cargar")
-    api.post("/api/caja/turnos", json={"monto_inicial": "0"})
+    abrir_caja(api, sucursal, "0")
 
     for _ in range(2):
         assert api.post(f"/api/cuenta-corriente/clientes/{cliente.id}/pagos",
@@ -189,19 +191,21 @@ def test_sin_turno_abierto_no_se_cobra_a_cuenta(api, cliente):
     assert api.get(f"/api/cuenta-corriente/clientes/{cliente.id}").json()["saldo"] == 0.0
 
 
-def test_pagar_de_mas_deja_saldo_a_favor(api, cliente):
+def test_pagar_de_mas_deja_saldo_a_favor(api, cliente, abrir_caja, sucursal):
     """Una seña o un adelanto del mes que viene es un caso real, no un error."""
-    api.post("/api/caja/turnos", json={"monto_inicial": "0"})
+    abrir_caja(api, sucursal, "0")
     r = api.post(f"/api/cuenta-corriente/clientes/{cliente.id}/pagos",
                  json={"monto": "5000", "medio_pago": "efectivo"})
     assert r.status_code == 200, r.text
     assert r.json()["saldo"] == -5000.0
 
 
-def test_el_extracto_trae_la_deuda_y_el_pago(api, cancha, cliente, tarifa_base):
+def test_el_extracto_trae_la_deuda_y_el_pago(
+    api, cancha, cliente, tarifa_base, abrir_caja, sucursal,
+):
     reserva = _reserva(api, cancha, cliente)
     api.post(f"/api/cuenta-corriente/reservas/{reserva['id']}/cargar")
-    api.post("/api/caja/turnos", json={"monto_inicial": "0"})
+    abrir_caja(api, sucursal, "0")
     api.post(f"/api/cuenta-corriente/clientes/{cliente.id}/pagos",
              json={"monto": "1000", "medio_pago": "efectivo"})
 
@@ -254,7 +258,7 @@ def test_sin_base_de_libracore_lo_dice_en_vez_de_romperse(engine, sesion, monkey
     finally:
         AuthBase.metadata.drop_all(engine)
 def test_el_total_por_cobrar_no_lo_baja_el_que_pago_de_mas(
-    api, cancha, cliente, tarifa_base
+    api, cancha, cliente, tarifa_base, abrir_caja, sucursal,
 ):
     """🔑 Los saldos a favor **no** se restan del total.
 
@@ -270,7 +274,7 @@ def test_el_total_por_cobrar_no_lo_baja_el_que_pago_de_mas(
     # Un segundo cliente que paga sin deber nada: queda con saldo a favor.
     otro = api.post("/api/clientes", json={"nombre": "Adelantados FC"})
     assert otro.status_code == 201, otro.text
-    api.post("/api/caja/turnos", json={"monto_inicial": "0"})
+    abrir_caja(api, sucursal, "0")
     a_favor = api.post(f"/api/cuenta-corriente/clientes/{otro.json()['id']}/pagos",
                        json={"monto": "2500", "medio_pago": "efectivo"})
     assert a_favor.status_code == 200, a_favor.text
@@ -284,14 +288,14 @@ def test_el_total_por_cobrar_no_lo_baja_el_que_pago_de_mas(
     assert deuda > 2500, "sin esto, restar el saldo a favor daría el mismo número"
 
 
-def test_el_pago_guarda_la_fecha_el_concepto_y_la_referencia(api, cliente):
+def test_el_pago_guarda_la_fecha_el_concepto_y_la_referencia(api, cliente, abrir_caja, sucursal):
     """Lo que se teclea en el diálogo de cobro tiene que llegar al extracto.
 
     Sin esto, los tres campos se pueden agregar a la pantalla y perderse en el
     camino: el pago se registra igual y el saldo baja igual, así que nada se ve
     roto.
     """
-    api.post("/api/caja/turnos", json={"monto_inicial": "0"})
+    abrir_caja(api, sucursal, "0")
     r = api.post(f"/api/cuenta-corriente/clientes/{cliente.id}/pagos", json={
         "monto": "1000", "medio_pago": "transferencia", "fecha": "2026-09-10",
         "concepto": "Seña del torneo", "referencia": "TRF-4412"})
@@ -305,12 +309,12 @@ def test_el_pago_guarda_la_fecha_el_concepto_y_la_referencia(api, cliente):
     assert movs[0]["medio"] == "transferencia"
 
 
-def test_sin_fecha_ni_concepto_el_pago_usa_los_defaults(api, cliente):
+def test_sin_fecha_ni_concepto_el_pago_usa_los_defaults(api, cliente, abrir_caja, sucursal):
     """El control del test de arriba: los tres campos son opcionales.
 
     Si el endpoint los exigiera, aquél pasaría igual y este cortaría.
     """
-    api.post("/api/caja/turnos", json={"monto_inicial": "0"})
+    abrir_caja(api, sucursal, "0")
     r = api.post(f"/api/cuenta-corriente/clientes/{cliente.id}/pagos",
                  json={"monto": "1000", "medio_pago": "efectivo"})
     assert r.status_code == 200, r.text
@@ -321,7 +325,9 @@ def test_sin_fecha_ni_concepto_el_pago_usa_los_defaults(api, cliente):
     assert movs[0]["referencia"] == ""
 
 
-def test_dos_pagos_con_la_misma_referencia_entran_los_dos_a_la_caja(api, cliente):
+def test_dos_pagos_con_la_misma_referencia_entran_los_dos_a_la_caja(
+    api, cliente, abrir_caja, sucursal,
+):
     """🔴 La referencia ahora la teclea el mostrador, y ahí está la trampa.
 
     `create_caja_movimiento` es idempotente por referencia. Si la referencia del
@@ -333,7 +339,7 @@ def test_dos_pagos_con_la_misma_referencia_entran_los_dos_a_la_caja(api, cliente
     Y repetir la referencia no es un caso raro: es un dedo pesado sobre
     «Registrar pago», o dos cobros contra el mismo recibo.
     """
-    api.post("/api/caja/turnos", json={"monto_inicial": "0"})
+    abrir_caja(api, sucursal, "0")
     for _ in range(2):
         r = api.post(f"/api/cuenta-corriente/clientes/{cliente.id}/pagos", json={
             "monto": "1000", "medio_pago": "efectivo", "referencia": "REC-1"})

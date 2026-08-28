@@ -21,6 +21,17 @@ class AperturaEntrada(BaseModel):
     #: Con cuánto efectivo arranca el cajón. Cero es un valor legítimo.
     monto_inicial: Decimal = Field(ge=0, default=Decimal("0"))
     notas: str = ""
+    #: Sobre qué mostrador. Obligatorio en este producto: acá siempre se está
+    #: parado en una sucursal, y el arqueo del cierre es el de ESE cajón.
+    caja_id: int
+
+
+class EgresoEntrada(BaseModel):
+    monto: Decimal = Field(gt=0)
+    #: De la lista de `servicios/caja.MOTIVOS_DE_EGRESO`. Cerrada a propósito.
+    motivo: str
+    detalle: str = ""
+    medio_pago: str
 
 
 class CierreEntrada(BaseModel):
@@ -40,6 +51,10 @@ class CobroEntrada(BaseModel):
 class TurnoSalida(BaseModel):
     id: int
     usuario_id: int
+    #: El mostrador sobre el que se abrió. `null` en los turnos anteriores al
+    #: 2026-08-28, que nacieron sin caja y quedaron en la de por defecto.
+    caja_id: int | None = None
+    caja_nombre: str = ""
     apertura: str
     cierre: str | None = None
     monto_inicial: float
@@ -63,8 +78,10 @@ class CierreSalida(TurnoSalida):
 
 
 def _a_salida(turno: dict) -> TurnoSalida:
+    caja = servicio.caja_de(turno["caja_id"]) if turno.get("caja_id") else None
     return TurnoSalida(
         id=turno["id"], usuario_id=turno["usuario_id"], apertura=str(turno["apertura"]),
+        caja_id=turno.get("caja_id"), caja_nombre=(caja or {}).get("nombre", ""),
         cierre=str(turno["cierre"]) if turno.get("cierre") else None,
         monto_inicial=float(turno["monto_inicial"]),
         monto_declarado_cierre=(
@@ -84,9 +101,21 @@ def abrir(
     datos: AperturaEntrada,
     usuario: dict = Depends(require_staff),
 ):
-    """Abre la caja de quien lo pide. **El mostrador abre su propia caja.**"""
+    """Abre la caja de quien lo pide, **sobre un mostrador**.
+
+    El mostrador abre su propia caja: el turno es de la persona. Lo que la caja
+    agrega es **dónde** — sin eso, dos personas en dos sedes distintas arquean
+    contra el mismo montón.
+    """
+    caja = servicio.caja_de(datos.caja_id)
+    if caja is None:
+        raise HTTPException(404, "no existe esa caja")
+    if not caja.get("activo", 1):
+        raise HTTPException(422, "esa caja está dada de baja")
     try:
-        return _a_salida(servicio.abrir_turno(usuario, datos.monto_inicial, datos.notas))
+        return _a_salida(servicio.abrir_turno(
+            usuario, datos.monto_inicial, datos.notas, caja_id=datos.caja_id,
+        ))
     except servicio.TurnoYaAbierto as e:
         raise HTTPException(409, str(e)) from e
 
@@ -136,6 +165,49 @@ def cobrar(datos: CobroEntrada, usuario: dict = Depends(require_staff)):
         raise HTTPException(409, str(e)) from e
     except servicio.MedioDePagoInvalido as e:
         raise HTTPException(422, str(e)) from e
+
+
+@router.get("/motivos-de-egreso")
+def motivos_de_egreso(_: object = Depends(require_staff)) -> list[str]:
+    """Por qué puede salir plata del cajón. Lista cerrada: un motivo libre
+    convierte el arqueo en algo que no se puede sumar por categoría."""
+    return list(servicio.MOTIVOS_DE_EGRESO)
+
+
+@router.post("/egresos")
+def registrar_egreso(datos: EgresoEntrada, usuario: dict = Depends(require_staff)):
+    """Plata que **sale** del cajón. Devuelve el resumen al momento.
+
+    🔴 **Sin esto el arqueo sólo podía subir.** El resumen del motor ya netea los
+    egresos y este producto no tenía forma de registrar uno: sacar plata dejaba
+    el cierre con un faltante sin explicación, indistinguible de un error de
+    conteo.
+    """
+    try:
+        return servicio.registrar_egreso(
+            usuario, datos.monto, datos.motivo, datos.detalle, datos.medio_pago,
+        )
+    except servicio.SinTurnoAbierto as e:
+        raise HTTPException(409, str(e)) from e
+    except servicio.MotivoInvalido as e:
+        raise HTTPException(422, str(e)) from e
+    except servicio.MedioDePagoInvalido as e:
+        raise HTTPException(422, str(e)) from e
+
+
+@router.delete("/movimientos/{movimiento_id}")
+def anular_movimiento(movimiento_id: int, usuario: dict = Depends(require_staff)):
+    """Anula un movimiento **del turno abierto de quien lo pide**.
+
+    Es el caso del monto tipeado mal hace treinta segundos. Un arqueo ya cerrado
+    no se toca: esa diferencia la firmó alguien.
+    """
+    try:
+        return servicio.anular_movimiento(usuario, movimiento_id)
+    except servicio.SinTurnoAbierto as e:
+        raise HTTPException(409, str(e)) from e
+    except servicio.MovimientoAjeno as e:
+        raise HTTPException(404, str(e)) from e
 
 
 @router.post("/turnos/{turno_id}/cerrar", response_model=CierreSalida)
