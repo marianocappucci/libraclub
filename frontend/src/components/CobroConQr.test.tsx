@@ -210,3 +210,85 @@ describe('el cobro', () => {
     expect(screen.queryByText(/factura solo al acreditarse/)).toBeNull()
   })
 })
+
+describe('la campanita del cobro acreditado', () => {
+  // 📋 Es lo que hace [[contalibra]], que el humano probó y da por bueno: en un
+  // mostrador el operador **escucha** que el pago entró, sin tener que mirar la
+  // pantalla mientras atiende al que sigue.
+  //
+  // 🔴 jsdom no trae `AudioContext`, así que sin este doble el código toma la
+  // rama del `catch` y no suena nada — y un test que no lo stubea pasa en verde
+  // sobre un componente que perdió la campanita.
+  let creados: number
+  let osciladores: number
+
+  function stubearAudio() {
+    creados = 0
+    osciladores = 0
+    class AudioFalso {
+      state = 'running'
+      currentTime = 0
+      destination = {}
+      constructor() { creados += 1 }
+      resume() {}
+      createOscillator() {
+        osciladores += 1
+        return {
+          type: '', frequency: { value: 0 },
+          connect: () => ({ connect: () => {} }),
+          start: () => {}, stop: () => {},
+        }
+      }
+      createGain() {
+        return {
+          gain: {
+            setValueAtTime: () => {},
+            exponentialRampToValueAtTime: () => {},
+          },
+          connect: () => ({ connect: () => {} }),
+        }
+      }
+    }
+    vi.stubGlobal('AudioContext', AudioFalso)
+  }
+
+  it('🔴 el AudioContext se abre con el CLICK, no al acreditarse', async () => {
+    // 🔑 **Es el detalle que hace que no suene nunca, y en silencio.** Los
+    // navegadores bloquean el audio que no nace de un gesto del usuario, y la
+    // acreditación llega desde un `setInterval` — que no cuenta como gesto.
+    // Crearlo en el lugar obvio, cuando suena, es exactamente lo que lo rompe.
+    stubearAudio()
+    montar('confirmada')
+    const boton = await screen.findByRole('button', { name: /Cobrar con QR/ })
+    expect(creados).toBe(0)   // el control: antes del click no se abrió nada
+
+    await userEvent.click(boton)
+    await waitFor(() => expect(creados).toBe(1))
+    // Y todavía no sonó: sólo se abrió el contexto.
+    expect(osciladores).toBe(0)
+  })
+
+  it('🔴 al acreditarse suena, con sus dos notas', async () => {
+    stubearAudio()
+    montar('confirmada')
+    await userEvent.click(await screen.findByRole('button', { name: /Cobrar con QR/ }))
+    await screen.findByText(/Pedile al cliente que lo escanee/i)
+
+    config.resultado = 'aprobado'
+    await screen.findByText(/Cobrado por QR/i, {}, { timeout: 5000 })
+    // Dos osciladores: mi6 y la6. Uno solo sería media campanita.
+    expect(osciladores).toBe(2)
+  })
+
+  it('🔑 y si el navegador no tiene audio, el cobro igual funciona', async () => {
+    // El control de que la campanita es un adorno del cobro y no una condición:
+    // sin `AudioContext` ---jsdom puro, o un navegador viejo--- el circuito
+    // tiene que llegar a «Cobrado» lo mismo.
+    vi.stubGlobal('AudioContext', undefined)
+    montar('confirmada')
+    await userEvent.click(await screen.findByRole('button', { name: /Cobrar con QR/ }))
+    config.resultado = 'aprobado'
+    expect(await screen.findByText(/Cobrado por QR/i, {}, { timeout: 5000 }))
+      .toBeInTheDocument()
+  })
+})
