@@ -617,3 +617,74 @@ def test_dos_cobros_fraccionados_bajan_el_pendiente_una_vez_cada_uno(
     conceptos = [c["concepto"] for c in segundo.json()["cobros"]]
     assert len(conceptos) == 2, "el segundo cobro no se registro"
     assert len(set(conceptos)) == 2, "los dos cobros parciales no se distinguen"
+
+
+# -- Lo que este producto le pide al MOTOR ---------------------------------
+
+
+def test_el_motor_rellena_la_caja_de_un_turno_viejo(
+    api, base_de_libracore, abrir_caja, sucursal,
+):
+    """El guard del pin de LibraCore, medido sobre el motor INSTALADO.
+
+    🔴 **Un pin no se verifica leyendo el pin.** Que `pyproject.toml` diga
+    `@v1.57.1` prueba lo que se escribio, no lo que la instancia va a correr: el
+    venv puede estar atras y una bajada de version en un merge no rompe nada
+    visible. Lo unico que ata este producto a la conducta que necesita es
+    ejercitar el motor.
+
+    Lo que se mide es el relleno de `caja_id` de **v1.57.1**. LibraClub lo
+    necesita porque su pantalla de Caja muestra el mostrador del turno: sin
+    relleno, los turnos anteriores al 2026-08-28 salen con *"sin caja
+    asignada"*, que es lo que el humano reporto ese dia.
+
+    ⚠️ **Va con el arnes de este archivo y no con una conexion propia.** La
+    primera version armaba un SQLite a mano y llamaba a `init_core_schema`
+    encima: pasaba local y **fallaba en CI** con `no such table: pg_constraint`,
+    porque `init_core_schema` mira la configuracion del motor ---que en la suite
+    es PostgreSQL--- y no el tipo de la conexion que recibe. El test verde local
+    corria sobre una premisa que la suite no tiene.
+    """
+    from libracore.db import core as libracore_core
+    from libracore.db.schema import init_core_schema
+
+    # Abrir la caja espeja al usuario en la base del motor. Sin eso 
+    # esta vacia y el INSERT de abajo muere por la FK --- que es un error sobre
+    # el arnes, no sobre lo que se esta midiendo.
+    abrir_caja(api, sucursal)
+
+    conexion = libracore_core.get_connection()
+    try:
+        # El usuario sale de la tabla y no se hardcodea en 1:  lleva
+        # FK a , y el id del admin espejado depende de en que orden
+        # corrio la siembra. Con el 1 fijo, el test muere con un
+        # ForeignKeyViolation que no habla de lo que se esta midiendo.
+        usuario_id = conexion.execute(
+            "SELECT id FROM usuarios ORDER BY id LIMIT 1"
+        ).fetchone()[0]
+        conexion.execute(
+            "INSERT INTO turnos_caja (usuario_id, apertura, monto_inicial, estado,"
+            f" caja_id) VALUES ({usuario_id}, '2026-08-21 22:16:21', 1000, 'abierto', NULL)"
+        )
+        conexion.commit()
+        fila = conexion.execute(
+            "SELECT id FROM turnos_caja WHERE caja_id IS NULL ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        # El control: **antes** esta en NULL. Sin esto, un INSERT que ya trajera
+        # la caja haria pasar el test sin que el motor rellene nada.
+        assert fila is not None, "el control: la fila tiene que arrancar sin caja"
+        turno_id = fila[0]
+
+        init_core_schema(conexion)
+        conexion.commit()
+
+        caja_id = conexion.execute(
+            f"SELECT caja_id FROM turnos_caja WHERE id={turno_id}"
+        ).fetchone()[0]
+    finally:
+        conexion.close()
+
+    assert caja_id is not None, (
+        "el motor instalado no rellena `caja_id`: el pin de libracore quedo "
+        "atras de v1.57.1, y la Caja va a mostrar «sin caja asignada»"
+    )
