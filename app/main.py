@@ -47,6 +47,7 @@ from app.routers import cuenta_corriente as cuenta_corriente_router
 from app.routers import facturacion as facturacion_router
 from app.routers import facturas as facturas_router
 from app.routers import mercadopago as mercadopago_router
+from app.routers import mp_bandeja as mp_bandeja_router
 from app.routers import portal as portal_router
 from app.routers import resumen as resumen_router
 
@@ -294,6 +295,18 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # va la plata del complejo. El mostrador *usa* el QR sin poder leer esto:
     # `GET /api/reservas/mp/estado` le dice si está configurado, y nada más.
     app.include_router(mercadopago_router.router, dependencies=[Depends(require_admin)])
+
+    # La bandeja de MercadoPago: conciliar lo que entró y facturarlo. Es la
+    # del motor, con el reparto por `external_reference` de este producto —
+    # ver `routers/mp_bandeja.py`.
+    #
+    # 🔑 Admin, y con `exigir_base`: la bandeja vive en la base de LibraCore,
+    # así que un complejo sin facturación configurada tiene que recibir el
+    # 503 que nombra la variable y no un error de conexión de psycopg.
+    app.include_router(
+        mp_bandeja_router.router,
+        dependencies=[Depends(require_admin), Depends(exigir_base)],
+    )
 
     # La caja por turno. Sin `dependencies` acá: cada endpoint declara su rol —
     # el mostrador abre y cobra en su propia caja, el historial es de admin, y

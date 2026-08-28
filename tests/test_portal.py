@@ -450,8 +450,9 @@ def test_la_firma_invalida_se_rechaza():
     from app.servicios.pagos import firma_valida
 
     assert not firma_valida(
-        cuerpo=b"{}", x_signature="ts=1,v1=deadbeef", x_request_id="r1",
-        payment_id="123", secreto="el-secreto")
+        x_signature="ts=1,v1=deadbeef", x_request_id="r1",
+        payment_id="123", secreto="el-secreto",
+    )
 
 
 def test_la_firma_valida_se_acepta():
@@ -467,8 +468,7 @@ def test_la_firma_valida_se_acepta():
         secreto.encode(), f"id:{pid};request-id:{rid};ts:{ts}".encode(), hashlib.sha256
     ).hexdigest()
 
-    assert firma_valida(
-        cuerpo=b"{}", x_signature=f"ts={ts},v1={esperado}", x_request_id=rid,
+    assert firma_valida( x_signature=f"ts={ts},v1={esperado}", x_request_id=rid,
         payment_id=pid, secreto=secreto)
 
 
@@ -490,8 +490,9 @@ def test_sin_secreto_configurado_ninguna_firma_es_valida():
     ).hexdigest()
 
     assert not firma_valida(
-        cuerpo=b"{}", x_signature=f"ts={ts},v1={con_clave_vacia}",
-        x_request_id=rid, payment_id=pid, secreto="")
+        x_signature=f"ts={ts},v1={con_clave_vacia}",
+        x_request_id=rid, payment_id=pid, secreto="",
+    )
 
 
 def test_el_webhook_sin_secreto_no_confirma_nada(api, sesion, cancha, tarifa_base, abierto):

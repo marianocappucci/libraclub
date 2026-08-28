@@ -18,11 +18,12 @@ El circuito completo:
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from libracore import config_manager, mp_api
+from libracore import config_manager, mp_api, mp_sync
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
@@ -30,10 +31,13 @@ from app.db import obtener_sesion
 from app.models.maestros import Cancha, CuentaDeJugador
 from app.models.reservas import PagoDeReserva, Reserva
 from app.portal_sesion import borrar_cookie, crear_cookie, cuenta_actual, exigir_jugador
+from app.routers.mp_bandeja import REFERENCIAS_PROPIAS
 from app.servicios import pagos as servicio_pagos
 from app.servicios import partidos as servicio_partidos
 from app.servicios import portal as servicio
 from app.tiempo import TZ, hoy
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/portal", tags=["portal público"])
 
@@ -408,7 +412,6 @@ async def webhook(request: Request, sesion: Session = Depends(obtener_sesion)):
         return {"ok": False, "motivo": "webhook sin secreto configurado"}
 
     if not servicio_pagos.firma_valida(
-        cuerpo=cuerpo,
         x_signature=request.headers.get("x-signature", ""),
         x_request_id=request.headers.get("x-request-id", ""),
         payment_id=payment_id,
@@ -430,7 +433,34 @@ async def webhook(request: Request, sesion: Session = Depends(obtener_sesion)):
 
     pago = servicio_pagos.por_referencia(sesion, referencia)
     if pago is None:
-        # Un pago de otra instancia, o una prueba. No es nuestro.
+        # 🔑 **Un cobro que no salió de un turno.** Hasta el 2026-08-27 esto
+        # contestaba 200 y no dejaba rastro: una transferencia al complejo o un
+        # pago suelto **se perdían**. Ahora entran a la bandeja de conciliación.
+        #
+        # El depósito no se replica a mano: se llama a la MISMA función pública
+        # que usan el botón *Sincronizar* y el cron nocturno. Rearmar acá los
+        # datos del pagador —que el motor ya resuelve— es cómo dos copias
+        # empiezan a divergir. `ingerir` es idempotente: si el pago ya estaba, no
+        # lo duplica.
+        if not referencia.startswith(servicio_pagos.PREFIJO_DE_REFERENCIA):
+            try:
+                nuevos = await mp_sync.ingerir(
+                    config, dias=1, referencias_a_omitir=REFERENCIAS_PROPIAS,
+                )
+            except Exception:
+                # 🔴 200 igual, y a propósito: el cobro **ya está hecho** del
+                # lado de MercadoPago. Un error haría que MP reintente durante
+                # días por algo que el cron nocturno va a traer solo.
+                logger.exception(
+                    "No se pudo llevar a la bandeja el pago %s (referencia %r)",
+                    payment_id, referencia,
+                )
+                return {"ok": True, "motivo": "no se pudo conciliar, queda para el cron"}
+            return {"ok": True, "motivo": f"a la bandeja ({len(nuevos)} nuevos)"}
+
+        # Con nuestro prefijo pero sin pago registrado: otra instancia del
+        # producto sobre la misma cuenta, o una prueba. No es nuestro, y a la
+        # bandeja tampoco va — ahí lo resolvió alguien más.
         return {"ok": True, "motivo": "referencia desconocida"}
 
     if estado_mp == "approved":
