@@ -82,6 +82,28 @@ export function diaISO(valor: string | Date | null | undefined): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d)
 }
 
+/** Cuántos días **de calendario local** pasaron entre dos instantes.
+ *
+ * 🔑 **Se comparan días, no milisegundos.** Un turno abierto ayer a las 23:00 y
+ * mirado hoy a las 08:00 lleva **un día**, aunque hayan pasado nueve horas: lo
+ * que importa para una caja es que cambió la jornada, no cuánto tiempo corrió.
+ * Dividir la diferencia por 86.400.000 diría «0» y dejaría pasar exactamente el
+ * caso que esto viene a detectar.
+ *
+ * El anclaje al mediodía UTC evita que el cambio de zona corra el día mientras
+ * se restan — mismo truco que usa `lunesDeLaSemana`.
+ */
+export function diasDeDiferencia(
+  desde: string | Date | null | undefined,
+  hasta: string | Date = new Date(),
+): number {
+  const a = diaISO(desde)
+  const b = diaISO(hasta)
+  if (!a || !b) return 0
+  const ms = Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)
+  return Math.round(ms / 86_400_000)
+}
+
 /** El lunes de la semana de `valor`, en ISO. La agenda arranca ahí. */
 export function lunesDeLaSemana(valor: string | Date = new Date()): string {
   const iso = diaISO(valor)

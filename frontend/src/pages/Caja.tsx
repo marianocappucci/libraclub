@@ -32,7 +32,7 @@ import type {
   CajaDeMostrador, LineaDeConsumo, QrDisponible, ResumenDeCaja, TurnoDeCaja,
   TurnoPorCobrar,
 } from '@/lib/api'
-import { hora, pesos } from '@/lib/fechas'
+import { diasDeDiferencia, fecha, hora, pesos } from '@/lib/fechas'
 import { AvisoDeError } from '@/components/listado'
 import { DialogoDeConsumo } from '@/components/DialogoDeConsumo'
 import { SeccionDeCobroConQr } from '@/components/CobroConQr'
@@ -232,6 +232,18 @@ function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
 
   const esperado = turno.monto_inicial + (resumen?.efectivo_ventas ?? 0)
 
+  // 🔴 **Un turno de caja es de una jornada, y esto es lo único que lo sostiene.**
+  // No hay nada que cierre los turnos viejos: el 2026-08-28 había dos abiertos
+  // desde el 21, siete días, y el «esperado en el cajón» era la suma de una
+  // semana — un arqueo que abarca siete días no mide nada, y el faltante que
+  // aparezca no se puede atribuir a ningún día.
+  //
+  // Se compara el **día local** y no el tiempo transcurrido: uno abierto ayer a
+  // las 23:00 y mirado hoy a las 08:00 lleva un día, aunque hayan pasado nueve
+  // horas. Lo que cambió es la jornada.
+  const diasAbierto = diasDeDiferencia(turno.apertura)
+  const deOtroDia = diasAbierto > 0
+
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <div className="space-y-4 rounded-lg border bg-card p-4">
@@ -239,9 +251,31 @@ function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
           <Wallet className="size-4" /> Cobrar
         </div>
 
-        <PuntoDeVenta medios={medios} onCambio={onCambio} onError={onError} />
+        {deOtroDia ? (
+          // 🔴 **El freno está acá y no en la API**, a propósito. Bloquearlo del
+          // lado del backend rompería lo que llega **solo**: la acreditación de
+          // un pago por QR y el consumo de buffet que se cobra con el turno
+          // entran por `registrar_ingreso` sin que nadie apriete un botón, y
+          // rechazarlos perdería plata que ya entró. Esto es disciplina en el
+          // punto de uso, no un invariante — y se dice, para no confundir una
+          // cosa con la otra.
+          <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+            <p className="font-medium">
+              Cerrá la caja del {fecha(turno.apertura)} antes de seguir cobrando.
+            </p>
+            <p className="text-muted-foreground">
+              Está abierta hace {diasAbierto === 1 ? 'un día' : `${diasAbierto} días`}, así
+              que el arqueo de la derecha suma todo ese tiempo y no la jornada.
+              Contá el efectivo, cerrala, y abrí una nueva.
+            </p>
+          </div>
+        ) : (
+          <>
+            <PuntoDeVenta medios={medios} onCambio={onCambio} onError={onError} />
 
-        <Egreso medios={medios} onHecho={onCambio} onError={onError} />
+            <Egreso medios={medios} onHecho={onCambio} onError={onError} />
+          </>
+        )}
       </div>
 
       <div className="space-y-3 rounded-lg border bg-card p-4">
@@ -254,6 +288,14 @@ function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
             {turno.caja_nombre || 'sin caja asignada'}
           </span>
         </div>
+        {deOtroDia && (
+          // El mismo dato de este lado: acá está el arqueo, y es donde se ve el
+          // número que la antigüedad explica.
+          <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-sm">
+            Abierta desde el <strong>{fecha(turno.apertura)}</strong>, hace{' '}
+            {diasAbierto === 1 ? 'un día' : `${diasAbierto} días`}.
+          </p>
+        )}
         <div className="space-y-1 text-sm">
           <div className="flex justify-between">
             <span className="text-muted-foreground">Efectivo inicial</span>
