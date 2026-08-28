@@ -1,18 +1,28 @@
 /**
- * La pantalla de Caja: el turno sobre un mostrador, los movimientos a la vista,
- * el egreso y la anulación.
+ * La pantalla de Caja: el turno sobre un mostrador, las cuentas de cada cancha,
+ * el egreso.
  *
  * 🔴 **Lo que esto arregla no es cosmético.** Antes: el turno no sabía en qué
- * sede estaba, el arqueo sólo podía subir —no había forma de registrar plata que
- * sale— y `movimientos` **llegaba de la API y la pantalla lo tiraba**, así que
- * un monto mal tipeado sólo aparecía como una diferencia al cerrar, cuando ya no
- * se sabía cuál era.
+ * sede estaba y el arqueo sólo podía subir —no había forma de registrar plata
+ * que sale—.
+ *
+ * 🔑 **El detalle acumulado ya no está acá**, y sus tests tampoco: viven en
+ * `MovimientosDeCaja.test.tsx`, con la pantalla. Lo que se prueba de este lado
+ * es la unidad de trabajo del mostrador — ir a una cancha, en un turno, a nombre
+ * de alguien, y cerrar esa cuenta.
  */
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Caja } from './Caja'
+
+// La pantalla linkea a `/caja/movimientos`: sin router, `<Link>` tumba el árbol
+// entero con un error de contexto que no dice nada de lo que se está probando.
+function montar() {
+  return render(<MemoryRouter><Caja /></MemoryRouter>)
+}
 
 vi.mock('@/context/SucursalContext', () => ({
   useSucursal: () => ({ actual: 1, sucursales: [], elegir: vi.fn(), cargando: false }),
@@ -28,10 +38,31 @@ const MOVIMIENTOS = [
   { id: 12, fecha: '2026-08-28', tipo: 'egreso' as const, concepto: 'Retiro a banco', monto: 5000, medio_pago: 'efectivo' },
 ]
 
+/** Dos canchas con cuenta abierta. La segunda ya tiene una seña.
+ *
+ * 🔑 Los `pendiente` son **distintos entre sí y distintos del total**: con dos
+ * filas del mismo importe, una pantalla que muestre siempre la primera pasaría
+ * igual, y con `pendiente === total` no se vería si el cobrado se descuenta.
+ */
+const CUENTAS = [
+  {
+    reserva_id: 41, cancha_id: 1, cancha: 'Cancha 1', deporte: 'padel',
+    comienza_at: '2026-08-28T20:00:00-03:00', termina_at: '2026-08-28T21:30:00-03:00',
+    cliente: 'Juan Pérez', total: 14000, cobrado: 0, pendiente: 14000,
+  },
+  {
+    reserva_id: 42, cancha_id: 2, cancha: 'Cancha 2', deporte: 'padel',
+    comienza_at: '2026-08-28T21:30:00-03:00', termina_at: '2026-08-28T23:00:00-03:00',
+    cliente: 'Ana Gómez', total: 18000, cobrado: 6000, pendiente: 12000,
+  },
+]
+
 const estado = {
   hayTurno: true,
   mostradores: MOSTRADORES,
   movimientos: MOVIMIENTOS,
+  cuentas: CUENTAS,
+  consumos: [] as { descripcion: string; cantidad: number; precio_unitario: number; importe: number }[],
 }
 
 const llamadas: { metodo: string; ruta: string; cuerpo: unknown }[] = []
@@ -56,6 +87,8 @@ beforeEach(() => {
   estado.hayTurno = true
   estado.mostradores = MOSTRADORES
   estado.movimientos = MOVIMIENTOS
+  estado.cuentas = CUENTAS
+  estado.consumos = []
   vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
     const u = String(url)
     let cuerpo: unknown = null
@@ -69,6 +102,12 @@ beforeEach(() => {
       ]))
     }
     if (u.includes('/api/cajas')) return Promise.resolve(json(estado.mostradores))
+    if (u.includes('/api/reservas/agenda/por-cobrar')) {
+      return Promise.resolve(json(estado.cuentas))
+    }
+    if (u.includes('/consumos')) {
+      return Promise.resolve(json({ total: 0, lineas: estado.consumos }))
+    }
     if (u.includes('/api/caja/motivos-de-egreso')) {
       return Promise.resolve(json(['Pago a proveedor', 'Retiro a banco']))
     }
@@ -92,7 +131,7 @@ describe('abrir el turno sobre un mostrador', () => {
   beforeEach(() => { estado.hayTurno = false })
 
   it('🔑 ofrece los mostradores de la sucursal', async () => {
-    render(<Caja />)
+    montar()
     const selector = await screen.findByLabelText('Caja')
     expect(within(selector).getAllByRole('option').map((o) => o.textContent))
       .toEqual(['Mostrador', 'Buffet'])
@@ -100,7 +139,7 @@ describe('abrir el turno sobre un mostrador', () => {
 
   it('🔴 manda la caja elegida al abrir', async () => {
     const user = userEvent.setup()
-    render(<Caja />)
+    montar()
     await user.selectOptions(await screen.findByLabelText('Caja'), '6')
     await user.click(screen.getByRole('button', { name: /Abrir caja/ }))
 
@@ -115,7 +154,7 @@ describe('abrir el turno sobre un mostrador', () => {
     // El mostrador no puede resolverlo —crear una caja es de admin—, así que un
     // formulario que no funciona sin decir por qué manda a adivinar.
     estado.mostradores = []
-    render(<Caja />)
+    montar()
     expect(await screen.findByText(/no tiene ninguna caja cargada/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Abrir caja/ })).toBeDisabled()
   })
@@ -123,47 +162,203 @@ describe('abrir el turno sobre un mostrador', () => {
 
 describe('el turno abierto', () => {
   it('🔑 dice sobre qué mostrador está', async () => {
-    render(<Caja />)
+    montar()
     expect(await screen.findByText('Mostrador')).toBeInTheDocument()
   })
 
-  it('🔴 muestra los movimientos, que antes llegaban y se tiraban', async () => {
-    render(<Caja />)
-    expect(await screen.findByText('Turno cancha 1')).toBeInTheDocument()
-    expect(screen.getByText('Retiro a banco')).toBeInTheDocument()
+})
+
+describe('la cuenta de cada cancha', () => {
+  it('🔑 lista las canchas con cuenta abierta, con su hora y a nombre de quién', async () => {
+    // Es lo que el humano pidió: *"ir a una cancha determinada en un turno
+    // determinado a nombre de tal persona"*. Las tres cosas tienen que estar en
+    // la fila, o hay que abrir algo para saber cuál es cuál.
+    montar()
+    const fila = await screen.findByRole('button', { name: /Cancha 2/ })
+    expect(fila.textContent).toMatch(/21:30/)
+    expect(fila.textContent).toMatch(/Ana Gómez/)
   })
 
-  it('🔑 el egreso se muestra en negativo', async () => {
-    // Es lo que hace que la lista se pueda sumar de arriba abajo y dé el
-    // esperado: sin el signo, un retiro se lee como un cobro.
-    render(<Caja />)
-    const fila = (await screen.findByText('Retiro a banco')).closest('div')!.parentElement!
-    expect(fila.textContent).toMatch(/−/)
+  it('🔴 la fila muestra el PENDIENTE, no el total', async () => {
+    // La cancha 2 debe 18.000 y ya señó 6.000. Mostrar el total ahí es cobrarle
+    // dos veces la seña al que ya la pagó.
+    montar()
+    const fila = await screen.findByRole('button', { name: /Cancha 2/ })
+    expect(fila.textContent).toMatch(/12\.000/)
+    expect(fila.textContent).not.toMatch(/18\.000/)
   })
 
-  it('🔴 anular pega en el endpoint de ESE movimiento', async () => {
+  it('🔴 al elegir una cancha, el monto arranca en su pendiente', async () => {
+    // Y no en el de la otra: es el defecto que le cobra a uno lo que debe otro.
     const user = userEvent.setup()
-    render(<Caja />)
-    await screen.findByText('Turno cancha 1')
+    montar()
+    await user.click(await screen.findByRole('button', { name: /Cancha 2/ }))
+    expect((await screen.findByLabelText('Monto', { selector: '#monto-cuenta' }))).toHaveValue('12000')
+  })
 
-    // 🔑 Se anula el **segundo** de la lista, no el primero. Con el primero, un
-    // `anular(11)` hardcodeado pasaría igual — es lo que delató la mutación.
-    await user.click(screen.getByRole('button', { name: 'Anular Retiro a banco' }))
+  it('🔴 cobrar pega en el endpoint de ESA reserva', async () => {
+    const user = userEvent.setup()
+    montar()
+    // La **segunda** de la lista, no la primera: con la primera, un id
+    // hardcodeado pasaría igual.
+    await user.click(await screen.findByRole('button', { name: /Cancha 2/ }))
+    await user.click(await screen.findByRole('button', { name: /Cobrar y cerrar la cuenta/ }))
 
     await waitFor(() => {
-      expect(llamadas.some(
-        (l) => l.metodo === 'DELETE' && l.ruta.endsWith('/api/caja/movimientos/12'),
-      )).toBe(true)
+      const post = llamadas.find(
+        (l) => l.metodo === 'POST' && l.ruta.endsWith('/api/reservas/42/cobros'),
+      )
+      expect(post).toBeTruthy()
+      expect(post!.cuerpo).toMatchObject({ monto: '12000', medio_pago: 'efectivo' })
     })
-    // El control: no anuló el otro.
-    expect(llamadas.some((l) => l.ruta.endsWith('/api/caja/movimientos/11'))).toBe(false)
+    // El control: no le cobró a la otra cancha.
+    expect(llamadas.some((l) => l.ruta.endsWith('/api/reservas/41/cobros'))).toBe(false)
+  })
+
+  it('🔑 el detalle desglosa el buffet consumido en esa cancha', async () => {
+    // 🔴 Y el alquiler sale de restar: si el desglose no cerrara contra el
+    // total, el operador vería un número y cobraría otro.
+    estado.consumos = [
+      { descripcion: 'Gaseosa 500ml', cantidad: 2, precio_unitario: 1200, importe: 2400 },
+    ]
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: /Cancha 1/ }))
+
+    expect(await screen.findByText(/2× Gaseosa 500ml/)).toBeInTheDocument()
+    const panel = screen.getByText(/2× Gaseosa 500ml/).closest('div')!.parentElement!
+    // 14.000 de total menos 2.400 de buffet = 11.600 de alquiler.
+    expect(panel.textContent).toMatch(/11\.600/)
+  })
+
+  it('🔴 sin cuentas abiertas lo dice, en vez de un hueco', async () => {
+    estado.cuentas = []
+    montar()
+    expect(await screen.findByText(/No hay canchas con cuenta abierta/i)).toBeInTheDocument()
+  })
+})
+
+describe('la cuenta fraccionada', () => {
+  // El pedido del humano: un turno de cancha se cierra como una mesa de
+  // restaurante — *"se puede pagar solo la cancha y después cada uno paga
+  // individual lo que pidió"*.
+  //
+  // 🔴 Lo que se puede romper acá es plata: cobrar de más al que paga sólo la
+  // cancha, o dejar saldado lo que nadie pagó.
+  beforeEach(() => {
+    estado.consumos = [
+      { descripcion: 'Gaseosa 500ml', cantidad: 2, precio_unitario: 1200, importe: 2400 },
+      { descripcion: 'Cerveza', cantidad: 1, precio_unitario: 1600, importe: 1600 },
+    ]
+    // La cancha 1: 14.000 de total, sin nada cobrado. Alquiler = 14.000 − 4.000.
+    estado.cuentas = [{ ...CUENTAS[0], total: 14000, cobrado: 0, pendiente: 14000 }]
+  })
+
+  async function abrirLaCuenta() {
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: /Cancha 1/ }))
+    await screen.findByRole('checkbox', { name: /Gaseosa/ })
+    return user
+  }
+
+  it('🔴 destildar el buffet deja el monto en el alquiler solo', async () => {
+    const user = await abrirLaCuenta()
+    await user.click(screen.getByRole('checkbox', { name: /Gaseosa/ }))
+    await user.click(screen.getByRole('checkbox', { name: /Cerveza/ }))
+    // 14.000 − 2.400 − 1.600 = 10.000, que es la cancha sola.
+    expect(screen.getByLabelText('Monto', { selector: '#monto-cuenta' })).toHaveValue('10000')
+  })
+
+  it('🔴 y lo que viaja es ESE monto, con el detalle de qué se pagó', async () => {
+    // Sin `detalle`, tres cobros parciales del mismo turno quedan con el mismo
+    // texto en el arqueo y nadie puede reconstruir quién pagó qué.
+    const user = await abrirLaCuenta()
+    await user.click(screen.getByRole('checkbox', { name: /Gaseosa/ }))
+    await user.click(screen.getByRole('checkbox', { name: /Cerveza/ }))
+    await user.click(screen.getByRole('button', { name: /Cobrar lo seleccionado/ }))
+
+    await waitFor(() => {
+      const post = llamadas.find(
+        (l) => l.metodo === 'POST' && l.ruta.endsWith('/api/reservas/41/cobros'),
+      )
+      expect(post).toBeTruthy()
+      expect(post!.cuerpo).toMatchObject({ monto: '10000' })
+      expect((post!.cuerpo as { detalle: string }).detalle).toMatch(/Alquiler/)
+      // El control: el detalle NO nombra lo que quedó sin cobrar.
+      expect((post!.cuerpo as { detalle: string }).detalle).not.toMatch(/Gaseosa/)
+    })
+  })
+
+  it('🔑 al revés: cada uno paga sólo lo suyo', async () => {
+    const user = await abrirLaCuenta()
+    await user.click(screen.getByRole('checkbox', { name: /Alquiler/ }))
+    await user.click(screen.getByRole('checkbox', { name: /Cerveza/ }))
+    // Queda la gaseosa sola.
+    expect(screen.getByLabelText('Monto', { selector: '#monto-cuenta' })).toHaveValue('2400')
+  })
+
+  it('🔴 con todo tildado NO manda detalle, y cobra el pendiente', async () => {
+    // El control del caso normal. Si mandara detalle siempre, el concepto de un
+    // cobro entero quedaría con la cuenta repetida adentro.
+    const user = await abrirLaCuenta()
+    await user.click(screen.getByRole('button', { name: /Cobrar y cerrar la cuenta/ }))
+
+    await waitFor(() => {
+      const post = llamadas.find(
+        (l) => l.metodo === 'POST' && l.ruta.endsWith('/api/reservas/41/cobros'),
+      )
+      expect(post).toBeTruthy()
+      expect(post!.cuerpo).toMatchObject({ monto: '14000', detalle: '' })
+    })
+  })
+
+  it('🔴 cambiar de cancha suelta las tildes de la anterior', async () => {
+    // Es el defecto que le cobra a una cancha el fraccionamiento de otra: las
+    // líneas tildadas son de la cuenta que se estaba mirando.
+    estado.cuentas = [
+      { ...CUENTAS[0], total: 14000, cobrado: 0, pendiente: 14000 },
+      { ...CUENTAS[1] },
+    ]
+    const user = await abrirLaCuenta()
+    await user.click(screen.getByRole('checkbox', { name: /Gaseosa/ }))
+    expect(screen.getByLabelText('Monto', { selector: '#monto-cuenta' })).toHaveValue('11600')
+
+    await user.click(screen.getByRole('button', { name: /Cancha 2/ }))
+    // La 2 debe 12.000: el monto es el suyo, no lo que quedaba tildado en la 1.
+    await waitFor(() => {
+      expect(screen.getByLabelText('Monto', { selector: '#monto-cuenta' })).toHaveValue('12000')
+    })
+    expect(screen.getByRole('button', { name: /Cobrar y cerrar la cuenta/ })).toBeInTheDocument()
+  })
+})
+
+describe('el buffet, según de dónde se cargue', () => {
+  it('🔴 desde la cuenta de una cancha, el consumo viaja CON reserva_id', async () => {
+    // Con `reserva_id` el motor **no cobra**: le cuelga el consumo al turno y se
+    // cobra al cerrar la cuenta. Es el invariante que evita cobrar dos veces las
+    // mismas gaseosas.
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: /Cancha 2/ }))
+    await user.click(await screen.findByRole('button', { name: /Cargar buffet/ }))
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('🔑 «Venta suelta» dice que ahí SÍ se cobra', async () => {
+    // Las dos acciones abren el mismo diálogo y hacen cosas distintas con la
+    // plata. Si la pantalla no lo dice, la única forma de saberlo es el arqueo.
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: /^Venta suelta$/ }))
+    expect(await screen.findByText(/se cobra al confirmar/i)).toBeInTheDocument()
   })
 })
 
 describe('el egreso', () => {
   it('🔴 manda motivo, monto y medio', async () => {
     const user = userEvent.setup()
-    render(<Caja />)
+    montar()
     await user.click(await screen.findByRole('button', { name: /Registrar un egreso/ }))
 
     await user.selectOptions(await screen.findByLabelText('Motivo'), 'Retiro a banco')
@@ -183,7 +378,7 @@ describe('el egreso', () => {
     // Si divergieran, la pantalla ofrecería un motivo que el POST rechaza con
     // 422 — y el operador no tendría forma de saber cuál sí vale.
     const user = userEvent.setup()
-    render(<Caja />)
+    montar()
     await user.click(await screen.findByRole('button', { name: /Registrar un egreso/ }))
 
     const motivos = await screen.findByLabelText('Motivo')

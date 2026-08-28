@@ -6,7 +6,7 @@ El router valida, delega y traduce errores a códigos. Las reglas están en
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -193,6 +193,18 @@ class CobroDeTurnoEntrada(BaseModel):
     monto: Decimal = Field(gt=0)
     medio_pago: str
     referencia_externa: str = ""
+    #: Qué parte de la cuenta se está pagando: "sólo el alquiler", "2× Gaseosa".
+    #:
+    #: 🔑 **Es un agregado al concepto, no el concepto.** Quien arma el texto
+    #: sigue siendo el backend —dos pantallas escribiendo el suyo terminan con
+    #: dos formatos para el mismo hecho—; esto es el dato que la pantalla tiene
+    #: y el backend no: cuál de las líneas de la cuenta se está cobrando.
+    #:
+    #: 🔴 Sin esto el cobro fraccionado es indistinguible de una seña. Un turno
+    #: de 14.000 donde el dueño de la cancha paga 11.600 y cada jugador su
+    #: consumo deja tres movimientos con el mismo concepto y montos raros, y al
+    #: día siguiente nadie puede reconstruir qué pagó quién.
+    detalle: str = Field(default="", max_length=120)
 
 
 class CobroDeTurno(BaseModel):
@@ -289,6 +301,20 @@ def cobrar_turno(
     **No exige que el monto sea el pendiente**: una seña es un cobro parcial, y
     un vuelto mal contado es un problema del mostrador, no algo que la API tenga
     que impedir.
+
+    🔑 **Y esa misma libertad es la que permite fraccionar la cuenta.** Pedido
+    del humano el 2026-08-28: un turno de cancha se cierra como una mesa de
+    restaurante — *"se puede pagar solo la cancha y después cada uno paga
+    individual lo que pidió"*. Eso son N cobros parciales contra la misma
+    reserva, que es exactamente lo que esta ruta ya hacía para la seña. Lo único
+    que hizo falta agregar es `detalle`, para que los N movimientos no queden
+    con el mismo texto y montos sin explicación.
+
+    ⚠️ **Lo que NO hay es liquidación por línea.** El sistema sabe cuánto entró
+    contra la reserva, no qué línea quedó saldada: `detalle` es texto para el
+    arqueo, no un vínculo. Alcanza para el mostrador —el pendiente baja y se ve
+    quién pagó qué— y **no** alcanzaría para dividir automáticamente entre
+    jugadores. Si eso hace falta, es un modelo nuevo, no un campo más.
     """
     _exigir_base_de_caja()
     reserva = sesion.get(Reserva, reserva_id)
@@ -304,6 +330,10 @@ def cobrar_turno(
         f"Turno {a_local(reserva.comienza_at):%d-%m-%Y %H:%M}"
         f" — {cancha.nombre if cancha else 'cancha'}"
         f"{f' — {cliente.nombre}' if cliente else ''}"
+        # El detalle va al final y sólo si vino: es lo que distingue «pagó el
+        # alquiler» de «pagó sus consumos» cuando la cuenta se fracciona entre
+        # varios, que en una cancha con buffet es lo normal y no la excepción.
+        f"{f' ({datos.detalle.strip()})' if datos.detalle.strip() else ''}"
     )
     try:
         servicio_caja.registrar_ingreso(
@@ -686,6 +716,99 @@ def _con_zona(valor: datetime) -> datetime:
     reserva a las 17:00 y el operador ve un turno que nunca cargó.
     """
     return valor if valor.tzinfo is not None else valor.replace(tzinfo=TZ)
+
+
+class TurnoPorCobrar(BaseModel):
+    """Un turno con plata pendiente, como lo ve el mostrador."""
+
+    reserva_id: int
+    cancha_id: int
+    cancha: str
+    deporte: str
+    comienza_at: datetime
+    termina_at: datetime
+    cliente: str
+    total: float
+    cobrado: float
+    pendiente: float
+
+
+@router.get("/agenda/por-cobrar", response_model=list[TurnoPorCobrar])
+def por_cobrar(
+    sucursal_id: int,
+    limite: int = Query(default=60, ge=1, le=200),
+    sesion: Session = Depends(obtener_sesion),
+    _: object = Depends(require_staff),
+):
+    """Los turnos del día que todavía deben plata. Es el selector de la Caja.
+
+    🔑 **No se puede usar `/agenda/proximas` para esto**, aunque el nombre
+    invite: esa ruta filtra `comienza_at >= ahora`, y el turno que se cobra en el
+    mostrador es justamente el que **está terminando**. A las 21:00, el turno de
+    20:00 a 21:30 ya no es "próximo" — y es el que tiene al cliente parado del
+    otro lado del mostrador.
+
+    🔴 **La ventana es el día local, con las dos cotas.** La de abajo es obvia;
+    la de arriba **no es de comodidad**: el filtro por pendiente se aplica en
+    Python, después de traer las filas, así que un `LIMIT` sin cota superior se
+    llenaría con los turnos de la semana que viene —todos impagos, porque
+    todavía no se jugaron— y los de hoy quedarían afuera **sin que nada avise**.
+    Acotando el día, el `limite` deja de ser un recorte y pasa a ser una válvula.
+
+    Un turno impago de anteayer, entonces, no está acá — y no hace falta: el
+    detalle de la reserva linkea a la Caja con ese turno ya elegido, que es el
+    camino para cualquier reserva fuera de la ventana.
+    """
+    _exigir_base_de_caja()
+    hoy = a_local(ahora()).date()
+    desde = datetime.combine(hoy, time.min, tzinfo=TZ)
+    hasta = desde + timedelta(days=1)
+    filas = sesion.execute(
+        select(Reserva, Cancha, Cliente)
+        .join(Cancha, Reserva.cancha_id == Cancha.id)
+        .outerjoin(Cliente, Reserva.cliente_id == Cliente.id)
+        .where(
+            Cancha.sucursal_id == sucursal_id,
+            Reserva.estado.in_(ESTADOS_QUE_OCUPAN),
+            Reserva.comienza_at >= desde,
+            Reserva.comienza_at < hasta,
+        )
+        .order_by(Reserva.comienza_at)
+        .limit(limite)
+    ).all()
+
+    # 🔑 Los dos totales salen **por lote**. Pedirlos reserva por reserva abre y
+    # cierra una conexión a la base del motor por fila: con la grilla de un día
+    # completo son decenas por refresco de pantalla.
+    ids = [reserva.id for reserva, _cancha, _cliente in filas]
+    consumido = servicio_buffet.consumido_de_reservas(ids)
+    cobrado = servicio_caja.cobrado_de_reservas(ids)
+
+    salida = []
+    for reserva, cancha, cliente in filas:
+        # Mismo total que `_estado_de_cobro` y que el comprobante: alquiler más
+        # buffet. Si saliera de `reserva.precio` a secas, el mostrador diría que
+        # no falta nada sobre un turno con tres gaseosas sin cobrar.
+        total = Decimal(str(reserva.precio or 0)) + consumido.get(reserva.id, Decimal("0"))
+        entro = cobrado.get(reserva.id, Decimal("0"))
+        pendiente = max(Decimal("0"), total - entro)
+        if pendiente <= 0:
+            continue
+        salida.append(
+            TurnoPorCobrar(
+                reserva_id=reserva.id,
+                cancha_id=cancha.id,
+                cancha=cancha.nombre,
+                deporte=cancha.deporte.value,
+                comienza_at=reserva.comienza_at,
+                termina_at=reserva.termina_at,
+                cliente=(cliente.nombre if cliente else "") or reserva.motivo or "",
+                total=float(total),
+                cobrado=float(entro),
+                pendiente=float(pendiente),
+            )
+        )
+    return salida
 
 
 @router.get("/agenda/proximas", response_model=list[ReservaSalida])

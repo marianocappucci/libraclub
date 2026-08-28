@@ -3,6 +3,7 @@ import { Layout } from '@/components/Layout'
 import { Agenda } from '@/pages/Agenda'
 import { Buffet } from '@/pages/Buffet'
 import { Caja } from '@/pages/Caja'
+import { MovimientosDeCaja } from '@/pages/MovimientosDeCaja'
 import { CuentaCorriente } from '@/pages/CuentaCorriente'
 import { CuentaCorrienteDetalle } from '@/pages/CuentaCorrienteDetalle'
 import { Horarios } from '@/pages/Horarios'
@@ -107,6 +108,7 @@ function Backoffice() {
           <Route path="/sucursales" element={<Sucursales />} />
           <Route path="/usuarios" element={<Usuarios />} />
           <Route path="/caja" element={<Caja />} />
+          <Route path="/caja/movimientos" element={<MovimientosDeCaja />} />
           <Route path="/cajas" element={<Cajas />} />
           <Route path="/buffet" element={<Buffet />} />
           <Route path="/cuenta-corriente" element={<CuentaCorriente />} />

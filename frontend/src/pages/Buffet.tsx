@@ -9,14 +9,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-import { AlertTriangle, CupSoda, Plus, ShoppingCart } from 'lucide-react'
+import { AlertTriangle, CupSoda, Plus } from 'lucide-react'
 
 import { buffet as api } from '@/lib/api'
 import type { ProductoDeBuffet } from '@/lib/api'
 import { pesos } from '@/lib/fechas'
 import { useSucursal } from '@/context/SucursalContext'
 import { useAuth } from '@/context/AuthContext'
-import { DialogoDeConsumo } from '@/components/DialogoDeConsumo'
 import { FormularioDeProducto } from '@/components/FormularioDeProducto'
 import { AvisoDeError, filaInactiva } from '@/components/listado'
 import { Button } from '@/components/ui/button'
@@ -30,7 +29,6 @@ export function Buffet() {
   const [cargando, setCargando] = useState(true)
   const [editando, setEditando] = useState<ProductoDeBuffet | null>(null)
   const [abierto, setAbierto] = useState(false)
-  const [vendiendo, setVendiendo] = useState(false)
 
   const puedeEscribir = user?.role === 'admin'
 
@@ -156,10 +154,13 @@ export function Buffet() {
   return (
     <div className="space-y-3">
       <EncabezadoDePantalla titulo={<TituloPantalla icono={CupSoda}>Buffet</TituloPantalla>}>
-        <Button variant="outline" onClick={() => setVendiendo(true)}>
-          <ShoppingCart className="size-4" />
-          Vender
-        </Button>
+        {/* 🔴 **Acá no se vende.** El botón «Vender» estuvo hasta el
+            2026-08-28 y se retiró por pedido del humano: *"para cobrar un turno
+            o buffet de la cancha lo cobrás por caja pero algo de buffet solo va
+            por buffet, no es práctico, todo tiene que ir por el mismo lado"*.
+            La venta suelta se hace desde la Caja, que es la única pantalla
+            donde entra plata; ésta quedó para lo que de verdad es —cargar
+            productos y stock—, que es también por lo que vive en Maestros. */}
         {puedeEscribir && (
           <Button
             onClick={() => {
@@ -211,16 +212,6 @@ export function Buffet() {
         onCerrar={() => setAbierto(false)}
         onGuardado={() => {
           setAbierto(false)
-          recargar()
-        }}
-      />
-      <DialogoDeConsumo
-        abierto={vendiendo}
-        sucursalId={actual}
-        reservaId={null}
-        onCerrar={() => setVendiendo(false)}
-        onCargado={() => {
-          setVendiendo(false)
           recargar()
         }}
       />

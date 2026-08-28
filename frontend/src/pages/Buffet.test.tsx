@@ -1,5 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
@@ -115,56 +114,18 @@ describe('pantalla de buffet', () => {
     expect(screen.queryByText(/Hay que reponer/)).not.toBeInTheDocument()
   })
 
-  it('el carrito suma por precio de lista y manda medio de pago', async () => {
+  it('🔴 acá NO se vende: la venta suelta se hace desde la Caja', async () => {
+    // Pedido del humano el 2026-08-28: *"todo tiene que ir por el mismo lado"*.
+    // Esta pantalla es de carga de productos y stock; el botón «Vender» que
+    // estaba acá abría el mismo diálogo que ahora vive en la Caja, y tener dos
+    // puertas para lo mismo es lo que dejaba el buffet suelto fuera del
+    // mostrador.
+    //
+    // 🔑 Los tres tests que entraban por ese botón —el carrito, el stock a la
+    // vista y el medio de pago— **no se borraron**: están en
+    // `DialogoDeConsumo.test.tsx`, montando el diálogo directo.
     render(<Buffet />)
-    await userEvent.click(await screen.findByRole('button', { name: /Vender/ }))
-
-    const dialogo = await screen.findByRole('dialog')
-    // Dos gaseosas y un agua: 1200×2 + 900 = 3300.
-    const gaseosa = within(dialogo).getByText('Gaseosa 500ml')
-    await userEvent.click(gaseosa)
-    await userEvent.click(within(dialogo).getByLabelText('Agregar uno de Gaseosa 500ml'))
-    await userEvent.click(within(dialogo).getByText('Agua'))
-
-    expect(within(dialogo).getByText('$ 3.300,00')).toBeInTheDocument()
-
-    await userEvent.click(within(dialogo).getByRole('button', { name: 'Cobrar' }))
-    await waitFor(() => expect(consumir).toHaveBeenCalled())
-
-    const [sucursalId, cuerpo] = consumir.mock.calls[0]
-    expect(sucursalId).toBe(1)
-    expect(cuerpo.lineas).toEqual([
-      { item_id: 1, cantidad: '2' },
-      { item_id: 2, cantidad: '1' },
-    ])
-    // 🔑 Venta de mostrador: se cobra en el acto, así que va el medio de pago.
-    expect(cuerpo.reserva_id).toBeNull()
-    expect(cuerpo.medio_pago).toBe('efectivo')
-  })
-
-  it('el stock se ve al vender, no sólo en la tabla', async () => {
-    render(<Buffet />)
-    await userEvent.click(await screen.findByRole('button', { name: /Vender/ }))
-    const dialogo = await screen.findByRole('dialog')
-    // El encargado tiene que ver que quedan 4 antes de prometer 6.
-    expect(within(dialogo).getByText('4 en stock')).toBeInTheDocument()
-  })
-
-  it('quitar la última unidad saca la línea del carrito', async () => {
-    render(<Buffet />)
-    await userEvent.click(await screen.findByRole('button', { name: /Vender/ }))
-    const dialogo = await screen.findByRole('dialog')
-    await userEvent.click(within(dialogo).getByText('Agua'))
-    // El control de cantidad sólo existe si la línea está en el carrito. Se
-    // asierta sobre él y no sobre el importe: `$ 900,00` aparece tres veces
-    // —precio del producto, importe de la línea y total—, así que contarlo
-    // haría un test que se rompe al agregar cualquier columna.
-    expect(within(dialogo).getByLabelText('Quitar uno de Agua')).toBeInTheDocument()
-    expect(within(dialogo).getByRole('button', { name: 'Cobrar' })).toBeEnabled()
-
-    await userEvent.click(within(dialogo).getByLabelText('Quitar uno de Agua'))
-    expect(within(dialogo).queryByLabelText('Quitar uno de Agua')).not.toBeInTheDocument()
-    // Sin líneas no se puede cobrar: el botón queda deshabilitado.
-    expect(within(dialogo).getByRole('button', { name: 'Cobrar' })).toBeDisabled()
+    await screen.findByText('Gaseosa 500ml')
+    expect(screen.queryByRole('button', { name: /Vender/ })).not.toBeInTheDocument()
   })
 })
