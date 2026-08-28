@@ -16,7 +16,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { Caja } from './Caja'
+import { Caja, partirImporte } from './Caja'
 
 // La pantalla linkea a `/caja/movimientos`: sin router, `<Link>` tumba el árbol
 // entero con un error de contexto que no dice nada de lo que se está probando.
@@ -330,6 +330,139 @@ describe('la cuenta fraccionada', () => {
       expect(screen.getByLabelText('Monto', { selector: '#monto-cuenta' })).toHaveValue('12000')
     })
     expect(screen.getByRole('button', { name: /Cobrar y cerrar la cuenta/ })).toBeInTheDocument()
+  })
+})
+
+describe('partir un importe entre jugadores', () => {
+  // 🔴 Aritmética pura, medida sin montar la pantalla: probarla a través de
+  // clicks es probarla con ruido, y lo que se rompe acá es un centavo que no
+  // cierra nunca.
+  it('🔴 las partes suman EXACTAMENTE el importe, aunque no sea divisible', () => {
+    // $14.000 entre 3 da $4.666,66 y tres pagos de eso suman $13.999,98: dos
+    // centavos pendientes que nadie puede cobrar y un turno que no cierra.
+    const partes = partirImporte(14000, 3)
+    expect(partes).toEqual([4666.67, 4666.67, 4666.66])
+    expect(partes.reduce((a, b) => a + b, 0)).toBeCloseTo(14000, 2)
+  })
+
+  it('🔑 el caso divisible no se rompe por arreglar el otro', () => {
+    expect(partirImporte(14000, 4)).toEqual([3500, 3500, 3500, 3500])
+  })
+
+  it('🔴 y con centavos en el importe tampoco', () => {
+    const partes = partirImporte(100.01, 3)
+    expect(partes.reduce((a, b) => a + b, 0)).toBeCloseTo(100.01, 2)
+    // 🔴 **Se asierta sobre el TEXTO, que es lo que viaja al backend.** Medir
+    // `x * 100` es medir punto flotante contra sí mismo: `33.34 * 100` da
+    // 3333.9999999999995 y el assert falla sin que haya ningún defecto. Lo que
+    // de verdad se puede romper es mandar `"4666.670000000001"` en el POST.
+    expect(partes.every((x) => /^\d+(\.\d{1,2})?$/.test(String(x)))).toBe(true)
+  })
+
+  it('🔑 los bordes no explotan', () => {
+    expect(partirImporte(0, 3)).toEqual([])
+    expect(partirImporte(-5, 3)).toEqual([])
+    expect(partirImporte(NaN, 3)).toEqual([])
+    expect(partirImporte(100, 1)).toEqual([100])
+  })
+})
+
+describe('dividir la cuenta entre jugadores', () => {
+  beforeEach(() => {
+    estado.consumos = []
+    estado.cuentas = [{ ...CUENTAS[0], total: 14000, cobrado: 0, pendiente: 14000 }]
+  })
+
+  async function abrirLaCuenta() {
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: /Cancha 1/ }))
+    return user
+  }
+
+  it('🔑 en pádel propone cuatro jugadores', async () => {
+    // Es un punto de partida, no una regla: se puede cambiar. Pero arrancar en 2
+    // en un producto de canchas de pádel obliga a corregirlo siempre.
+    await abrirLaCuenta()
+    expect(await screen.findByLabelText('Jugadores')).toHaveValue('4')
+  })
+
+  it('🔴 dividir muestra las partes, y suman la cuenta', async () => {
+    const user = await abrirLaCuenta()
+    await user.click(await screen.findByRole('button', { name: /^Dividir$/ }))
+
+    const partes = await screen.findAllByText(/Jugador \d de 4/)
+    expect(partes).toHaveLength(4)
+    // 14.000 entre 4 = 3.500 cada uno.
+    expect(screen.getAllByText('$ 3.500,00')).toHaveLength(4)
+  })
+
+  it('🔴 cobrar una parte manda ESE monto y dice qué jugador es', async () => {
+    const user = await abrirLaCuenta()
+    await user.click(await screen.findByRole('button', { name: /^Dividir$/ }))
+
+    // La **segunda** parte, no la primera: con la primera, un índice hardcodeado
+    // en 0 pasaría igual.
+    const filas = await screen.findAllByText(/Jugador \d de 4/)
+    const fila = filas[1].closest('div')!
+    await user.click(within(fila).getByRole('button', { name: 'Cobrar' }))
+
+    await waitFor(() => {
+      const post = llamadas.find(
+        (l) => l.metodo === 'POST' && l.ruta.endsWith('/api/reservas/41/cobros'),
+      )
+      expect(post).toBeTruthy()
+      expect(post!.cuerpo).toMatchObject({ monto: '3500', detalle: 'Jugador 2 de 4' })
+    })
+  })
+
+  it('🔴 las partes NO se recalculan cuando baja el pendiente', async () => {
+    // 🔑 **Es la diferencia entre que esto funcione y que no.** Cada parte
+    // cobrada baja el pendiente; si las partes salieran del pendiente nuevo, a
+    // los tres que faltan les cambiaría el importe después de que el primero
+    // pagó. Las partes se calculan una vez y se sostienen.
+    const user = await abrirLaCuenta()
+    await user.click(await screen.findByRole('button', { name: /^Dividir$/ }))
+    expect(screen.getAllByText('$ 3.500,00')).toHaveLength(4)
+
+    // El primero paga: el backend ahora contesta con el pendiente bajado.
+    estado.cuentas = [{ ...CUENTAS[0], total: 14000, cobrado: 3500, pendiente: 10500 }]
+    const filas = screen.getAllByText(/Jugador \d de 4/)
+    await user.click(within(filas[0].closest('div')!).getByRole('button', { name: 'Cobrar' }))
+
+    await waitFor(() => expect(screen.getByText('cobrado')).toBeInTheDocument())
+    // Los tres que faltan siguen debiendo 3.500 cada uno. Si se recalcularan
+    // sobre 10.500 en cuatro partes, dirían 2.625.
+    expect(screen.getAllByText('$ 3.500,00').length).toBeGreaterThanOrEqual(3)
+    expect(screen.queryByText('$ 2.625,00')).not.toBeInTheDocument()
+  })
+
+  it('🔴 cambiar de cancha suelta la división', async () => {
+    // Las partes son de la cuenta que se estaba mirando. Arrastrarlas a otra
+    // cancha es cobrarle a una lo que se dividió de otra.
+    estado.cuentas = [
+      { ...CUENTAS[0], total: 14000, cobrado: 0, pendiente: 14000 },
+      { ...CUENTAS[1] },
+    ]
+    const user = await abrirLaCuenta()
+    await user.click(await screen.findByRole('button', { name: /^Dividir$/ }))
+    expect(await screen.findAllByText(/Jugador \d de 4/)).toHaveLength(4)
+
+    await user.click(screen.getByRole('button', { name: /Cancha 2/ }))
+    await waitFor(() => {
+      expect(screen.queryByText(/Jugador 1 de 4/)).not.toBeInTheDocument()
+    })
+  })
+
+  it('🔑 con la división abierta no se puede cobrar la cuenta entera', async () => {
+    // Las dos cosas juntas cobran de más: las partes suman el total, así que un
+    // cobro entero encima duplica la cuenta.
+    const user = await abrirLaCuenta()
+    await user.click(await screen.findByRole('button', { name: /^Dividir$/ }))
+    expect(screen.getByRole('button', { name: /Cobrar y cerrar la cuenta/ })).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: /Cancelar la división/ }))
+    expect(screen.getByRole('button', { name: /Cobrar y cerrar la cuenta/ })).toBeEnabled()
   })
 })
 
