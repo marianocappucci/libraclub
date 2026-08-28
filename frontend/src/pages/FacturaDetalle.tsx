@@ -26,6 +26,18 @@ export function FacturaDetalle() {
     <FacturaDetalleCompartida
       esAdmin={user?.role === 'admin'}
       muestraCobros={false}
+      // 🔴 **Acá el PDF lo sirve la API, no un router aparte.** El default del
+      // kit es `/facturas/{id}/pdf`, que es donde lo tienen Contalibra y
+      // Restolibra con su router Jinja2 viejo. Este producto no lo tiene, así
+      // que esa ruta **no daba 404**: caía en el catch-all de la SPA y devolvía
+      // el `index.html` con 200. Apretar «Ver PDF» abría una pestaña con la
+      // aplicación adentro. Lo reportó el humano el 2026-08-28.
+      urlDelPdf={(id) => `/api/facturas/${id}/pdf`}
+      // Este producto **no imprime ticket**: el botón llevaba al mismo callejón.
+      // `null` lo saca en vez de dejarlo apuntando a ninguna parte.
+      urlDelTicket={null}
+      // Ídem el recibo del cobro, que además necesita `muestraCobros`.
+      urlDelRecibo={null}
     />
   )
 }
