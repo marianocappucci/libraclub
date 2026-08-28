@@ -18,12 +18,61 @@
  * no tocarse son el control de que la extracción no cambió nada.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Loader2, QrCode } from 'lucide-react'
 
 import { cobroQr } from '@/lib/api'
 import type { QrDisponible } from '@/lib/api'
 import { pesos } from '@/lib/fechas'
 import { AvisoDeError } from '@/components/listado'
 import { buttonVariants } from '@/components/ui/button'
+
+/** Dos notas cortas, sintetizadas. Sin archivo de audio a propósito: no hay
+ *  nada que descargar ni que sirva el backend, y suena igual sin internet.
+ *
+ *  🔴 **El `AudioContext` se crea con el click de «Cobrar con QR» y no al
+ *  acreditar.** Los navegadores bloquean el audio que no nace de un gesto del
+ *  usuario, y la acreditación llega desde un `setInterval`, que no cuenta como
+ *  gesto. Crearlo en el lugar obvio —cuando suena— es exactamente lo que hace
+ *  que no suene nunca, y en silencio.
+ *
+ *  📋 **Copiado de [[contalibra]]** (`frontend/src/pages/VentaDetalle.tsx`), que
+ *  es el que el humano probó y da por bueno. Queda **duplicado a propósito**: es
+ *  el segundo consumidor, o sea el momento en que corresponde evaluar mudarlo a
+ *  `libra-ui` — pero mudarlo obliga a tocar Contalibra, que hoy anda, para no
+ *  ganar nada visible. Se anota como candidato, no se hace de arrastre.
+ */
+function crearAudio(): AudioContext | null {
+  try {
+    const Ctor = window.AudioContext
+      ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    return Ctor ? new Ctor() : null
+  } catch {
+    return null
+  }
+}
+
+function sonarCampanita(ctx: AudioContext | null) {
+  if (!ctx) return
+  // Un contexto creado antes de cualquier gesto puede quedar suspendido.
+  if (ctx.state === 'suspended') void ctx.resume()
+  const notas = [
+    { hz: 1318.5, en: 0 },      // mi6
+    { hz: 1760.0, en: 0.13 },   // la6
+  ]
+  for (const { hz, en } of notas) {
+    const osc = ctx.createOscillator()
+    const vol = ctx.createGain()
+    osc.type = 'sine'
+    osc.frequency.value = hz
+    const t = ctx.currentTime + en
+    vol.gain.setValueAtTime(0.0001, t)
+    vol.gain.exponentialRampToValueAtTime(0.28, t + 0.01)
+    vol.gain.exponentialRampToValueAtTime(0.0001, t + 0.42)
+    osc.connect(vol).connect(ctx.destination)
+    osc.start(t)
+    osc.stop(t + 0.45)
+  }
+}
 
 const POLL_MS = 3000
 
@@ -47,6 +96,7 @@ export function SeccionDeCobroConQr({ reservaId, estado, abierto, onCobrado }: {
   const [monto, setMonto] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const pollRef = useRef<number | null>(null)
+  const audioRef = useRef<AudioContext | null>(null)
 
   const frenarPoll = useCallback(() => {
     if (pollRef.current !== null) {
@@ -112,6 +162,9 @@ export function SeccionDeCobroConQr({ reservaId, estado, abierto, onCobrado }: {
 
   async function cobrar() {
     if (reservaId === null) return
+    // Acá, con el click todavía en curso, es el único momento en que el
+    // navegador deja abrir el audio.
+    audioRef.current = audioRef.current ?? crearAudio()
     setError(null)
     setQr('poniendo')
     try {
@@ -135,6 +188,7 @@ export function SeccionDeCobroConQr({ reservaId, estado, abierto, onCobrado }: {
       }
       if (resultado.estado === 'aprobado') {
         frenarPoll()
+        sonarCampanita(audioRef.current)
         setQr('cobrado')
         // Refresca la agenda y, con ella, la sección de la factura que pudo
         // haber salido sola.
@@ -175,6 +229,11 @@ export function SeccionDeCobroConQr({ reservaId, estado, abierto, onCobrado }: {
   if (qr === 'esperando') {
     return (
       <div className="space-y-2 rounded-md border px-3 py-2 text-sm">
+        {/* El spinner no es decoración: es lo que distingue «está esperando» de
+            «se colgó». Mismo cartel que Contalibra. */}
+        <p className="flex items-center gap-1.5 font-medium text-amber-700 dark:text-amber-400">
+          <Loader2 className="size-3.5 animate-spin" /> Esperando el pago…
+        </p>
         <p>
           El QR de la caja ya está cobrando{' '}
           <strong>{monto === null ? '' : pesos(monto)}</strong>. Pedile al
@@ -200,6 +259,7 @@ export function SeccionDeCobroConQr({ reservaId, estado, abierto, onCobrado }: {
         onClick={cobrar}
         className={buttonVariants({ variant: 'outline' })}
       >
+        <QrCode className="size-4" />
         {qr === 'poniendo' ? 'Preparando el QR…' : 'Cobrar con QR'}
       </button>
       {/* ⚠️ **Decía «el total del turno» y era mentira desde el 2026-08-28.**
