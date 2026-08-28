@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { agenda, canchas as apiCanchas } from '@/lib/api'
+import { agenda, canchas as apiCanchas, NOMBRE_DE_DEPORTE } from '@/lib/api'
 import type { Cancha, Semana, Turno } from '@/lib/api'
 import { diaYMes, hora, lunesDeLaSemana, nombreDelDia, pesos } from '@/lib/fechas'
 import { useSucursal } from '@/context/SucursalContext'
 import { DialogoDeReserva } from '@/components/DialogoDeReserva'
 import { DetalleDeReserva } from '@/components/DetalleDeReserva'
 import { buttonVariants } from '@/components/ui/button'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AvisoDeError } from '@/components/listado'
 import { sumarDiasISO } from 'libra-ui/fechas'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
@@ -44,6 +45,11 @@ export function Agenda() {
   const [desde, setDesde] = useState(() => lunesDeLaSemana())
   const [semana, setSemana] = useState<Semana | null>(null)
   const [canchas, setCanchas] = useState<Cancha[]>([])
+  //: Qué cancha se está mirando. `null` hasta que llegue el listado.
+  //
+  //: 🔑 Se guarda el **id** y no el índice: al cambiar de sucursal la lista es
+  //: otra, y un índice apuntaría a la cancha que ocupe ese lugar en la nueva.
+  const [elegida, setElegida] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [cargando, setCargando] = useState(false)
   const [nueva, setNueva] = useState<Seleccion | null>(null)
@@ -76,6 +82,11 @@ export function Agenda() {
   // primera cancha: con la primera cancha sin turnos —un feriado cerrado, por
   // ejemplo— la grilla entera se quedaba sin columnas.
   const dias = semana ? Array.from({ length: 7 }, (_, i) => sumarDiasISO(semana.desde, i)) : []
+
+  // La cancha que se muestra. Cae a la primera cuando la elegida no está en la
+  // lista: pasa al cambiar de sucursal, y también si se da de baja la que se
+  // estaba mirando. Sin la caída, la agenda quedaría en blanco sin decir por qué.
+  const activa = canchas.find((c) => c.id === elegida) ?? canchas[0] ?? null
 
   function elegir(cancha: Cancha, turno: Turno) {
     if (turno.libre) setNueva({ cancha, turno })
@@ -137,6 +148,36 @@ export function Agenda() {
         </button>
         {cargando && <span className="text-sm text-muted-foreground">actualizando…</span>}
       </div>
+
+      {/* Una cancha por vez, elegida acá.
+       *
+       * 🔑 **Antes se apilaban todas**, una debajo de la otra: con cuatro
+       * canchas la pantalla eran cuatro grillas de siete días y para ver la
+       * última había que scrollear más allá de las otras tres. Un complejo mira
+       * **una** cancha a la vez.
+       *
+       * Las pestañas van adentro de la barra pegada, con la navegación de
+       * semana: son las dos cosas que mueven lo que se está mirando, y tenerlas
+       * a mano es justamente para lo que la barra queda arriba.
+       *
+       * `overflow-x-auto` porque la tira crece con el complejo: con ocho canchas
+       * no entra, y sin esto arrastra el ancho de la página entera. */}
+      {canchas.length > 1 && (
+        <div className="-mx-1 overflow-x-auto px-1">
+          <Tabs
+            value={activa ? String(activa.id) : ''}
+            onValueChange={(v) => setElegida(Number(v))}
+          >
+            <TabsList>
+              {canchas.map((c) => (
+                <TabsTrigger key={c.id} value={String(c.id)}>
+                  {c.nombre}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        </div>
+      )}
       </div>
 
       <AvisoDeError mensaje={error} />
@@ -152,12 +193,12 @@ export function Agenda() {
         </p>
       )}
 
-      {canchas.map((cancha) => (
+      {(activa ? [activa] : []).map((cancha) => (
         <section key={cancha.id} className="rounded-lg border bg-card">
           <h2 className="encabezado-de-cancha border-b px-4 py-2 font-medium">
             {cancha.nombre}
             <span className="ml-2 text-sm font-normal text-muted-foreground">
-              {cancha.deporte} · turnos de {cancha.duracion_turno_min} min
+              {NOMBRE_DE_DEPORTE[cancha.deporte] ?? cancha.deporte} · turnos de {cancha.duracion_turno_min} min
             </span>
           </h2>
           <div className="overflow-x-auto">

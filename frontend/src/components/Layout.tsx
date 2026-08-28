@@ -88,9 +88,6 @@ const Cascaron = createLayout<Usuario>({
         // cuando configura el complejo.
         { to: '/torneos', label: 'Torneos', icon: Trophy },
         { to: '/caja', label: 'Caja', icon: Wallet },
-        // Con la caja y la cuenta corriente: es lo que se toca durante el
-        // turno, no cuando se configura el complejo.
-        { to: '/buffet', label: 'Buffet', icon: CupSoda },
         // La cobranza va con la caja y no en Maestros: se mira el mismo día que
         // se cobra, y el pago a cuenta entra por el turno abierto.
         { to: '/cuenta-corriente', label: 'Cuenta corriente', icon: NotebookText },
@@ -102,6 +99,17 @@ const Cascaron = createLayout<Usuario>({
         { to: '/clientes', label: 'Clientes', icon: Users },
         { to: '/canchas', label: 'Canchas', icon: LayoutGrid },
         { to: '/tarifas', label: 'Tarifas', icon: Tags },
+        // 🔑 **El buffet es mantenimiento, no operación.** Estuvo con la Caja
+        // hasta el 2026-08-28 con el argumento de que "es lo que se toca durante
+        // el turno", y era falso: el consumo se carga **desde el turno**, en el
+        // detalle de la reserva. Lo que esta pantalla hace es el catálogo y el
+        // stock — cargar productos y reponer cantidades—, que es exactamente lo
+        // que hacen las otras de este grupo.
+        //
+        // ⚠️ Tiene además una **venta de mostrador** (el consumo sin reserva).
+        // Es la minoría del uso y sigue estando acá adentro; si esa venta pasa a
+        // ser frecuente, merece su propio acceso y no volver a mudar la pantalla.
+        { to: '/buffet', label: 'Buffet', icon: CupSoda },
         // Junto a Tarifas y no en Configuración: las dos definen qué se
         // vende y a cuánto, y se cargan en la misma sesión al abrir el
         // complejo. El horario decide qué turnos existen; la tarifa, su precio.

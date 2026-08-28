@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Dices, Plus, Swords, Trash2, Trophy } from 'lucide-react'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 
-import { canchas as apiCanchas, torneos as api } from '@/lib/api'
+import { canchas as apiCanchas, NOMBRE_DE_DEPORTE, torneos as api } from '@/lib/api'
 import type {
   Cancha, Competidor, Fixture as DatosDelFixture, PartidoDeTorneo, TablaDeZona, Torneo as UnTorneo,
 } from '@/lib/api'
@@ -111,7 +111,7 @@ export function Torneo() {
               <EstadoDelTorneo torneo={{ estado: torneo.estado, jugados }} />
             </TituloPantalla>
             <p className="text-sm text-muted-foreground">
-              {NOMBRE_DE_FORMATO[torneo.formato]} · {torneo.deporte} ·{' '}
+              {NOMBRE_DE_FORMATO[torneo.formato]} · {NOMBRE_DE_DEPORTE[torneo.deporte] ?? torneo.deporte} ·{' '}
               {fecha(torneo.desde)}
               {torneo.hasta ? ` al ${fecha(torneo.hasta)}` : ''}
               {torneo.semilla !== null && (
