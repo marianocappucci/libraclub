@@ -11,9 +11,10 @@
 //   llena el cobro por QR: el efectivo se carga como monto y concepto libre, sin
 //   vínculo con la reserva. Con esto prendido, todo lo cobrado en efectivo diría
 //   «Sin cobrar». Es la misma decisión que se tomó para la columna de cobrado.
-// - **`rutaDelDetalle`**, porque `/facturas/:id` todavía no existe acá. Sin la
-//   ruta, el botón «Ver» mandaría al catch-all de la SPA y sacaría al usuario a
-//   la Agenda. Se enciende cuando entre la pantalla de detalle.
+// `rutaDelDetalle` **sí** va desde el 2026-08-27: la pantalla de detalle existe
+// y es la compartida del kit. Antes estaba apagada porque `/facturas/:id` no
+// existía, y un botón hacia una ruta inexistente en estas SPA no da 404 — cae en
+// el catch-all y saca al usuario a la Agenda.
 import { Facturas as FacturasCompartida } from 'libra-ui/Facturas'
 
 export function Facturas() {
@@ -22,6 +23,7 @@ export function Facturas() {
       // Acá el PDF lo sirve la API, no un router aparte.
       urlDelPdf={(id) => `/api/facturas/${id}/pdf`}
       muestraCobros={false}
+      rutaDelDetalle={(id) => `/facturas/${id}`}
       // Sin botón de alta todavía: la pantalla de emisión manual no existe. La
       // factura de un turno se emite desde la Agenda.
       mensajeVacio="Todavía no se emitió ningún comprobante. Se facturan desde el turno, en la Agenda."
