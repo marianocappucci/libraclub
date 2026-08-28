@@ -70,6 +70,16 @@ const estado = {
   cuentas: CUENTAS,
   consumos: [] as { descripcion: string; cantidad: number; precio_unitario: number; importe: number }[],
   qr: { disponible: true, auto_facturar: true },
+  //: Hace cuántos días se abrió el turno. 0 = hoy, que es lo normal.
+  diasAbierto: 0,
+}
+
+/** Un instante de hace `dias` días, a media mañana. */
+function hace(dias: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - dias)
+  d.setHours(9, 0, 0, 0)
+  return d.toISOString()
 }
 
 const llamadas: { metodo: string; ruta: string; cuerpo: unknown }[] = []
@@ -97,6 +107,7 @@ beforeEach(() => {
   estado.cuentas = CUENTAS
   estado.consumos = []
   estado.qr = { disponible: true, auto_facturar: true }
+  estado.diasAbierto = 0
   vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
     const u = String(url)
     let cuerpo: unknown = null
@@ -135,7 +146,10 @@ beforeEach(() => {
       return Promise.resolve(json({
         turno: {
           id: 3, usuario_id: 1, caja_id: 5, caja_nombre: 'Mostrador',
-          apertura: '2026-08-28T09:00:00-03:00', cierre: null, monto_inicial: 1000,
+          // 🔑 **Relativa a hoy y no una fecha fija.** Con una constante, el
+          // test de «abierta hace N días» diría una cosa distinta cada día que
+          // pasa — y el de «hoy no avisa» se rompería mañana.
+          apertura: hace(estado.diasAbierto), cierre: null, monto_inicial: 1000,
           monto_declarado_cierre: null, monto_esperado_cierre: null,
           estado: 'abierto', notas: '',
         },
@@ -185,6 +199,59 @@ describe('el turno abierto', () => {
     expect(await screen.findByText('Mostrador')).toBeInTheDocument()
   })
 
+})
+
+describe('un turno de caja es de UNA jornada', () => {
+  // 🔴 El humano lo vio en dev el 2026-08-28: dos turnos abiertos desde el 21,
+  // siete días, y el «esperado en el cajón» sumando toda la semana. Un arqueo
+  // que abarca siete días no mide nada, y el faltante que aparezca no se puede
+  // atribuir a ninguna jornada. No había NADA que los cerrara ni que avisara.
+
+  it('🔑 el de hoy no dice nada y deja cobrar', async () => {
+    // El control. Sin esto, un aviso puesto siempre pasaría los tests de abajo
+    // y le pondría un cartel de alarma a cada turno normal.
+    montar()
+    expect(await screen.findByRole('button', { name: /^Canchas$/ })).toBeInTheDocument()
+    expect(screen.queryByText(/antes de seguir cobrando/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Abierta desde el/i)).not.toBeInTheDocument()
+  })
+
+  it('🔴 el de otro día lo DICE, con cuántos lleva', async () => {
+    estado.diasAbierto = 7
+    montar()
+    expect(await screen.findByText(/Abierta desde el/i)).toBeInTheDocument()
+    // 🔑 En los DOS lados, y es a proposito: el aviso de la izquierda dice que
+    // hay que cerrar, y el de la derecha esta pegado al numero del arqueo, que
+    // es el que la antiguedad explica. Se asierta el par para que sacar uno de
+    // los dos ponga rojo esto.
+    expect(screen.getAllByText(/7 días/)).toHaveLength(2)
+  })
+
+  it('🔴 y FRENA el cobro hasta que se cierre', async () => {
+    // El punto de venta y el egreso desaparecen: lo único que queda es contar
+    // el efectivo y cerrar.
+    estado.diasAbierto = 2
+    montar()
+    expect(await screen.findByText(/antes de seguir cobrando/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Canchas$/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Registrar un egreso/ })).not.toBeInTheDocument()
+  })
+
+  it('🔴 pero el cierre sigue habilitado: es la salida', async () => {
+    // 🔑 Frenar el cobro **y** el cierre dejaría la caja sin ninguna salida —
+    // que es peor que el problema, porque el operador no podría ni corregirlo.
+    estado.diasAbierto = 2
+    montar()
+    expect(await screen.findByLabelText('Efectivo contado')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Cerrar caja/ })).toBeInTheDocument()
+  })
+
+  it('🔑 con UN día dice «un día» y no «1 días»', async () => {
+    estado.diasAbierto = 1
+    montar()
+    expect(await screen.findAllByText(/hace un día/i)).toHaveLength(2)
+    expect(screen.queryByText(/1 días/)).not.toBeInTheDocument()
+  })
 })
 
 describe('la cuenta de cada cancha', () => {
