@@ -15,6 +15,7 @@ import { Clientes } from '@/pages/Clientes'
 import { Login } from '@/pages/Login'
 import { ForgotPassword, ResetPassword } from '@/pages/PasswordReset'
 import { Logs } from '@/pages/Logs'
+import { MpBandeja } from '@/pages/MpBandeja'
 import { Sucursales } from '@/pages/Sucursales'
 import { Tarifas } from '@/pages/Tarifas'
 import { Torneo } from '@/pages/Torneo'
@@ -122,6 +123,11 @@ function Backoffice() {
               leerlo — "nueva" no es un id. */}
           <Route path="/facturas/nueva" element={<FacturaNueva />} />
           <Route path="/facturas/:id" element={<FacturaDetalle />} />
+          {/* La bandeja de MercadoPago. Misma ruta que en Contalibra y
+              Restolibra: es la misma pantalla del kit y el mismo prefijo
+              de API, y una tercera URL para lo mismo sólo obligaría a
+              acordarse de cuál usa cada producto. */}
+          <Route path="/mp-bandeja" element={<MpBandeja />} />
           <Route path="/configuracion" element={<Configuracion />} />
           <Route path="/logs" element={<Logs />} />
           {/* Las rutas no llevan guarda de rol: el permiso lo decide el
