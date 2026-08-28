@@ -7,6 +7,7 @@ El router valida, delega y traduce errores a códigos. Las reglas están en
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -29,6 +30,8 @@ from app.schemas.reservas import (
     SerieEntrada,
     SerieSalida,
 )
+from app.servicios import buffet as servicio_buffet
+from app.servicios import caja as servicio_caja
 from app.servicios import cobro_qr, disponibilidad, tarifario
 from app.servicios import facturacion as servicio_facturacion
 from app.servicios import pagos as servicio_pagos
@@ -183,6 +186,136 @@ class FacturaSalida(BaseModel):
     #: existe y lo que falta es el CAE, que se reintenta.
     cae: str = ""
     cae_vto: str = ""
+
+
+class CobroDeTurnoEntrada(BaseModel):
+    #: Cuánto entra ahora. Puede ser menos que el total: una seña es eso.
+    monto: Decimal = Field(gt=0)
+    medio_pago: str
+    referencia_externa: str = ""
+
+
+class CobroDeTurno(BaseModel):
+    id: int
+    fecha: str
+    monto: float
+    medio_pago: str
+    concepto: str
+    #: A qué comprobante quedó atado. `null` mientras el turno no se facturó.
+    factura_id: int | None = None
+
+
+class EstadoDeCobro(BaseModel):
+    #: Alquiler + buffet consumido. Es el mismo número que factura el turno.
+    total: float
+    cobrado: float
+    pendiente: float
+    cobros: list[CobroDeTurno]
+
+
+def _exigir_base_de_caja() -> None:
+    """503 con el nombre de la variable si la instancia no tiene base de LibraCore.
+
+    La caja vive del lado del motor. Sin esto el mostrador recibiría un error de
+    conexión de psycopg, que no dice qué hay que configurar.
+    """
+    if not servicio_facturacion.hay_base():
+        raise HTTPException(
+            503,
+            "La caja no está configurada en esta instancia: falta "
+            "LIBRACLUB_LIBRACORE_DATABASE_URL.",
+        )
+
+
+def _estado_de_cobro(reserva: Reserva) -> EstadoDeCobro:
+    """Cuánto vale el turno, cuánto entró y cuánto falta.
+
+    🔑 **El total se arma igual que el del comprobante** —alquiler más buffet
+    consumido— y no desde `reserva.precio` a secas. Si salieran de dos lados, la
+    pantalla diría «pendiente $0» sobre un turno con tres gaseosas sin cobrar.
+    """
+    precio = Decimal(str(reserva.precio or 0))
+    total = precio + servicio_buffet.total_consumido(reserva.id)
+    cobros = servicio_caja.cobros_de_reserva(reserva.id)
+    cobrado = sum((Decimal(str(c["monto"])) for c in cobros), Decimal("0"))
+    return EstadoDeCobro(
+        total=float(total),
+        cobrado=float(cobrado),
+        # `max(0, ...)`: un cobro de más no se muestra como pendiente negativo.
+        pendiente=float(max(Decimal("0"), total - cobrado)),
+        cobros=[
+            CobroDeTurno(
+                id=c["id"], fecha=str(c["fecha"]), monto=float(c["monto"]),
+                medio_pago=c.get("medio_pago") or "", concepto=c.get("concepto") or "",
+                factura_id=c.get("factura_id"),
+            )
+            for c in cobros
+        ],
+    )
+
+
+@router.get("/{reserva_id}/cobros", response_model=EstadoDeCobro)
+def ver_cobros(
+    reserva_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    _: object = Depends(require_staff),
+):
+    """Lo cobrado de un turno. De mostrador: es quien cobra."""
+    _exigir_base_de_caja()
+    reserva = sesion.get(Reserva, reserva_id)
+    if reserva is None:
+        raise HTTPException(404, "no existe esa reserva")
+    return _estado_de_cobro(reserva)
+
+
+@router.post("/{reserva_id}/cobros", response_model=EstadoDeCobro, status_code=201)
+def cobrar_turno(
+    reserva_id: int,
+    datos: CobroDeTurnoEntrada,
+    sesion: Session = Depends(obtener_sesion),
+    usuario: dict = Depends(require_staff),
+):
+    """Registra plata de este turno en la caja abierta, atada a su comprobante.
+
+    🔑 **Es lo que la pantalla de Caja no puede hacer.** Ahí el cobro se carga
+    como monto más concepto libre, sin vínculo con nada: sirve para un ingreso
+    suelto y deja el comprobante del turno viéndose «sin cobrar». Acá el
+    movimiento nace sabiendo de qué reserva es y, si ya se facturó, contra qué
+    comprobante va.
+
+    Si todavía no se facturó, `factura_id` queda en `None` y lo completa
+    `facturar_reserva` cuando se emita — ver `servicios/caja.py`.
+
+    **No exige que el monto sea el pendiente**: una seña es un cobro parcial, y
+    un vuelto mal contado es un problema del mostrador, no algo que la API tenga
+    que impedir.
+    """
+    _exigir_base_de_caja()
+    reserva = sesion.get(Reserva, reserva_id)
+    if reserva is None:
+        raise HTTPException(404, "no existe esa reserva")
+
+    cancha = sesion.get(Cancha, reserva.cancha_id)
+    cliente = sesion.get(Cliente, reserva.cliente_id) if reserva.cliente_id else None
+    # El concepto lo arma el backend y no la pantalla: es el texto que después
+    # se lee en el arqueo y en el historial de caja, y dos pantallas escribiendo
+    # el suyo terminan con dos formatos para el mismo hecho.
+    concepto = (
+        f"Turno {a_local(reserva.comienza_at):%d-%m-%Y %H:%M}"
+        f" — {cancha.nombre if cancha else 'cancha'}"
+        f"{f' — {cliente.nombre}' if cliente else ''}"
+    )
+    try:
+        servicio_caja.registrar_ingreso(
+            usuario, datos.monto, concepto, datos.medio_pago,
+            referencia=servicio_caja.referencia_de_cobro(reserva.id),
+            factura_id=reserva.factura_id,
+        )
+    except servicio_caja.SinTurnoAbierto as e:
+        raise HTTPException(409, str(e)) from e
+    except servicio_caja.MedioDePagoInvalido as e:
+        raise HTTPException(422, str(e)) from e
+    return _estado_de_cobro(reserva)
 
 
 @router.post("/{reserva_id}/facturar", response_model=FacturaSalida, status_code=201)

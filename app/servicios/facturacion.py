@@ -34,7 +34,7 @@ from libracore.db import core as libracore_core
 from libracore.db import facturas as db_facturas
 from libracore.db.schema import init_core_schema
 
-from app.servicios import buffet
+from app.servicios import buffet, caja
 from app.tiempo import a_local
 
 #: Una sola "empresa" ARCA: LibraClub es de instancia única por cliente
@@ -352,6 +352,15 @@ async def facturar_reserva(reserva, cliente, cancha_nombre: str = "cancha") -> d
     # apuntando a un comprobante sin CAE, que se vería como "ya facturada" y no
     # habría forma de reintentar desde la pantalla.
     reserva.factura_id = factura_id
+
+    # 🔑 **Y se atan los cobros que ya estaban.** En un mostrador se cobra antes
+    # de facturar tan seguido como después: sin esto, un turno cobrado en
+    # efectivo el sábado y facturado el lunes deja el comprobante viéndose «sin
+    # cobrar» sobre plata que ya entró. Ver `servicios/caja.py`.
+    #
+    # Va acá y no en el caller porque la condición es "esta reserva acaba de
+    # conseguir su comprobante", que es justo lo que sabe esta línea.
+    caja.vincular_cobros_a_factura(reserva.id, factura_id)
     return factura
 
 
