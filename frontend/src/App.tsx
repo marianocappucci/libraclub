@@ -8,6 +8,7 @@ import { CuentaCorrienteDetalle } from '@/pages/CuentaCorrienteDetalle'
 import { Horarios } from '@/pages/Horarios'
 import { Canchas } from '@/pages/Canchas'
 import { Configuracion } from '@/pages/Configuracion'
+import { FacturaDetalle } from '@/pages/FacturaDetalle'
 import { Facturas } from '@/pages/Facturas'
 import { Clientes } from '@/pages/Clientes'
 import { Login } from '@/pages/Login'
@@ -112,6 +113,10 @@ function Backoffice() {
             element={<CuentaCorrienteDetalle />}
           />
           <Route path="/facturas" element={<Facturas />} />
+          {/* Al lado del listado y no anidado, mismo criterio que el
+              detalle de torneo y el de cuenta corriente: no comparten nada
+              salvo el camino. */}
+          <Route path="/facturas/:id" element={<FacturaDetalle />} />
           <Route path="/configuracion" element={<Configuracion />} />
           <Route path="/logs" element={<Logs />} />
           {/* Las rutas no llevan guarda de rol: el permiso lo decide el
