@@ -15,7 +15,11 @@
 // y es la compartida del kit. Antes estaba apagada porque `/facturas/:id` no
 // existía, y un botón hacia una ruta inexistente en estas SPA no da 404 — cae en
 // el catch-all y saca al usuario a la Agenda.
+import { Link } from 'react-router-dom'
+import { Plus } from 'lucide-react'
 import { Facturas as FacturasCompartida } from 'libra-ui/Facturas'
+
+import { Button } from '@/components/ui/button'
 
 export function Facturas() {
   return (
@@ -24,9 +28,14 @@ export function Facturas() {
       urlDelPdf={(id) => `/api/facturas/${id}/pdf`}
       muestraCobros={false}
       rutaDelDetalle={(id) => `/facturas/${id}`}
-      // Sin botón de alta todavía: la pantalla de emisión manual no existe. La
-      // factura de un turno se emite desde la Agenda.
-      mensajeVacio="Todavía no se emitió ningún comprobante. Se facturan desde el turno, en la Agenda."
+      // Las notas no se emiten desde acá: salen del detalle de la factura que
+      // anulan o ajustan, porque sin comprobante asociado no existen.
+      acciones={(
+        <Button asChild>
+          <Link to="/facturas/nueva"><Plus />Nueva factura</Link>
+        </Button>
+      )}
+      mensajeVacio="Todavía no se emitió ningún comprobante. Los de un turno se facturan desde la Agenda."
     />
   )
 }

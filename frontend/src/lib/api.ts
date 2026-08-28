@@ -323,6 +323,29 @@ export interface PaginaDeFacturas {
   page: number
 }
 
+/** Lo que el formulario de alta manda. **Sin `client_id`**, y es a propósito:
+ *  el motor lo resolvería contra la tabla `clients` de LibraCore, que es otra
+ *  base que la de los clientes de este producto — ver `FacturaNueva.tsx`. */
+export interface FacturaNuevaEntrada {
+  tipo: number
+  punto_venta: number
+  fecha: string
+  condicion_venta: string
+  client_name: string
+  client_cuit: string
+  observations: string
+  items: { description: string; qty: number; unit_price: number }[]
+}
+
+/** Qué puede emitir este complejo, según SU condición frente al IVA. */
+export interface TiposDeComprobante {
+  tipos: { value: number; label: string }[]
+  conceptos: { value: number; label: string }[]
+  condiciones_venta: string[]
+  punto_venta: number
+  es_monotributista: boolean
+}
+
 /** El listado de comprobantes del complejo. **Todo de admin** — ver
  *  `app/routers/facturas.py`. */
 export const facturas = {
@@ -336,6 +359,12 @@ export const facturas = {
     params.set('page', String(filtros.page ?? 1))
     return api.get<PaginaDeFacturas>(`/api/facturas?${params}`)
   },
+  tipos: () => api.get<TiposDeComprobante>('/api/facturas/tipos'),
+  /** Devuelve el comprobante **pelado**, con su `id` arriba: la pantalla navega
+   *  al detalle con eso. Envuelto en el detalle, `factura.id` quedaría
+   *  `undefined` — pasó de verdad al extraer el módulo al motor. */
+  crear: (cuerpo: FacturaNuevaEntrada) =>
+    api.post<FacturaDeListado>('/api/facturas', cuerpo),
 }
 
 /** Lo que el mostrador necesita saber del QR sin ver ninguna credencial. */
