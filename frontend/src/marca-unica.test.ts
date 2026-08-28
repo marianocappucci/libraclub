@@ -46,6 +46,18 @@ describe('el verde de la marca', () => {
     // mismo día porque la agenda pintaba con clases fijas. Un bloque que dice
     // «esta es la paleta» mientras nadie la usa es peor que no tenerlo.
     expect(CSS).toMatch(/\[data-active='true'\][\s\S]{0,120}border-color:\s*var\(--marca\)/)
-    expect(CSS).toMatch(/\.encabezado-de-cancha[\s\S]{0,200}var\(--marca\)/)
+
+    // 🔴 **Las DOS declaraciones del encabezado, no «alguna».** La primera
+    // versión pedía un `var(--marca)` en los 200 caracteres siguientes a la
+    // clase, y eso lo cumplía la línea del borde aunque el fondo se hubiera
+    // hardcodeado. Lo delató la mutación: hardcodear el fondo dejaba el guard
+    // en verde.
+    const mezclas = CSS.match(
+      /@supports \(color: color-mix[\s\S]*?\.encabezado-de-cancha \{([\s\S]*?)\}/,
+    )
+    expect(mezclas).not.toBeNull()
+    const cuerpo = mezclas?.[1] ?? ''
+    expect(cuerpo).toMatch(/background-color:\s*color-mix\([^)]*var\(--marca\)/)
+    expect(cuerpo).toMatch(/border-bottom-color:\s*color-mix\([^)]*var\(--marca\)/)
   })
 })
