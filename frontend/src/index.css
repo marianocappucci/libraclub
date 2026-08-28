@@ -469,6 +469,31 @@
  *    fondo suave contra un `--border` gris deja la banda flotando.
  */
 .encabezado-de-cancha {
-  background-color: color-mix(in oklab, var(--marca) 8%, var(--background));
-  border-bottom-color: color-mix(in oklab, var(--marca) 30%, var(--border));
+  /* 🔴 **El fallback lo controla este `@supports`, escrito a mano.**
+   *
+   * Lightning CSS parte cada `color-mix` en dos —el valor plano arriba y la
+   * mezcla adentro de un `@supports`— y, como los operandos son `var()`, no
+   * puede calcular la mezcla: deja **`var(--marca)`** como fallback. O sea el
+   * **verde pleno**, con el texto oscuro encima, que es lo contrario de lo que
+   * este fondo tiene que ser.
+   *
+   * Poner un literal antes tampoco alcanza: Lightning igual agrega el suyo
+   * DESPUÉS y lo pisa. Medido sobre el CSS construido, no supuesto.
+   *
+   * Los dos literales no se eligieron a ojo: son la mezcla **medida** en un
+   * navegador —pintada en un canvas y leído el píxel, con sus controles: el
+   * blanco da `#ffffff` y la marca da `#017b4b`—. Si cambia `--marca`, hay que
+   * volver a medirlos.
+   *
+   * ⚠️ Son del tema claro, que es el único que este producto usa hoy. La mezcla
+   * sí se adapta sola, porque compone contra `--background`. */
+  background-color: #edf4f0;
+  border-bottom-color: #abc5b5;
+}
+
+@supports (color: color-mix(in oklab, red, red)) {
+  .encabezado-de-cancha {
+    background-color: color-mix(in oklab, var(--marca) 8%, var(--background));
+    border-bottom-color: color-mix(in oklab, var(--marca) 30%, var(--border));
+  }
 }
