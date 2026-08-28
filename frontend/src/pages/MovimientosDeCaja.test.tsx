@@ -16,8 +16,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MovimientosDeCaja } from './MovimientosDeCaja'
 
 const MOVIMIENTOS = [
-  { id: 11, fecha: '2026-08-28', tipo: 'ingreso' as const, concepto: 'Turno cancha 1', monto: 14000, medio_pago: 'efectivo' },
-  { id: 12, fecha: '2026-08-28', tipo: 'egreso' as const, concepto: 'Retiro a banco', monto: 5000, medio_pago: 'efectivo' },
+  { id: 11, fecha: '2026-08-28T10:15:00-03:00', tipo: 'ingreso' as const, concepto: 'Turno cancha 1', monto: 14000, medio_pago: 'efectivo', anulado: 0 },
+  { id: 12, fecha: '2026-08-28T16:40:00-03:00', tipo: 'egreso' as const, concepto: 'Retiro a banco', monto: 5000, medio_pago: 'efectivo', anulado: 0 },
 ]
 
 const estado = { hayTurno: true, movimientos: MOVIMIENTOS }
@@ -111,5 +111,51 @@ describe('el detalle del turno', () => {
     estado.movimientos = []
     montar()
     expect(await screen.findByText(/Todavía no cargaste nada/i)).toBeInTheDocument()
+  })
+})
+
+describe('la tabla y los anulados', () => {
+  it('🔑 es una tabla con columnas, no una fila de texto', async () => {
+    // Pedido del humano el 2026-08-28: *"los movimientos se deberían tener que
+    // ver en una tabla con columnas"*. Con veinte filas, el formato viejo
+    // —concepto y medio corridos, el importe pegado a la derecha— no se puede
+    // leer ni sumar con la vista, y **no mostraba la hora**.
+    montar()
+    await screen.findByText('Turno cancha 1')
+    const encabezados = screen.getAllByRole('columnheader').map((h) => h.textContent)
+    expect(encabezados).toEqual(['Hora', 'Concepto', 'Medio', 'Importe', ''])
+  })
+
+  it('🔴 muestra la HORA, que antes no estaba', async () => {
+    montar()
+    expect(await screen.findByText('10:15')).toBeInTheDocument()
+    expect(screen.getByText('16:40')).toBeInTheDocument()
+  })
+
+  it('🔴 un anulado queda en la lista, tachado Y con la palabra', async () => {
+    // 🔑 Las dos cosas: sólo el tachado se pierde en una impresión en blanco y
+    // negro y no lo lee un lector de pantalla; sólo la palabra se pierde entre
+    // veinte filas.
+    estado.movimientos = [
+      { ...MOVIMIENTOS[0], anulado: 1 },
+      MOVIMIENTOS[1],
+    ]
+    montar()
+    const concepto = await screen.findByText('Turno cancha 1')
+    expect(concepto).toHaveClass('line-through')
+    expect(screen.getByText('anulado')).toBeInTheDocument()
+  })
+
+  it('🔴 y un anulado NO ofrece volver a anularse', async () => {
+    // El botón desaparece en vez de quedar deshabilitado, que invita a
+    // apretarlo. El control: el otro movimiento sí lo tiene.
+    estado.movimientos = [
+      { ...MOVIMIENTOS[0], anulado: 1 },
+      MOVIMIENTOS[1],
+    ]
+    montar()
+    await screen.findByText('Retiro a banco')
+    expect(screen.queryByRole('button', { name: 'Anular Turno cancha 1' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Anular Retiro a banco' })).toBeInTheDocument()
   })
 })

@@ -205,18 +205,28 @@ def test_sin_caja_abierta_no_se_registra_un_egreso(api, sucursal):
 
 
 def test_se_anula_un_movimiento_del_turno_abierto(api, sucursal, abrir_caja):
-    """El caso real: el monto tipeado mal hace treinta segundos."""
+    """El caso real: el monto tipeado mal hace treinta segundos.
+
+    ⚠️ **Este test asertaba `movimientos == []`** —o sea, que la fila
+    desapareciera— hasta el 2026-08-28. Cambió porque cambió la conducta: ahora
+    se **anula** y la fila queda. No es un test que se ablandó para que pase; es
+    el que fija la semántica nueva, y por eso pide las dos cosas: que siga en la
+    lista **y** que salga del arqueo.
+    """
     abrir_caja(api, sucursal, "0")
     api.post("/api/caja/cobros", json={
         "monto": "99999", "concepto": "Mal tipeado", "medio_pago": "efectivo",
     })
     resumen = api.get("/api/caja/turnos/actual").json()["resumen"]
     assert len(resumen["movimientos"]) == 1
+    assert resumen["pagos_por_medio"]["efectivo"] == 99999, "el control del total"
     mid = resumen["movimientos"][0]["id"]
 
     r = api.delete(f"/api/caja/movimientos/{mid}")
     assert r.status_code == 200, r.text
-    assert r.json()["movimientos"] == []
+    assert len(r.json()["movimientos"]) == 1, "la fila queda"
+    assert r.json()["movimientos"][0]["anulado"] == 1
+    assert r.json()["pagos_por_medio"].get("efectivo", 0) == 0, "y sale del arqueo"
     assert r.json()["efectivo_ventas"] == 0.0
 
 
@@ -234,3 +244,11 @@ def test_no_se_anula_un_movimiento_que_no_es_del_turno_abierto(api, sucursal, ab
     abrir_caja(api, sucursal, "0")
     r = api.delete(f"/api/caja/movimientos/{mid}")
     assert r.status_code == 404, r.text
+
+
+# -- Anular no borra -------------------------------------------------------
+#
+# Pedido del humano el 2026-08-28: *"no deberian poder borrarse, tienen que
+# quedar registrados"*. Los tests de lo que esto protege del lado de las
+# reservas ---el pendiente que vuelve, y que las dos pantallas coincidan---
+# estan en `test_cobro_del_turno.py`, donde viven los helpers de reserva.

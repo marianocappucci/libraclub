@@ -207,8 +207,17 @@ def anular_movimiento(usuario: dict, movimiento_id: int) -> dict:
     hecho: borrarle un movimiento después reescribe una diferencia que alguien
     ya firmó. Y el turno de otra persona no es de quien pide.
 
-    Se borra en vez de contra-asentar porque el caso real es el error de tipeo
-    de hace treinta segundos, no la corrección contable de un movimiento válido.
+    🔴 **Se ANULA, no se borra** —desde el 2026-08-28, por pedido del humano:
+    *"no deberían poder borrarse, tienen que quedar registrados"*—. La fila queda
+    con `anulado=1`, sale de los totales del arqueo y la lista la sigue
+    mostrando.
+
+    Borrar rompía tres cosas y ninguna avisaba: el arqueo quedaba con un agujero
+    que nadie puede auditar; un **cobro de turno** borrado hace que la reserva
+    vuelva a figurar impaga —el pendiente se suma por referencia—; y un **cobro
+    por QR** deja `PagoDeReserva.caja_movimiento_id` colgando, con lo cual el
+    poll **no** lo vuelve a registrar y la plata desaparece del cajón para
+    siempre.
     """
     turno = turno_abierto(usuario)
     if turno is None:
@@ -219,7 +228,7 @@ def anular_movimiento(usuario: dict, movimiento_id: int) -> dict:
             "Ese movimiento no es de tu turno abierto: sólo se puede anular lo "
             "que se cargó en la caja que está abierta ahora."
         )
-    db_caja.delete_caja_movimiento(movimiento_id)
+    db_caja.anular_caja_movimiento(movimiento_id)
     return db_turnos.get_resumen_turno_caja(turno["id"])
 
 
@@ -335,12 +344,17 @@ def cobros_de_reserva(reserva_id: int) -> list[dict]:
     segundo producto la necesita, ahí se muda. Mismo criterio que
     `espejar_usuario`, unas líneas más arriba.
     """
+    # 🔑 **`anulado=0` va en las DOS consultas** —acá y en
+    # `cobrado_de_reservas`—. Filtrar en una sola deja al detalle de la reserva
+    # y al listado del mostrador diciendo números distintos sobre el mismo turno,
+    # que es peor que no filtrar en ninguna: ahí al menos coinciden.
     mostrador, qr = _patrones_de_reserva(reserva_id)
     conexion = libracore_core.get_connection()
     try:
         filas = conexion.execute(
             "SELECT * FROM caja_movimientos"
-            " WHERE tipo='ingreso' AND (referencia LIKE ? OR referencia LIKE ?)"
+            " WHERE tipo='ingreso' AND anulado=0"
+            " AND (referencia LIKE ? OR referencia LIKE ?)"
             " ORDER BY id",
             (mostrador, qr),
         ).fetchall()
@@ -382,7 +396,7 @@ def cobrado_de_reservas(reserva_ids: Sequence[int]) -> dict[int, Decimal]:
     try:
         filas = conexion.execute(
             "SELECT referencia, monto FROM caja_movimientos"
-            f" WHERE tipo='ingreso' AND ({donde})",
+            f" WHERE tipo='ingreso' AND anulado=0 AND ({donde})",
             tuple(parametros),
         ).fetchall()
     finally:
