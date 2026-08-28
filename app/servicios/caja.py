@@ -19,6 +19,7 @@ fallar**. Es el mismo caso que VentaLibra, y por eso el motor tiene la variante
 from __future__ import annotations
 
 import secrets
+from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal
 
@@ -346,6 +347,64 @@ def cobros_de_reserva(reserva_id: int) -> list[dict]:
     finally:
         conexion.close()
     return [dict(f) for f in filas]
+
+
+def cobrado_de_reservas(reserva_ids: Sequence[int]) -> dict[int, Decimal]:
+    """Cuánto entró por cada una de varias reservas, en una sola consulta.
+
+    Misma razón que `buffet.consumido_de_reservas`: `cobros_de_reserva` abre y
+    cierra una conexión por reserva, y el listado del mostrador las pide de a
+    decenas.
+
+    🔑 **El id vuelve de la referencia, no de una columna.** `caja_movimientos`
+    no tiene `reserva_id` —es una tabla del motor, y el motor no sabe qué es una
+    reserva—: el vínculo es el texto `reserva-<id>-<azar>`. Por eso se filtra con
+    los mismos `LIKE` de `_patrones_de_reserva` y después se parsea; usar otro
+    criterio acá y otro allá es cómo se separan dos números que deberían ser el
+    mismo.
+
+    ⚠️ **Las dos mitades no pesan igual.** El `LIKE` acota el volumen —trae las
+    filas candidatas y no la caja entera—, pero el que decide de quién es cada
+    peso es `_id_de_referencia`: con los patrones flojos entran filas de más y el
+    parseo igual se las atribuye a su reserva. Si alguna vez hay que aflojar uno
+    de los dos, que sea el `LIKE`.
+    """
+    ids = [int(x) for x in reserva_ids]
+    if not ids:
+        return {}
+    condiciones, parametros = [], []
+    for reserva_id in ids:
+        mostrador, qr = _patrones_de_reserva(reserva_id)
+        condiciones.append("referencia LIKE ? OR referencia LIKE ?")
+        parametros.extend([mostrador, qr])
+    donde = " OR ".join(f"({c})" for c in condiciones)
+    conexion = libracore_core.get_connection()
+    try:
+        filas = conexion.execute(
+            "SELECT referencia, monto FROM caja_movimientos"
+            f" WHERE tipo='ingreso' AND ({donde})",
+            tuple(parametros),
+        ).fetchall()
+    finally:
+        conexion.close()
+    totales: dict[int, Decimal] = {}
+    for fila in filas:
+        reserva_id = _id_de_referencia(fila[0])
+        if reserva_id is None:
+            continue
+        totales[reserva_id] = totales.get(reserva_id, Decimal("0")) + Decimal(str(fila[1]))
+    return totales
+
+
+def _id_de_referencia(referencia: str | None) -> int | None:
+    """El id de reserva que hay adentro de `reserva-12-ab3f` o `lc-12-ab3f`."""
+    if not referencia:
+        return None
+    for prefijo in (PREFIJO_COBRO_DE_RESERVA, PREFIJO_COBRO_POR_QR):
+        if referencia.startswith(prefijo):
+            resto = referencia[len(prefijo):].split("-", 1)[0]
+            return int(resto) if resto.isdigit() else None
+    return None
 
 
 def total_cobrado(reserva_id: int) -> Decimal:

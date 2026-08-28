@@ -7,16 +7,33 @@
  * 🔑 **El esperado lo calcula el backend y acá sólo se muestra.** Es el número
  * que se mira al cerrar, y dos lugares restando por su cuenta terminan mostrando
  * cosas distintas por un redondeo.
+ *
+ * 🔴 **Y desde el 2026-08-28 ésta es la única pantalla donde entra plata.**
+ * Antes había tres —el turno se cobraba desde el detalle de la reserva, el
+ * buffet suelto desde la pantalla de Buffet, y acá quedaba el cobro libre—, cada
+ * una nacida por su lado; la Caja terminó siendo la que sobra en vez de la que
+ * manda. Reportado por el humano: *"todo tiene que ir por el mismo lado"*.
+ *
+ * Lo que **no** se junta es el consumo con su cobro: cargar buffet a una cancha
+ * abierta **no cobra nada**, queda colgado del turno y se cobra con él, en una
+ * sola operación y un solo comprobante. Cobrarlo dos veces es exactamente lo que
+ * ese diseño evita. Por eso las dos acciones están separadas y con su nombre.
  */
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-import { Trash2, Wallet } from 'lucide-react'
+import { CalendarCheck, CupSoda, Receipt, Wallet } from 'lucide-react'
 
-import { caja, cajas as apiCajas } from '@/lib/api'
+import {
+  buffet, caja, cajas as apiCajas, cobroDelTurno, turnosPorCobrar,
+} from '@/lib/api'
 import { useMediosDePago } from '@/lib/medios-pago'
-import type { CajaDeMostrador, ResumenDeCaja, TurnoDeCaja } from '@/lib/api'
-import { pesos } from '@/lib/fechas'
+import type {
+  CajaDeMostrador, LineaDeConsumo, ResumenDeCaja, TurnoDeCaja, TurnoPorCobrar,
+} from '@/lib/api'
+import { hora, pesos } from '@/lib/fechas'
 import { AvisoDeError } from '@/components/listado'
+import { DialogoDeConsumo } from '@/components/DialogoDeConsumo'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -204,76 +221,23 @@ function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
   onError: (m: string) => void
   onCerrado: (c: Cierre) => void
 }) {
-  const [monto, setMonto] = useState('')
-  const [concepto, setConcepto] = useState('')
+  // El monto, el concepto y el medio del cobro viven ahora en cada modo del
+  // punto de venta: los tres cobran cosas distintas y compartir un solo estado
+  // dejaba el importe de un turno metido en el cobro libre siguiente.
   const { medios, etiqueta: etiquetaDeMedio } = useMediosDePago()
-  const [medio, setMedio] = useState<string>('')
   const [declarado, setDeclarado] = useState('')
   const [enviando, setEnviando] = useState(false)
-
-  // 🔴 El medio por defecto **espera a que la lista llegue**. Antes se
-  // inicializaba con `MEDIOS_DE_PAGO[0]`, una constante que estaba siempre; con
-  // la lista pedida al backend eso es imposible hasta que conteste, y dejarlo en
-  // `''` haría que el movimiento entre a la caja **sin medio** — el cierre lo
-  // suma al total pero no lo reparte, y el arqueo por medio no cuadra.
-  useEffect(() => {
-    if (!medio && medios.length > 0) setMedio(medios[0].valor)
-  }, [medio, medios])
 
   const esperado = turno.monto_inicial + (resumen?.efectivo_ventas ?? 0)
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      <div className="space-y-3 rounded-lg border bg-card p-4">
+      <div className="space-y-4 rounded-lg border bg-card p-4">
         <div className="flex items-center gap-2 font-medium">
           <Wallet className="size-4" /> Cobrar
         </div>
-        <div className="grid gap-1.5">
-          <Label htmlFor="concepto">Concepto</Label>
-          <Input id="concepto" value={concepto} onChange={(e) => setConcepto(e.target.value)} />
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="grid gap-1.5">
-            <Label htmlFor="monto">Monto</Label>
-            <Input
-              id="monto"
-              inputMode="decimal"
-              value={monto}
-              onChange={(e) => setMonto(e.target.value)}
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="medio">Medio</Label>
-            <select
-              id="medio"
-              className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
-              value={medio}
-              onChange={(e) => setMedio(e.target.value)}
-            >
-              {medios.map((m) => (
-                <option key={m.valor} value={m.valor}>{m.etiqueta}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <Button
-          disabled={enviando || !concepto.trim() || !monto.trim()}
-          onClick={async () => {
-            setEnviando(true)
-            try {
-              await caja.cobrar({ monto, concepto: concepto.trim(), medio_pago: medio })
-              setMonto('')
-              setConcepto('')
-              onCambio()
-            } catch (e) {
-              onError((e as Error).message)
-            } finally {
-              setEnviando(false)
-            }
-          }}
-        >
-          {enviando ? 'Cobrando…' : 'Registrar cobro'}
-        </Button>
+
+        <PuntoDeVenta medios={medios} onCambio={onCambio} onError={onError} />
 
         <Egreso medios={medios} onHecho={onCambio} onError={onError} />
       </div>
@@ -310,12 +274,22 @@ function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
           </div>
         </div>
 
-        <Movimientos
-          movimientos={resumen?.movimientos ?? []}
-          etiquetaDeMedio={etiquetaDeMedio}
-          onAnulado={onCambio}
-          onError={onError}
-        />
+        {/* 🔴 **El detalle acumulado del turno NO va acá.** Pedido del humano
+            el 2026-08-28: *"lo que la caja mueva entre todas las canchas no
+            tiene por qué verse en la pantalla de caja"*. Y no es sólo ruido: la
+            unidad de trabajo del mostrador es **la cuenta de una cancha**, y una
+            lista con los movimientos de todas mezclados invita a buscar ahí lo
+            que se cierra del otro lado, cancha por cancha.
+
+            Lo que queda de este lado son los **totales**, que son lo que se
+            necesita para el arqueo. El detalle sigue existiendo —y con él la
+            anulación— en `/caja/movimientos`, a un click. */}
+        <Link
+          to="/caja/movimientos"
+          className="block text-sm text-muted-foreground underline-offset-4 hover:underline"
+        >
+          Ver los movimientos del turno →
+        </Link>
 
         <div className="grid gap-1.5 border-t pt-3">
           <Label htmlFor="declarado">Efectivo contado</Label>
@@ -357,6 +331,511 @@ function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
  * El motivo sale de una lista **del backend** y no de constantes acá: si
  * divergieran, la pantalla ofrecería un motivo que el POST rechaza con 422.
  */
+/** Las tres formas de que entre plata, juntas y con su nombre.
+ *
+ * 🔴 **Son tres y no una sola caja de texto** justamente porque no son lo mismo:
+ *
+ * | | Qué cobra | Contra qué queda |
+ * |---|---|---|
+ * | **Canchas** | la cuenta de un turno: alquiler + su buffet | la reserva, y su comprobante |
+ * | **Venta suelta** | una venta de buffet sin cancha, en el acto | la venta |
+ * | **Otro** | un ingreso suelto, con concepto libre | nada |
+ *
+ * 🔑 **La cuenta de la cancha es la unidad de trabajo**, y por eso es el primer
+ * modo: el operador va a un turno concreto, a nombre de alguien, y lo cierra
+ * ahí. El buffet consumido en esa cancha entra en esa cuenta y **no se cobra
+ * aparte** — cargarlo no mueve plata, la mueve el cierre del turno. Cobrarlo dos
+ * veces es exactamente lo que ese diseño evita.
+ *
+ * «Venta suelta» es la otra mitad: la gaseosa que compra alguien que no está
+ * jugando. Ésa sí se cobra en el acto, porque no hay turno donde colgarla.
+ */
+function PuntoDeVenta({ medios, onCambio, onError }: {
+  medios: { valor: string; etiqueta: string }[]
+  onCambio: () => void
+  onError: (m: string) => void
+}) {
+  const { actual: sucursalId } = useSucursal()
+  const [modo, setModo] = useState<'turno' | 'buffet' | 'libre'>('turno')
+  const [turnos, setTurnos] = useState<TurnoPorCobrar[]>([])
+
+  const recargarTurnos = useCallback(() => {
+    if (sucursalId === null) return
+    turnosPorCobrar
+      .listar(sucursalId)
+      // Se comprueba la forma y no se confía en ella: un cuerpo truncado es
+      // truthy y el `.map()` del selector tumbaría la pantalla entera.
+      .then((ts) => setTurnos(Array.isArray(ts) ? ts : []))
+      .catch(() => setTurnos([]))
+  }, [sucursalId])
+
+  useEffect(recargarTurnos, [recargarTurnos])
+
+  const alCobrar = () => {
+    recargarTurnos()
+    onCambio()
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-3 gap-1 rounded-md bg-muted p-1">
+        <BotonDeModo icono={CalendarCheck} activo={modo === 'turno'} onClick={() => setModo('turno')}>
+          Canchas
+        </BotonDeModo>
+        {/* ⚠️ Dice «Venta suelta» y no «Mostrador»: los cajones de la caja se
+            llaman así —el default de cada sede es «Mostrador»— y dos cosas
+            distintas con el mismo nombre en la misma pantalla es una de las
+            formas más baratas de confundir a quien la usa. Lo delató un test que
+            buscaba el nombre del cajón y encontraba la pestaña. */}
+        <BotonDeModo icono={CupSoda} activo={modo === 'buffet'} onClick={() => setModo('buffet')}>
+          Venta suelta
+        </BotonDeModo>
+        <BotonDeModo icono={Receipt} activo={modo === 'libre'} onClick={() => setModo('libre')}>
+          Otro
+        </BotonDeModo>
+      </div>
+
+      {modo === 'turno' && (
+        <CuentasDeCancha
+          turnos={turnos}
+          medios={medios}
+          sucursalId={sucursalId}
+          onCobrado={alCobrar}
+          onError={onError}
+        />
+      )}
+      {modo === 'buffet' && (
+        <VentaDeMostrador sucursalId={sucursalId} onCargado={alCobrar} />
+      )}
+      {modo === 'libre' && <CobroLibre medios={medios} onCobrado={alCobrar} onError={onError} />}
+    </div>
+  )
+}
+
+function BotonDeModo({ icono: Icono, activo, onClick, children }: {
+  icono: typeof Wallet
+  activo: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={activo}
+      className={
+        'flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-sm transition-colors '
+        + (activo
+          ? 'bg-background font-medium shadow-xs'
+          : 'text-muted-foreground hover:text-foreground')
+      }
+    >
+      <Icono className="size-4" /> {children}
+    </button>
+  )
+}
+
+/** La cuenta de una cancha: qué debe ese turno y cómo se cierra.
+ *
+ * 🔑 **Una lista y no un `<select>`.** El pedido del humano fue *"poder ir a una
+ * cancha determinada en un turno determinado a nombre de tal persona"*: eso es
+ * mirar lo que hay abierto y elegir, no desplegar un combo y adivinar. Con
+ * cuatro canchas la lista entra entera y se lee de un vistazo cuánto debe cada
+ * una.
+ *
+ * 🔴 **El monto arranca en el pendiente y se puede editar.** Lo primero cubre el
+ * caso normal —el cliente paga todo— y lo segundo la seña, que es la mitad de lo
+ * que pasa en un complejo. Fijarlo al total obligaría a cobrar de más o a salir
+ * de la Caja para tomar una seña.
+ */
+function CuentasDeCancha({ turnos, medios, sucursalId, onCobrado, onError }: {
+  turnos: TurnoPorCobrar[]
+  medios: { valor: string; etiqueta: string }[]
+  sucursalId: number | null
+  onCobrado: () => void
+  onError: (m: string) => void
+}) {
+  const [elegido, setElegido] = useState<number | null>(null)
+
+  // 🔴 **La elección se suelta cuando el turno deja la lista.** Un turno cobrado
+  // entero desaparece de `turnos`, y con el id viejo guardado el panel se
+  // quedaría abierto sobre una cuenta que ya no está — o peor, mostrando los
+  // números de la cuenta que ocupe ese lugar después.
+  useEffect(() => {
+    if (elegido !== null && !turnos.some((t) => t.reserva_id === elegido)) {
+      setElegido(null)
+    }
+  }, [elegido, turnos])
+
+  if (turnos.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        No hay canchas con cuenta abierta hoy.
+      </p>
+    )
+  }
+
+  const turno = turnos.find((t) => t.reserva_id === elegido) ?? null
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-col gap-1">
+        {turnos.map((t) => (
+          <button
+            key={t.reserva_id}
+            type="button"
+            aria-pressed={t.reserva_id === elegido}
+            onClick={() => setElegido(t.reserva_id === elegido ? null : t.reserva_id)}
+            className={
+              'flex min-w-0 items-center gap-2 rounded-md border px-2 py-1.5 text-left text-sm '
+              + (t.reserva_id === elegido ? 'border-primary bg-accent' : 'hover:bg-accent/50')
+            }
+          >
+            <span className="min-w-0 flex-1 truncate">
+              <span className="font-medium">{t.cancha}</span>
+              <span className="text-muted-foreground"> · {hora(t.comienza_at)}</span>
+              {t.cliente ? <span className="text-muted-foreground"> · {t.cliente}</span> : null}
+            </span>
+            <span className="shrink-0 tabular-nums">{pesos(t.pendiente)}</span>
+          </button>
+        ))}
+      </div>
+
+      {turno && (
+        <CierreDeCuenta
+          turno={turno}
+          medios={medios}
+          sucursalId={sucursalId}
+          onCobrado={onCobrado}
+          onError={onError}
+        />
+      )}
+    </div>
+  )
+}
+
+function CierreDeCuenta({ turno, medios, sucursalId, onCobrado, onError }: {
+  turno: TurnoPorCobrar
+  medios: { valor: string; etiqueta: string }[]
+  sucursalId: number | null
+  onCobrado: () => void
+  onError: (m: string) => void
+}) {
+  const [consumos, setConsumos] = useState<LineaDeConsumo[]>([])
+  const [monto, setMonto] = useState(String(turno.pendiente))
+  const [medio, setMedio] = useState<string>('')
+  const [enviando, setEnviando] = useState(false)
+  const [cargandoBuffet, setCargandoBuffet] = useState(false)
+  // Qué líneas de la cuenta se están cobrando en este movimiento. `null` = la
+  // cuenta entera, que es el caso normal y el estado inicial.
+  const [tildadas, setTildadas] = useState<Set<string> | null>(null)
+
+  useEffect(() => {
+    if (!medio && medios.length > 0) setMedio(medios[0].valor)
+  }, [medio, medios])
+
+  // El monto sigue al turno: cambiar de cancha con el importe del anterior
+  // adentro es cobrarle a uno lo que debe otro. Y se sueltan las tildes, por lo
+  // mismo: son las líneas de la cuenta anterior.
+  useEffect(() => {
+    setMonto(String(turno.pendiente))
+    setTildadas(null)
+  }, [turno.reserva_id, turno.pendiente])
+
+  const verConsumos = useCallback(() => {
+    buffet
+      .consumosDe(turno.reserva_id)
+      // Una instancia sin buffet configurado contesta 503: no es un error que
+      // mostrar, es que este complejo no tiene buffet y el detalle no aparece.
+      .then((d) => setConsumos(Array.isArray(d?.lineas) ? d.lineas : []))
+      .catch(() => setConsumos([]))
+  }, [turno.reserva_id])
+
+  useEffect(verConsumos, [verConsumos])
+
+  const buffetDeLaCuenta = consumos.reduce((suma, l) => suma + l.importe, 0)
+
+  /** Las líneas de la cuenta: el alquiler, y cada consumo cargado a la cancha.
+   *
+   * 🔑 **El alquiler sale de restar** y no de un campo propio: el backend manda
+   * el total ya armado —alquiler más buffet— y es el mismo número que factura el
+   * turno. Pedir el precio por separado abriría un segundo origen para la misma
+   * cifra, que es cómo dos pantallas terminan diciendo cosas distintas.
+   */
+  const lineas = [
+    { clave: 'alquiler', texto: 'Alquiler de la cancha', importe: turno.total - buffetDeLaCuenta },
+    ...consumos.map((l, i) => ({
+      clave: `c${i}`,
+      texto: `${l.cantidad}× ${l.descripcion}`,
+      importe: l.importe,
+    })),
+  ]
+
+  const fraccionado = tildadas !== null
+  const elegidas = lineas.filter((l) => !fraccionado || tildadas.has(l.clave))
+  const sumaElegida = elegidas.reduce((suma, l) => suma + l.importe, 0)
+
+  const alternar = (clave: string) => {
+    // La primera tilde arranca desde "todas", que es lo que se ve: destildar una
+    // línea de una cuenta completa es el gesto natural para cobrar el resto.
+    const base = tildadas ?? new Set(lineas.map((l) => l.clave))
+    const proximas = new Set(base)
+    if (proximas.has(clave)) proximas.delete(clave)
+    else proximas.add(clave)
+    setTildadas(proximas)
+    setMonto(
+      String(lineas.filter((l) => proximas.has(l.clave)).reduce((s, l) => s + l.importe, 0)),
+    )
+  }
+
+  const detalle = fraccionado && elegidas.length < lineas.length
+    ? elegidas.map((l) => l.texto).join(', ').slice(0, 120)
+    : ''
+
+  return (
+    <div className="space-y-3 rounded-md border bg-muted/40 p-3">
+      {/* 🔑 **Cada línea se tilda, y ahí está el fraccionamiento.** Pedido del
+          humano el 2026-08-28: un turno se cierra como una mesa de restaurante,
+          *"se puede pagar solo la cancha y después cada uno paga individual lo
+          que pidió"*. Destildar el buffet y cobrar deja el alquiler saldado y el
+          resto pendiente; después cada jugador tilda lo suyo. Son N cobros
+          parciales contra la misma reserva — lo mismo que ya hacía una seña.
+          ⚠️ Lo que el sistema guarda es **cuánto** entró, no qué línea quedó
+          saldada: el texto de las líneas viaja como `detalle` para que el arqueo
+          se pueda leer, pero no es una liquidación. */}
+      <div className="space-y-1 text-sm">
+        {lineas.map((l) => (
+          <label
+            key={l.clave}
+            className="flex cursor-pointer items-center justify-between gap-2"
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <input
+                type="checkbox"
+                className="size-3.5 shrink-0"
+                checked={!fraccionado || tildadas.has(l.clave)}
+                onChange={() => alternar(l.clave)}
+              />
+              <span className="min-w-0 truncate text-muted-foreground">{l.texto}</span>
+            </span>
+            <span className="shrink-0 tabular-nums">{pesos(l.importe)}</span>
+          </label>
+        ))}
+        <div className="flex justify-between border-t pt-1">
+          <span className="text-muted-foreground">Total</span>
+          <span className="tabular-nums">{pesos(turno.total)}</span>
+        </div>
+        {turno.cobrado > 0 && (
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Ya cobrado</span>
+            <span className="tabular-nums">−{pesos(turno.cobrado)}</span>
+          </div>
+        )}
+        <div className="flex justify-between border-t pt-1 font-medium">
+          <span>Pendiente</span>
+          <span className="tabular-nums">{pesos(turno.pendiente)}</span>
+        </div>
+        {fraccionado && elegidas.length < lineas.length && (
+          // 🔴 Se dice **qué** se está por cobrar, no sólo cuánto. Con tres
+          // cobros parciales sobre la misma cuenta, un importe suelto en la
+          // pantalla no alcanza para saber si es el que corresponde.
+          <p className="border-t pt-1 text-muted-foreground">
+            Cobrando {elegidas.length} de {lineas.length}: {pesos(sumaElegida)}
+          </p>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="grid gap-1.5">
+          <Label htmlFor="monto-cuenta">Monto</Label>
+          <Input
+            id="monto-cuenta"
+            inputMode="decimal"
+            value={monto}
+            onChange={(e) => setMonto(e.target.value)}
+          />
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="medio-cuenta">Medio</Label>
+          <select
+            id="medio-cuenta"
+            className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
+            value={medio}
+            onChange={(e) => setMedio(e.target.value)}
+          >
+            {medios.map((m) => (
+              <option key={m.valor} value={m.valor}>{m.etiqueta}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <Button
+          disabled={enviando || !monto.trim()}
+          onClick={async () => {
+            setEnviando(true)
+            try {
+              await cobroDelTurno.registrar(turno.reserva_id, {
+                monto, medio_pago: medio, detalle,
+              })
+              onCobrado()
+            } catch (e) {
+              onError((e as Error).message)
+            } finally {
+              setEnviando(false)
+            }
+          }}
+        >
+          {enviando
+            ? 'Cobrando…'
+            : fraccionado && elegidas.length < lineas.length
+              ? 'Cobrar lo seleccionado'
+              : 'Cobrar y cerrar la cuenta'}
+        </Button>
+
+        {/* 🔴 Cargar buffet acá **no cobra**: le suma a esta cuenta y se cobra
+            con el botón de al lado, en una sola operación y un solo
+            comprobante. Está junto al cierre a propósito — es lo que se hace
+            mientras el turno corre, y mandarlo a otra pantalla es lo que hacía
+            que el buffet de la cancha se terminara cobrando aparte. */}
+        {sucursalId !== null && (
+          <Button variant="outline" onClick={() => setCargandoBuffet(true)}>
+            <CupSoda className="size-4" /> Cargar buffet
+          </Button>
+        )}
+      </div>
+
+      {sucursalId !== null && (
+        <DialogoDeConsumo
+          abierto={cargandoBuffet}
+          sucursalId={sucursalId}
+          reservaId={turno.reserva_id}
+          onCerrar={() => setCargandoBuffet(false)}
+          onCargado={() => {
+            setCargandoBuffet(false)
+            verConsumos()
+            onCobrado()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+/** La venta de buffet que NO es de una cancha: se cobra en el acto.
+ *
+ * 🔴 **La diferencia con «Cargar buffet» de una cuenta no es de forma, es de
+ * plata.** Acá el consumo se cobra al confirmar; allá no se cobra, se le cuelga
+ * al turno. Confundirlas es cobrar dos veces las mismas gaseosas.
+ */
+function VentaDeMostrador({ sucursalId, onCargado }: {
+  sucursalId: number | null
+  onCargado: () => void
+}) {
+  const [abierto, setAbierto] = useState(false)
+
+  if (sucursalId === null) {
+    return <p className="text-sm text-muted-foreground">Elegí una sucursal.</p>
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">
+        Para quien no está jugando: se cobra al confirmar. Lo que consume una
+        cancha abierta se carga desde su cuenta, en «Canchas».
+      </p>
+      <Button variant="outline" onClick={() => setAbierto(true)}>
+        <CupSoda className="size-4" /> Vender del buffet
+      </Button>
+      <DialogoDeConsumo
+        abierto={abierto}
+        sucursalId={sucursalId}
+        reservaId={null}
+        onCerrar={() => setAbierto(false)}
+        onCargado={() => {
+          setAbierto(false)
+          onCargado()
+        }}
+      />
+    </div>
+  )
+}
+
+/** El ingreso suelto: lo que no es un turno ni una venta de buffet.
+ *
+ * Es el que estaba desde el principio y el único que **no queda atado a nada**:
+ * ni reserva ni comprobante. Sigue existiendo porque en un mostrador entra plata
+ * que no es ninguna de las otras dos —una cuota, un alquiler de paletas—, pero
+ * es el último de los tres a propósito: usarlo para cobrar un turno es lo que
+ * dejaba el comprobante viéndose «sin cobrar» sobre plata que ya había entrado.
+ */
+function CobroLibre({ medios, onCobrado, onError }: {
+  medios: { valor: string; etiqueta: string }[]
+  onCobrado: () => void
+  onError: (m: string) => void
+}) {
+  const [monto, setMonto] = useState('')
+  const [concepto, setConcepto] = useState('')
+  const [medio, setMedio] = useState<string>('')
+  const [enviando, setEnviando] = useState(false)
+
+  useEffect(() => {
+    if (!medio && medios.length > 0) setMedio(medios[0].valor)
+  }, [medio, medios])
+
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-1.5">
+        <Label htmlFor="concepto">Concepto</Label>
+        <Input id="concepto" value={concepto} onChange={(e) => setConcepto(e.target.value)} />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="grid gap-1.5">
+          <Label htmlFor="monto">Monto</Label>
+          <Input
+            id="monto"
+            inputMode="decimal"
+            value={monto}
+            onChange={(e) => setMonto(e.target.value)}
+          />
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="medio">Medio</Label>
+          <select
+            id="medio"
+            className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
+            value={medio}
+            onChange={(e) => setMedio(e.target.value)}
+          >
+            {medios.map((m) => (
+              <option key={m.valor} value={m.valor}>{m.etiqueta}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <Button
+        disabled={enviando || !concepto.trim() || !monto.trim()}
+        onClick={async () => {
+          setEnviando(true)
+          try {
+            await caja.cobrar({ monto, concepto: concepto.trim(), medio_pago: medio })
+            setMonto('')
+            setConcepto('')
+            onCobrado()
+          } catch (e) {
+            onError((e as Error).message)
+          } finally {
+            setEnviando(false)
+          }
+        }}
+      >
+        {enviando ? 'Cobrando…' : 'Registrar cobro'}
+      </Button>
+    </div>
+  )
+}
+
 function Egreso({ medios, onHecho, onError }: {
   medios: { valor: string; etiqueta: string }[]
   onHecho: () => void
@@ -476,80 +955,3 @@ function Egreso({ medios, onHecho, onError }: {
  * medio: el operador cobraba a ciegas y un monto mal tipeado sólo aparecía como
  * una diferencia al cerrar, cuando ya no se sabía cuál era.
  */
-function Movimientos({ movimientos, etiquetaDeMedio, onAnulado, onError }: {
-  movimientos: ResumenDeCaja['movimientos']
-  etiquetaDeMedio: (m: string) => string
-  onAnulado: () => void
-  onError: (m: string) => void
-}) {
-  const [anulando, setAnulando] = useState<number | null>(null)
-
-  if (movimientos.length === 0) {
-    return (
-      <p className="border-t pt-3 text-sm text-muted-foreground">
-        Todavía no cargaste nada en este turno.
-      </p>
-    )
-  }
-
-  return (
-    // 🔴 `flex flex-col` y **no** `grid gap-1`, que es lo que había.
-    //
-    // Un grid implícito dimensiona su columna a `max-content`, así que la fila
-    // crecía con el concepto más largo y se llevaba el importe y el botón fuera
-    // de la tarjeta — con el `min-w-0` puesto en la fila **y** en el texto, que
-    // no alcanzan. Medido en un navegador: la fila daba 554 dentro de un padre
-    // de 424; con `flex flex-col` da 424, y con `grid-cols-[minmax(0,1fr)]`
-    // también. Se elige el flex por ser el idioma del resto de la pantalla.
-    <div className="flex flex-col gap-1 border-t pt-3">
-      <div className="text-sm font-medium">Movimientos</div>
-      {movimientos.map((m) => (
-        <div key={m.id} className="flex min-w-0 items-center gap-2 text-sm">
-          {/* 🔴 `min-w-0` en la fila **y** en el texto. Sin el de la fila, el
-              `flex-1 truncate` del hijo no tiene contra qué achicarse: el
-              contenido empuja y el importe y el botón se salen de la tarjeta.
-              Medido en un navegador, no supuesto. */}
-          <span className="min-w-0 flex-1 truncate" title={m.concepto}>
-            {m.concepto}
-            <span className="ml-1 text-muted-foreground">
-              · {etiquetaDeMedio(m.medio_pago)}
-            </span>
-          </span>
-          {/* El egreso se muestra en negativo: es lo que hace que la lista se
-              pueda sumar de arriba abajo y dé el esperado.
-
-              `shrink-0` y `tabular-nums`: el importe no se parte, y los dígitos
-              quedan en columna para poder sumarlos con la vista. */}
-          <span className={`shrink-0 tabular-nums${m.tipo === 'egreso' ? ' text-amber-700 dark:text-amber-500' : ''}`}>
-            {m.tipo === 'egreso' ? '−' : ''}{pesos(String(m.monto))}
-          </span>
-          <Button
-            variant="outline"
-            size="icon"
-            className="size-7 shrink-0"
-            aria-label={`Anular ${m.concepto}`}
-            disabled={anulando === m.id}
-            onClick={async () => {
-              setAnulando(m.id)
-              try {
-                await caja.anular(m.id)
-                onAnulado()
-              } catch (e) {
-                onError((e as Error).message)
-              } finally {
-                setAnulando(null)
-              }
-            }}
-          >
-            {/* Icono y no la palabra: con el texto, la acción se comía el
-                ancho de una fila que ya lleva concepto, medio e importe.
-                El nombre accesible lo da el `aria-label`, que además nombra
-                **cuál** movimiento — con veinte filas, veinte «Anular»
-                idénticos no le sirven a nadie que use lector de pantalla. */}
-            <Trash2 className="size-3.5" />
-          </Button>
-        </div>
-      ))}
-    </div>
-  )
-}

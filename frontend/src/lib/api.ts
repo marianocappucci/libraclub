@@ -328,7 +328,44 @@ export const cobroDelTurno = {
   registrar: (reservaId: number, datos: {
     monto: string
     medio_pago: string
+    /** Qué parte de la cuenta se está pagando. El backend lo agrega al
+     *  concepto; sin esto, tres cobros fraccionados de un mismo turno quedan
+     *  con el mismo texto y montos que nadie puede reconstruir. */
+    detalle?: string
   }) => api.post<EstadoDeCobro>(`/api/reservas/${reservaId}/cobros`, datos),
+}
+
+/** Un turno del día que todavía debe plata, como lo ve el mostrador. */
+export type TurnoPorCobrar = {
+  reserva_id: number
+  cancha_id: number
+  cancha: string
+  deporte: string
+  comienza_at: string
+  termina_at: string
+  cliente: string
+  total: number
+  cobrado: number
+  pendiente: number
+}
+
+/** El selector de la Caja: qué turnos hay que cobrar hoy.
+ *
+ * 🔑 **No es `/agenda/proximas`, aunque el nombre invite.** Esa ruta filtra
+ * `comienza_at >= ahora` y el turno que se cobra en el mostrador es justamente
+ * el que **está terminando**: a las 21:00, el de 20:00 a 21:30 ya no es
+ * "próximo" y es el que tiene al cliente enfrente.
+ *
+ * Y el pendiente viene calculado del backend —alquiler más buffet consumido,
+ * menos lo que entró—, no derivado acá: el mismo número que el detalle de la
+ * reserva y que el comprobante. Dos pantallas restando por su cuenta terminan
+ * cobrando distinto.
+ */
+export const turnosPorCobrar = {
+  listar: (sucursalId: number) =>
+    api.get<TurnoPorCobrar[]>(
+      `/api/reservas/agenda/por-cobrar?sucursal_id=${sucursalId}`,
+    ),
 }
 
 /** Cómo se escribe cada deporte en pantalla.
