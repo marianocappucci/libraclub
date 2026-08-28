@@ -2,6 +2,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import Icons from 'unplugin-icons/vite'
 
 // Proxy de API en dev: el front (localhost:5173) le habla al backend por el
 // MISMO origen, así la cookie de sesión funciona sin pelear con CORS/SameSite.
@@ -24,7 +25,7 @@ const RUTAS_API = ['/auth', '/api', '/admin', '/salud']
 const BACKEND = 'http://localhost:8099'
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), Icons({ compiler: 'jsx', jsx: 'react' })],
   resolve: {
     alias: { '@': new URL('./src', import.meta.url).pathname },
   },
