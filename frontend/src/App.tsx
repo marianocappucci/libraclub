@@ -9,6 +9,7 @@ import { Horarios } from '@/pages/Horarios'
 import { Canchas } from '@/pages/Canchas'
 import { Configuracion } from '@/pages/Configuracion'
 import { FacturaDetalle } from '@/pages/FacturaDetalle'
+import { FacturaNueva } from '@/pages/FacturaNueva'
 import { Facturas } from '@/pages/Facturas'
 import { Clientes } from '@/pages/Clientes'
 import { Login } from '@/pages/Login'
@@ -116,6 +117,10 @@ function Backoffice() {
           {/* Al lado del listado y no anidado, mismo criterio que el
               detalle de torneo y el de cuenta corriente: no comparten nada
               salvo el camino. */}
+          {/* ANTES que `/facturas/:id`: react-router elige por especificidad
+              y no por orden, pero dejarlo escrito arriba evita la duda al
+              leerlo — "nueva" no es un id. */}
+          <Route path="/facturas/nueva" element={<FacturaNueva />} />
           <Route path="/facturas/:id" element={<FacturaDetalle />} />
           <Route path="/configuracion" element={<Configuracion />} />
           <Route path="/logs" element={<Logs />} />
