@@ -127,6 +127,17 @@ const Cascaron = createLayout<Usuario>({
         // encargado (`staff`) y lo que el backend gatea con `require_admin` es
         // el alta, la edición y la baja. La pantalla ya esconde esos botones
         // por su cuenta.
+        //
+        // ⬛ **El label es estático y el título de la pantalla no.** Ahí dice
+        // «Mi complejo» con una sola sucursal —la instancia comercial de un
+        // cliente ES un complejo— y esto sigue diciendo «Sucursales». La
+        // diferencia no es un olvido: `navSections` es un **array de módulo**
+        // que `createLayout` del kit consume una sola vez, así que un label que
+        // dependa del contexto necesita que `libra-ui` acepte una función —un
+        // cambio del kit que toca a los otros seis productos por un rótulo—.
+        // Se deja pendiente en vez de resolverlo con un `useMemo` sobre
+        // `createLayout`, que remontaría el árbol entero al pasar de una
+        // sucursal a dos.
         { to: '/sucursales', label: 'Sucursales', icon: MapPin },
         // Usuarios sí: el router entero exige admin, así que a un encargado el
         // link le daría 403. Un menú que ofrece lo que no se puede usar es peor
