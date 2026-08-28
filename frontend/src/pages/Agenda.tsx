@@ -8,6 +8,8 @@ import { DetalleDeReserva } from '@/components/DetalleDeReserva'
 import { buttonVariants } from '@/components/ui/button'
 import { AvisoDeError } from '@/components/listado'
 import { sumarDiasISO } from 'libra-ui/fechas'
+import { TituloPantalla } from 'libra-ui/titulo-pantalla'
+import { CalendarDays } from 'lucide-react'
 
 /** Los colores por estado. Un solo lugar, para que la leyenda y la grilla no
  *  puedan decir cosas distintas.
@@ -82,6 +84,31 @@ export function Agenda() {
 
   return (
     <div className="space-y-4">
+      {/* La barra de la agenda: el título y el salto de semana, pegados arriba.
+       *
+       * 🔑 **La agenda no tenía título de pantalla** y era la única así: su
+       * único `<h2>` era el encabezado de cada cancha, adentro del `.map()`. El
+       * guard de iconos lo tenía anotado como excepción documentada desde que se
+       * escribió; con el título puesto, esa excepción se retira.
+       *
+       * 🔑 **Sticky, y medido en un navegador antes de elegir el `top`.** Con
+       * esta misma cadena de contenedores —`main` con `p-4 pt-12 md:p-6`, la
+       * pantalla en `space-y-4`— la barra arranca a 48px y al scrollear queda
+       * clavada en **0**, sin dejar franja de contenido asomando arriba, y sin
+       * que nada pase por los costados: los 16px laterales son el padding del
+       * `main`, donde no hay filas. Es el mismo tipo de arnés con el que
+       * LibraDesk midió su barra de abajo.
+       *
+       * `sticky` y no `fixed`: tiene que respetar el ancho de la columna de
+       * contenido, que cambia según la sidebar esté abierta, cerrada o en
+       * mobile. Un `fixed` se posiciona contra el viewport y cruzaría por debajo
+       * del menú.
+       *
+       * El fondo **opaco** no es decorativo: la grilla pasa por debajo.
+       */}
+      <div className="sticky top-0 z-20 -mx-1 space-y-3 rounded-lg border bg-card px-3 py-3 shadow-sm">
+        <TituloPantalla icono={CalendarDays}>Agenda</TituloPantalla>
+
       {/* 🔴 `flex-wrap`: los botones de `buttonVariants` traen `whitespace-nowrap`
           y `shrink-0`, así que la fila NO se puede encoger. Sin envolver, en un
           teléfono de 375px se sale 61px y arrastra al `<body>` con ella.
@@ -109,6 +136,7 @@ export function Agenda() {
           Semana siguiente →
         </button>
         {cargando && <span className="text-sm text-muted-foreground">actualizando…</span>}
+      </div>
       </div>
 
       <AvisoDeError mensaje={error} />
