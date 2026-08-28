@@ -7,6 +7,7 @@ import { DialogoDeReserva } from '@/components/DialogoDeReserva'
 import { DetalleDeReserva } from '@/components/DetalleDeReserva'
 import { buttonVariants } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { iconoDeDeporte } from '@/lib/deportes'
 import { AvisoDeError } from '@/components/listado'
 import { sumarDiasISO } from 'libra-ui/fechas'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
@@ -170,7 +171,13 @@ export function Agenda() {
           >
             <TabsList>
               {canchas.map((c) => (
-                <TabsTrigger key={c.id} value={String(c.id)}>
+                <TabsTrigger key={c.id} value={String(c.id)} className="gap-1.5">
+                  {/* El icono dice de qué es la cancha sin leer: con seis
+                      pestañas, el nombre solo obliga a leerlas todas. */}
+                  {(() => {
+                    const Icono = iconoDeDeporte(c.deporte)
+                    return <Icono aria-hidden className="size-4 shrink-0" />
+                  })()}
                   {c.nombre}
                 </TabsTrigger>
               ))}

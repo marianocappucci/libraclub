@@ -14,6 +14,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Agenda } from './Agenda'
+import IconoGenerico from '~icons/mdi/dumbbell'
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => ({ user: { username: 'ana', name: 'Ana', role: 'staff' }, loading: false }),
@@ -86,6 +87,52 @@ describe('la agenda, una cancha por vez', () => {
     render(<Agenda />)
     await screen.findByText(/11\.111/)
     expect(screen.getAllByRole('tab')).toHaveLength(2)
+  })
+
+  it('🔴 cada pestaña lleva el icono de SU deporte, y no el mismo para todas', async () => {
+    // Lo pidió el humano el 2026-08-28: saber de qué es cada cancha sin leer.
+    //
+    // 🔑 Se compara el dibujo de los dos, no que "haya un svg": un mapa que
+    // devolviera siempre el icono genérico pasaría esa versión floja del test, y
+    // sería exactamente el defecto —seis pestañas con la misma pesa al lado—.
+    render(<Agenda />)
+    await screen.findByText(/11\.111/)
+
+    const [padel, futbol] = screen.getAllByRole('tab')
+    const dibujoDe = (t: HTMLElement) => t.querySelector('svg')?.innerHTML ?? ''
+
+    expect(dibujoDe(padel)).not.toBe('')
+    expect(dibujoDe(futbol)).not.toBe('')
+    expect(dibujoDe(padel)).not.toBe(dibujoDe(futbol))
+
+    // 🔴 **Y que no sea el genérico**, que es lo que "distintos entre sí" no
+    // alcanza a decir: con pádel mapeado a la pesa y fútbol a la pelota, los dos
+    // siguen siendo distintos y el de pádel está mal igual. Lo delató la
+    // mutación; la primera versión de este test se quedaba en la línea de
+    // arriba.
+    const generico = render(<IconoGenerico />).container.querySelector('svg')?.innerHTML
+    expect(generico).toBeTruthy()
+    expect(dibujoDe(padel)).not.toBe(generico)
+    expect(dibujoDe(futbol)).not.toBe(generico)
+  })
+
+  it('🔑 un deporte que el mapa no conoce igual muestra un icono', async () => {
+    // El guard cruzado del backend impide que el enum crezca sin etiqueta ni
+    // icono, pero el fallback es el cinturón: una pestaña sin icono al lado de
+    // seis que lo tienen se lee como un error de carga, no como "no sé cuál es".
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      const u = String(url)
+      if (u.includes('/api/canchas')) {
+        return Promise.resolve(json([CANCHAS[0], { ...CANCHAS[1], deporte: 'curling' }]))
+      }
+      if (u.includes('/api/disponibilidad/semana')) return Promise.resolve(json(SEMANA))
+      return Promise.resolve(json(null))
+    }))
+    render(<Agenda />)
+    await screen.findByText(/11\.111/)
+
+    const desconocida = screen.getAllByRole('tab')[1]
+    expect(desconocida.querySelector('svg')).not.toBeNull()
   })
 
   it('🔑 con una sola cancha no se dibuja la tira de pestañas', async () => {
