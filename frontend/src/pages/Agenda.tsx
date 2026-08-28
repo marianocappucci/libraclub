@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { agenda, canchas as apiCanchas } from '@/lib/api'
+import { agenda, canchas as apiCanchas, NOMBRE_DE_DEPORTE } from '@/lib/api'
 import type { Cancha, Semana, Turno } from '@/lib/api'
 import { diaYMes, hora, lunesDeLaSemana, nombreDelDia, pesos } from '@/lib/fechas'
 import { useSucursal } from '@/context/SucursalContext'
@@ -157,7 +157,7 @@ export function Agenda() {
           <h2 className="encabezado-de-cancha border-b px-4 py-2 font-medium">
             {cancha.nombre}
             <span className="ml-2 text-sm font-normal text-muted-foreground">
-              {cancha.deporte} · turnos de {cancha.duracion_turno_min} min
+              {NOMBRE_DE_DEPORTE[cancha.deporte] ?? cancha.deporte} · turnos de {cancha.duracion_turno_min} min
             </span>
           </h2>
           <div className="overflow-x-auto">

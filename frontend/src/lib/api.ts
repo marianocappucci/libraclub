@@ -329,6 +329,29 @@ export const cobroDelTurno = {
   }) => api.post<EstadoDeCobro>(`/api/reservas/${reservaId}/cobros`, datos),
 }
 
+/** Cómo se escribe cada deporte en pantalla.
+ *
+ * 🔑 **El valor guardado es la clave del enum** (`padel`, `futbol`), sin
+ * acentos y en minúscula, porque es lo que viaja a la base. Las cuatro
+ * pantallas que lo mostraban lo escupían crudo: en la agenda se leía
+ * *"Cancha 1 · padel"*, con el deporte en minúscula y sin tilde al lado de un
+ * nombre propio. Reportado el 2026-08-28.
+ *
+ * El mapa vive acá, con los tipos de comprobante, y no en cada pantalla: cuatro
+ * copias de esta lista es cómo se llega a que una diga «Padel» y otra «Pádel».
+ *
+ * El `?? deporte` del uso cubre un valor nuevo del enum que todavía no esté
+ * acá: se ve crudo, que es feo pero no rompe. */
+export const NOMBRE_DE_DEPORTE: Record<string, string> = {
+  padel: 'Pádel',
+  futbol: 'Fútbol',
+  tenis: 'Tenis',
+  basquet: 'Básquet',
+  voley: 'Vóley',
+  hockey: 'Hockey',
+  otro: 'Otro',
+}
+
 export const facturacion = {
   /** `null` si todavía no se facturó. Lo puede ver el mostrador. */
   ver: (reservaId: number) => api.get<Factura | null>(`/api/reservas/${reservaId}/factura`),
