@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-import { CalendarCheck, CupSoda, Receipt, Wallet } from 'lucide-react'
+import { CalendarCheck, CupSoda, Receipt, Users, Wallet } from 'lucide-react'
 
 import {
   buffet, caja, cajas as apiCajas, cobroDelTurno, turnosPorCobrar,
@@ -435,6 +435,37 @@ function BotonDeModo({ icono: Icono, activo, onClick, children }: {
   )
 }
 
+/** Parte un importe en `cuantas` partes que **suman exactamente el importe**.
+ *
+ * 🔴 **El resto se reparte, no se descarta.** Es el defecto clásico de dividir
+ * una cuenta: $14.000 entre 3 da $4.666,66 y tres pagos de eso suman $13.999,98
+ * — quedan **dos centavos pendientes que nadie puede cobrar** y el turno no
+ * cierra nunca. Se trabaja en centavos enteros y el resto se reparte de a uno
+ * entre las primeras partes, así que la suma cierra siempre.
+ *
+ * Se exporta sólo para que el test pueda medirlo sin montar la pantalla: es
+ * aritmética, y probarla a través de clicks es probarla con ruido.
+ */
+export function partirImporte(importe: number, cuantas: number): number[] {
+  if (!Number.isFinite(importe) || importe <= 0 || cuantas < 1) return []
+  const centavos = Math.round(importe * 100)
+  const base = Math.floor(centavos / cuantas)
+  const resto = centavos - base * cuantas
+  return Array.from({ length: cuantas }, (_, i) => (base + (i < resto ? 1 : 0)) / 100)
+}
+
+/** Cuántos jugadores propone la pantalla según el deporte.
+ *
+ * Es un **punto de partida, no una regla**: se puede cambiar antes de dividir.
+ * El pádel se juega de a cuatro y es el caso dominante de este producto, así que
+ * arrancar en 2 obligaría a corregirlo siempre. Para el resto se arranca en 2,
+ * que es lo menos comprometido — un fútbol 5 son diez jugadores pero nadie
+ * divide una cancha en diez.
+ */
+function jugadoresSugeridos(deporte: string): number {
+  return deporte === 'padel' ? 4 : 2
+}
+
 /** La cuenta de una cancha: qué debe ese turno y cómo se cierra.
  *
  * 🔑 **Una lista y no un `<select>`.** El pedido del humano fue *"poder ir a una
@@ -529,6 +560,10 @@ function CierreDeCuenta({ turno, medios, sucursalId, onCobrado, onError }: {
   // Qué líneas de la cuenta se están cobrando en este movimiento. `null` = la
   // cuenta entera, que es el caso normal y el estado inicial.
   const [tildadas, setTildadas] = useState<Set<string> | null>(null)
+  // La división entre jugadores, si se pidió. `partes` se calcula **una vez** y
+  // no se recalcula: ver el comentario del efecto que la suelta.
+  const [division, setDivision] = useState<{ partes: number[]; pagadas: boolean[] } | null>(null)
+  const [cuantos, setCuantos] = useState(() => jugadoresSugeridos(turno.deporte))
 
   useEffect(() => {
     if (!medio && medios.length > 0) setMedio(medios[0].valor)
@@ -541,6 +576,16 @@ function CierreDeCuenta({ turno, medios, sucursalId, onCobrado, onError }: {
     setMonto(String(turno.pendiente))
     setTildadas(null)
   }, [turno.reserva_id, turno.pendiente])
+
+  // 🔴 **La división se suelta al cambiar de cancha y NO al bajar el pendiente.**
+  // Es la diferencia entre que funcione y que no: cada parte que se cobra baja
+  // el pendiente, y recalcular las partes desde el pendiente nuevo le cambiaría
+  // el importe a los jugadores que todavía no pagaron. Se calcula una vez, sobre
+  // lo que había, y se sostiene hasta que se cobra entera o se cancela.
+  useEffect(() => {
+    setDivision(null)
+    setCuantos(jugadoresSugeridos(turno.deporte))
+  }, [turno.reserva_id, turno.deporte])
 
   const verConsumos = useCallback(() => {
     buffet
@@ -670,9 +715,100 @@ function CierreDeCuenta({ turno, medios, sucursalId, onCobrado, onError }: {
         </div>
       </div>
 
+      {/* 🔑 **Dividir entre jugadores.** En una cancha de pádel lo normal no es
+          que pague uno: pagan los cuatro, y a veces con medios distintos. Se
+          divide **lo que se está por cobrar** —el monto de arriba, que por
+          defecto es el pendiente y con líneas destildadas es la parte elegida—,
+          así las dos formas de partir la cuenta se componen: cobrás el alquiler
+          entero y después dividís el buffet entre los tres que consumieron.
+
+          🔴 El medio de pago es el de arriba y se cambia **entre parte y
+          parte**: es exactamente el caso en que uno paga en efectivo y otro
+          transfiere, que es por lo que esto existe. */}
+      {division === null ? (
+        <div className="flex items-end gap-2 border-t pt-3">
+          <div className="grid gap-1.5">
+            <Label htmlFor="cuantos-jugadores">Jugadores</Label>
+            <Input
+              id="cuantos-jugadores"
+              className="w-20"
+              inputMode="numeric"
+              value={String(cuantos)}
+              onChange={(e) => setCuantos(Math.max(1, Number(e.target.value) || 1))}
+            />
+          </div>
+          <Button
+            variant="outline"
+            disabled={cuantos < 2 || partirImporte(Number(monto), cuantos).length === 0}
+            onClick={() => {
+              const partes = partirImporte(Number(monto), cuantos)
+              setDivision({ partes, pagadas: partes.map(() => false) })
+            }}
+          >
+            <Users className="size-4" /> Dividir
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-2 border-t pt-3">
+          <div className="flex items-baseline justify-between">
+            <span className="text-sm font-medium">
+              Dividido en {division.partes.length}
+            </span>
+            <button
+              type="button"
+              className="text-sm text-muted-foreground underline-offset-4 hover:underline"
+              onClick={() => setDivision(null)}
+            >
+              Cancelar la división
+            </button>
+          </div>
+          {division.partes.map((parte, i) => (
+            <div key={i} className="flex items-center gap-2 text-sm">
+              <span className="min-w-0 flex-1 truncate">
+                Jugador {i + 1} de {division.partes.length}
+              </span>
+              <span className="shrink-0 tabular-nums">{pesos(parte)}</span>
+              {division.pagadas[i] ? (
+                <span className="shrink-0 text-muted-foreground">cobrado</span>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0"
+                  disabled={enviando}
+                  onClick={async () => {
+                    setEnviando(true)
+                    try {
+                      await cobroDelTurno.registrar(turno.reserva_id, {
+                        monto: String(parte),
+                        medio_pago: medio,
+                        detalle: `Jugador ${i + 1} de ${division.partes.length}`,
+                      })
+                      // 🔴 Se marca **esta** parte y no se recalculan las otras:
+                      // el importe de los que faltan ya está fijado.
+                      setDivision({
+                        ...division,
+                        pagadas: division.pagadas.map((p, n) => (n === i ? true : p)),
+                      })
+                      onCobrado()
+                    } catch (e) {
+                      onError((e as Error).message)
+                    } finally {
+                      setEnviando(false)
+                    }
+                  }}
+                >
+                  Cobrar
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2">
         <Button
-          disabled={enviando || !monto.trim()}
+          disabled={enviando || !monto.trim() || division !== null}
           onClick={async () => {
             setEnviando(true)
             try {
