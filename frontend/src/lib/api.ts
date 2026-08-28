@@ -295,6 +295,40 @@ export const TIPO_DE_FACTURA: Record<number, string> = {
   11: 'C',
 }
 
+export type CobroDeTurno = {
+  id: number
+  fecha: string
+  monto: number
+  medio_pago: string
+  concepto: string
+  /** A qué comprobante quedó atado. `null` mientras el turno no se facturó. */
+  factura_id: number | null
+}
+
+export type EstadoDeCobro = {
+  /** Alquiler + buffet consumido: el mismo número que factura el turno. */
+  total: number
+  cobrado: number
+  pendiente: number
+  cobros: CobroDeTurno[]
+}
+
+/** El cobro de un turno, atado a su comprobante.
+ *
+ * 🔑 **No es lo mismo que la pantalla de Caja.** Ahí el cobro se carga como
+ * monto más concepto libre, sin vínculo con nada — sirve para un ingreso suelto
+ * y deja el comprobante del turno viéndose «sin cobrar». Acá el movimiento nace
+ * sabiendo de qué reserva es y, si ya se facturó, contra qué comprobante va.
+ */
+export const cobroDelTurno = {
+  ver: (reservaId: number) =>
+    api.get<EstadoDeCobro>(`/api/reservas/${reservaId}/cobros`),
+  registrar: (reservaId: number, datos: {
+    monto: string
+    medio_pago: string
+  }) => api.post<EstadoDeCobro>(`/api/reservas/${reservaId}/cobros`, datos),
+}
+
 export const facturacion = {
   /** `null` si todavía no se facturó. Lo puede ver el mostrador. */
   ver: (reservaId: number) => api.get<Factura | null>(`/api/reservas/${reservaId}/factura`),

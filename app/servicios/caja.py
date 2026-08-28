@@ -18,6 +18,7 @@ fallar**. Es el mismo caso que VentaLibra, y por eso el motor tiene la variante
 
 from __future__ import annotations
 
+import secrets
 from datetime import date
 from decimal import Decimal
 
@@ -173,3 +174,115 @@ def turno_por_id(turno_id: int) -> dict | None:
 
 def historial(limite: int = 50) -> list[dict]:
     return db_turnos.get_all_turnos(limit=limite)
+
+
+# ── El cobro de un turno ───────────────────────────────────────────────────
+#
+# 🔑 **`facturar_reserva` ya declaraba este modelo y nadie lo implementaba**: su
+# docstring dice que *"si hubo seña, la seña y el saldo son dos movimientos de
+# caja contra la MISMA factura"*. Hasta el 2026-08-28 ningún cobro en efectivo
+# llevaba `factura_id`: la pantalla de Caja carga monto y concepto libre, sin
+# vínculo con la reserva ni con el comprobante. El único cruce que existía lo
+# llenaba el cobro por QR.
+#
+# Sin ese vínculo no se puede contestar "¿esta factura está cobrada?", que es lo
+# que mantiene apagada la columna de cobrado en las tres pantallas del kit.
+
+#: Con qué arranca la referencia de un cobro de mostrador de una reserva.
+PREFIJO_COBRO_DE_RESERVA = "reserva-"
+
+#: El otro prefijo que identifica plata de una reserva: el del cobro por QR, que
+#: reusa la referencia de MercadoPago (`servicios/pagos.nueva_referencia`).
+#:
+#: 🔴 **Los dos hacen falta.** Contar sólo los de mostrador diría que un turno
+#: cobrado por QR está impago, y ofrecería cobrarlo de nuevo.
+PREFIJO_COBRO_POR_QR = "lc-"
+
+
+def referencia_de_cobro(reserva_id: int) -> str:
+    """La referencia de un cobro de mostrador: identifica la reserva y es única.
+
+    🔴 **El sufijo aleatorio no es decorativo.** `create_caja_movimiento` del
+    motor trae idempotencia por `(referencia, factura_id)`: dos movimientos con
+    la misma referencia y la misma factura **no se duplican, se descartan en
+    silencio**. Con una referencia fija por reserva, cobrar la seña y después el
+    saldo registraría el primero y perdería el segundo sin decir nada — plata
+    que entró y que ningún arqueo cuenta.
+
+    Es el mismo criterio, y por el mismo motivo, que `pagos.nueva_referencia`.
+    """
+    return f"{PREFIJO_COBRO_DE_RESERVA}{reserva_id}-{secrets.token_hex(4)}"
+
+
+def _patrones_de_reserva(reserva_id: int) -> tuple[str, str]:
+    """Los dos `LIKE` que matchean la plata de esta reserva y de ninguna otra.
+
+    El guion después del id es lo que separa la reserva 1 de la 12: sin él,
+    `reserva-1%` se llevaría los cobros de la 1, la 10 y la 199.
+    """
+    return (
+        f"{PREFIJO_COBRO_DE_RESERVA}{reserva_id}-%",
+        f"{PREFIJO_COBRO_POR_QR}{reserva_id}-%",
+    )
+
+
+def cobros_de_reserva(reserva_id: int) -> list[dict]:
+    """Los movimientos de caja que son plata de esta reserva, en orden.
+
+    Consulta directa contra `caja_movimientos` de LibraCore: el motor no expone
+    una búsqueda por referencia, y agregarla allá con **un** consumidor sería
+    inventar una API compartida antes de tener con quién compartirla. Si un
+    segundo producto la necesita, ahí se muda. Mismo criterio que
+    `espejar_usuario`, unas líneas más arriba.
+    """
+    mostrador, qr = _patrones_de_reserva(reserva_id)
+    conexion = libracore_core.get_connection()
+    try:
+        filas = conexion.execute(
+            "SELECT * FROM caja_movimientos"
+            " WHERE tipo='ingreso' AND (referencia LIKE ? OR referencia LIKE ?)"
+            " ORDER BY id",
+            (mostrador, qr),
+        ).fetchall()
+    finally:
+        conexion.close()
+    return [dict(f) for f in filas]
+
+
+def total_cobrado(reserva_id: int) -> Decimal:
+    """Cuánta plata entró por esta reserva, sumando mostrador y QR."""
+    return sum(
+        (Decimal(str(m["monto"])) for m in cobros_de_reserva(reserva_id)),
+        Decimal("0"),
+    )
+
+
+def vincular_cobros_a_factura(reserva_id: int, factura_id: int) -> int:
+    """Ata a la factura los cobros de esa reserva que todavía no lo estén.
+
+    🔑 **Existe porque en un mostrador se cobra antes de facturar tan seguido
+    como después.** Pasar `factura_id` en el momento del cobro sólo resuelve un
+    orden; el otro deja el comprobante viéndose «sin cobrar» sobre plata que ya
+    entró.
+
+    Sólo toca las filas con `factura_id` en `NULL`: reescribir una que ya apunta
+    a otro comprobante movería un ingreso de una factura a otra.
+
+    De paso cierra un caso que `cobro_qr` documenta y no podía resolver: si ARCA
+    falla, el cobro por QR se registra igual **sin atar**, y hasta ahora quedaba
+    así para siempre. Al emitir la factura en el reintento, este vínculo lo
+    alcanza.
+    """
+    mostrador, qr = _patrones_de_reserva(reserva_id)
+    conexion = libracore_core.get_connection()
+    try:
+        cursor = conexion.execute(
+            "UPDATE caja_movimientos SET factura_id=?"
+            " WHERE factura_id IS NULL AND tipo='ingreso'"
+            " AND (referencia LIKE ? OR referencia LIKE ?)",
+            (factura_id, mostrador, qr),
+        )
+        conexion.commit()
+        return cursor.rowcount or 0
+    finally:
+        conexion.close()

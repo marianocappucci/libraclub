@@ -3,12 +3,16 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  agenda, buffet, cobroQr, cuentaCorriente, facturacion, TIPO_DE_FACTURA,
+  agenda, buffet, cobroDelTurno, cobroQr, cuentaCorriente, facturacion, TIPO_DE_FACTURA,
 } from '@/lib/api'
-import type { Cancha, Factura, LineaDeConsumo, QrDisponible, Turno } from '@/lib/api'
+import type {
+  Cancha, EstadoDeCobro, Factura, LineaDeConsumo, QrDisponible, Turno,
+} from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
 import { fecha, hora, pesos } from '@/lib/fechas'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { useMediosDePago } from '@/lib/medios-pago'
 import { AvisoDeError } from '@/components/listado'
 import { buttonVariants } from '@/components/ui/button'
 import { DialogoDeConsumo } from '@/components/DialogoDeConsumo'
@@ -130,6 +134,12 @@ export function DetalleDeReserva({
             onCambio={onCambiada}
           />
           <SeccionDeCobroConQr
+            reservaId={turno.reserva_id}
+            estado={estado}
+            abierto={abierto}
+            onCobrado={onCambiada}
+          />
+          <SeccionDeCobro
             reservaId={turno.reserva_id}
             estado={estado}
             abierto={abierto}
@@ -366,6 +376,136 @@ function SeccionDeCobroConQr({ reservaId, estado, abierto, onCobrado }: {
  * siempre — por eso se dice "pendiente de CAE" y no se muestra un error rojo,
  * que mandaría a buscar un problema que no está.
  */
+/** Lo cobrado del turno, y el botón para cobrar lo que falta.
+ *
+ * 🔑 **Va acá y no en la pantalla de Caja** porque es el único lugar donde se
+ * sabe de qué reserva es la plata. En Caja el cobro se carga como monto más
+ * concepto libre: sirve para un ingreso suelto y deja el comprobante del turno
+ * viéndose «sin cobrar», que es exactamente lo que este flujo viene a cerrar.
+ *
+ * El monto arranca en el pendiente y **se puede bajar**: una seña es un cobro
+ * parcial, y es la mitad del modelo que `facturar_reserva` declara —la seña y el
+ * saldo, dos movimientos contra la misma factura—.
+ *
+ * ⚠️ Si el complejo no tiene facturación configurada, el endpoint contesta 503 y
+ * la sección **no aparece**: no es un error que mostrar, es que esta instancia
+ * no lleva caja contra LibraCore.
+ */
+function SeccionDeCobro({ reservaId, estado, abierto, onCobrado }: {
+  reservaId: number | null
+  estado: string
+  abierto: boolean
+  onCobrado: () => void
+}) {
+  const [datos, setDatos] = useState<EstadoDeCobro | null>(null)
+  const [monto, setMonto] = useState('')
+  const [medio, setMedio] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const { medios, etiqueta: etiquetaDeMedio } = useMediosDePago()
+
+  useEffect(() => {
+    if (!abierto || reservaId === null) return
+    setError(null)
+    cobroDelTurno
+      .ver(reservaId)
+      .then((d) => {
+        setDatos(d)
+        setMonto(d.pendiente > 0 ? String(d.pendiente) : '')
+      })
+      .catch(() => setDatos(null))
+  }, [abierto, reservaId])
+
+  // El medio por defecto espera a que la lista llegue: con `''` el cobro entra
+  // sin medio y el arqueo por medio no cuadra. Mismo cuidado que en Caja.
+  useEffect(() => {
+    if (!medio && medios.length > 0) setMedio(medios[0].valor)
+  }, [medio, medios])
+
+  if (reservaId === null || datos === null) return null
+  // Un bloqueo o una reserva cancelada no se cobran.
+  if (!COBRABLES.includes(estado)) return null
+
+  return (
+    <div className="grid gap-2 rounded-lg border p-3">
+      <div className="flex items-center justify-between text-sm">
+        <span className="font-medium">Cobro del turno</span>
+        <span className={datos.pendiente > 0 ? 'text-muted-foreground' : 'text-emerald-700'}>
+          {datos.pendiente > 0
+            ? `Pendiente ${pesos(String(datos.pendiente))} de ${pesos(String(datos.total))}`
+            : `Cobrado ${pesos(String(datos.cobrado))}`}
+        </span>
+      </div>
+
+      {datos.cobros.length > 0 && (
+        <ul className="grid gap-0.5 text-sm text-muted-foreground">
+          {datos.cobros.map((c) => (
+            <li key={c.id} className="flex justify-between gap-2">
+              <span className="truncate">
+                {fecha(c.fecha)} · {etiquetaDeMedio(c.medio_pago)}
+              </span>
+              <span>{pesos(String(c.monto))}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
+      {datos.pendiente > 0 && (
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="grid gap-1">
+            <Label htmlFor="monto-cobro" className="text-xs">Monto</Label>
+            <Input
+              id="monto-cobro"
+              className="h-8 w-28"
+              inputMode="decimal"
+              value={monto}
+              onChange={(e) => setMonto(e.target.value)}
+            />
+          </div>
+          <div className="grid gap-1">
+            <Label htmlFor="medio-cobro" className="text-xs">Medio</Label>
+            <select
+              id="medio-cobro"
+              className="h-8 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
+              value={medio}
+              onChange={(e) => setMedio(e.target.value)}
+            >
+              {medios.map((m) => (
+                <option key={m.valor} value={m.valor}>{m.etiqueta}</option>
+              ))}
+            </select>
+          </div>
+          <button
+            className={buttonVariants({ size: 'sm' })}
+            disabled={enviando || !monto.trim() || !medio}
+            onClick={async () => {
+              setEnviando(true)
+              setError(null)
+              try {
+                const d = await cobroDelTurno.registrar(reservaId, {
+                  monto, medio_pago: medio,
+                })
+                setDatos(d)
+                setMonto(d.pendiente > 0 ? String(d.pendiente) : '')
+                onCobrado()
+              } catch (e) {
+                setError((e as Error).message)
+              } finally {
+                setEnviando(false)
+              }
+            }}
+          >
+            {enviando ? 'Cobrando…' : 'Cobrar'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 function SeccionDeFactura(
   { reservaId, abierto }: { reservaId: number | null; abierto: boolean },
 ) {
