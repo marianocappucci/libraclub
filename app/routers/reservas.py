@@ -481,6 +481,11 @@ async def poner_en_el_qr(
         raise HTTPException(400, str(exc)) from exc
     except cobro_qr.SinPrecio as exc:
         raise HTTPException(422, str(exc)) from exc
+    except cobro_qr.NadaQueCobrar as exc:
+        # 409 y no 422: el pedido está bien formado, lo que no admite la
+        # operación es que el turno ya esté cobrado. Mismo criterio que el
+        # `PagoInvalido` de abajo.
+        raise HTTPException(409, str(exc)) from exc
     except servicio_pagos.PagoInvalido as exc:
         # 409 y no 400: el pedido está bien formado, lo que no admite la
         # operación es el estado del turno.
@@ -728,6 +733,10 @@ class TurnoPorCobrar(BaseModel):
     comienza_at: datetime
     termina_at: datetime
     cliente: str
+    #: 🔑 Lo usa el cobro con QR, que sólo se ofrece sobre un turno `confirmada`
+    #: o `jugada` — cobrar uno cancelado no es un caso de uso, es un error. Sin
+    #: este campo la Caja tendría que pedir la reserva entera para saberlo.
+    estado: str
     total: float
     cobrado: float
     pendiente: float
@@ -803,6 +812,7 @@ def por_cobrar(
                 comienza_at=reserva.comienza_at,
                 termina_at=reserva.termina_at,
                 cliente=(cliente.nombre if cliente else "") or reserva.motivo or "",
+                estado=reserva.estado.value,
                 total=float(total),
                 cobrado=float(entro),
                 pendiente=float(pendiente),

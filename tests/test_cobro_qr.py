@@ -234,6 +234,80 @@ def test_el_qr_cobra_la_cancha_MAS_el_buffet(
     assert "Gaseosa 500ml" in nombres
 
 
+def test_el_qr_cobra_LO_QUE_FALTA_cuando_ya_hubo_una_sena(
+    api, sucursal, cancha, cliente, tarifa_base, abrir_caja, mp,
+):
+    """El defecto que esto arregla le cobraba el turno DOS VECES al cliente.
+
+    Hasta el 2026-08-28 el QR ponia el total pelado. Un turno de $10.000 con
+    $4.000 de sena en efectivo, cobrado despues por QR, ponia **$10.000** en el
+    cartel: entraban $14.000 por un turno de $10.000 y el sobrante recien
+    aparecia en el cierre, horas despues y sin saber de quien era.
+
+    Y no era un caso raro: tomar sena y cobrar el saldo es el flujo normal de un
+    complejo, y la pantalla del detalle ofrecia el boton igual.
+    """
+    _configurar_mp(api)
+    abrir_caja(api, sucursal)
+    reserva = _reserva(api, cancha, cliente, precio="10000.00")
+
+    assert api.post(
+        f"/api/reservas/{reserva['id']}/cobros",
+        json={"monto": "4000", "medio_pago": "efectivo", "detalle": "Sena"},
+    ).status_code == 201
+
+    r = api.post(f"/api/reservas/{reserva['id']}/mp-qr")
+    assert r.status_code == 201, r.text
+    assert r.json()["monto"] == 6000.0, (
+        "el QR tiene que cobrar los $6.000 que faltan, no los $10.000 del turno"
+    )
+    assert mp.ordenes[0]["total"] == 6000.0, (
+        "y lo que se le pone al cartel de MercadoPago es ese mismo numero"
+    )
+
+
+def test_sin_nada_cobrado_el_qr_sigue_poniendo_el_total(
+    api, sucursal, cancha, cliente, tarifa_base, abrir_caja, mp,
+):
+    """El control del caso normal, que es la mayoria.
+
+    Sin esto, el test de arriba pasaria con un QR que pone cualquier numero mas
+    chico que el total --- incluido uno roto que reste de mas.
+    """
+    _configurar_mp(api)
+    abrir_caja(api, sucursal)
+    reserva = _reserva(api, cancha, cliente, precio="10000.00")
+
+    r = api.post(f"/api/reservas/{reserva['id']}/mp-qr")
+    assert r.status_code == 201, r.text
+    assert r.json()["monto"] == 10000.0
+    assert mp.ordenes[0]["total"] == 10000.0
+
+
+def test_un_turno_YA_COBRADO_no_se_pone_en_el_qr(
+    api, sucursal, cancha, cliente, tarifa_base, abrir_caja, mp,
+):
+    """Poner cero en el cartel es cobrarle de nuevo a quien ya pago.
+
+    El `CheckConstraint monto > 0` de la tabla lo frenaria igual, pero con un
+    500 que no le dice nada al operador. Sale 409 --- el pedido esta bien
+    formado; lo que no admite la operacion es el estado del turno.
+    """
+    _configurar_mp(api)
+    abrir_caja(api, sucursal)
+    reserva = _reserva(api, cancha, cliente, precio="10000.00")
+
+    assert api.post(
+        f"/api/reservas/{reserva['id']}/cobros",
+        json={"monto": "10000", "medio_pago": "efectivo"},
+    ).status_code == 201
+
+    r = api.post(f"/api/reservas/{reserva['id']}/mp-qr")
+    assert r.status_code == 409, r.text
+    assert "cobrado" in r.text.lower()
+    assert mp.ordenes == [], "no se le manda nada a MercadoPago"
+
+
 def test_un_turno_sin_precio_no_se_puede_cobrar(api, cancha, cliente, mp):
     _configurar_mp(api)
     reserva = _reserva(api, cancha, cliente, precio="0")

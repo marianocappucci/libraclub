@@ -67,6 +67,10 @@ class QrError(RuntimeError):
     """MercadoPago rechazó la orden, o no se la pudo consultar."""
 
 
+class NadaQueCobrar(RuntimeError):
+    """No queda saldo: poner cero en el QR es cobrarle de nuevo a quien ya pagó."""
+
+
 class SinPrecio(RuntimeError):
     """El turno no tiene precio cargado: no hay nada que cobrar."""
 
@@ -128,15 +132,39 @@ def auto_facturar_prendida(cfg: dict | None = None) -> bool:
 
 
 def total_a_cobrar(reserva: Reserva) -> Decimal:
-    """La cancha más lo que el grupo consumió en el buffet.
+    """Lo que falta cobrar del turno: cancha más buffet, menos lo que ya entró.
 
-    🔴 **El mismo total que factura `facturar_reserva`.** Si el QR cobrara sólo
-    `reserva.precio`, la factura saldría por más de lo que entró y el arqueo no
-    cerraría — y el que lo descubre es el cierre de turno, horas después.
+    🔴 **La cancha más el buffet, y no `reserva.precio` a secas.** Si el QR
+    cobrara sólo el alquiler, la factura saldría por más de lo que entró y el
+    arqueo no cerraría — y el que lo descubre es el cierre de turno, horas
+    después. Es el mismo total que factura `facturar_reserva`.
+
+    🔴 **Y menos lo ya cobrado, desde el 2026-08-28.** Antes esta función
+    devolvía el total pelado, así que un turno con **seña en efectivo** cobrado
+    después por QR le cobraba al cliente el total **otra vez**: $14.000 de turno
+    con $5.000 de seña terminaban en $19.000 en la caja. No era hipotético —
+    tomar seña y cobrar el saldo es el flujo normal de un complejo, y la
+    pantalla del detalle ofrecía el botón igual.
+
+    Restar acá y no en el llamador es a propósito: son **tres** los caminos que
+    ponen plata en el QR —el detalle del turno, la Caja y el portal— y el que
+    sabe cuánto falta es este módulo.
+
+    La factura, en cambio, sigue siendo del **turno entero**: seña y saldo son
+    dos movimientos de caja contra el mismo comprobante, que es el modelo que
+    `facturar_reserva` declara desde el día uno.
     """
     if reserva.precio is None or Decimal(str(reserva.precio)) <= 0:
         raise SinPrecio("El turno no tiene precio cargado.")
-    return Decimal(str(reserva.precio)) + buffet.total_consumido(reserva.id)
+    total = Decimal(str(reserva.precio)) + buffet.total_consumido(reserva.id)
+    pendiente = total - caja.total_cobrado(reserva.id)
+    if pendiente <= 0:
+        # 🔑 Sale como error de dominio y no como el `CheckConstraint monto > 0`
+        # de la tabla: ese fallaría con un 500 que no le dice nada al operador.
+        raise NadaQueCobrar(
+            f"El turno ya está cobrado (total {total}, cobrado {total - pendiente})."
+        )
+    return pendiente
 
 
 def items_para_mp(reserva: Reserva, cancha_nombre: str) -> list[dict]:

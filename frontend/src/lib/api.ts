@@ -344,6 +344,9 @@ export type TurnoPorCobrar = {
   comienza_at: string
   termina_at: string
   cliente: string
+  /** `confirmada`, `jugada`… Lo mira el cobro con QR, que no se ofrece sobre
+   *  un turno cancelado. */
+  estado: string
   total: number
   cobrado: number
   pendiente: number

@@ -25,15 +25,17 @@ import { EncabezadoDePantalla } from 'libra-ui/acciones'
 import { CalendarCheck, CupSoda, Receipt, Users, Wallet } from 'lucide-react'
 
 import {
-  buffet, caja, cajas as apiCajas, cobroDelTurno, turnosPorCobrar,
+  buffet, caja, cajas as apiCajas, cobroDelTurno, cobroQr, turnosPorCobrar,
 } from '@/lib/api'
 import { useMediosDePago } from '@/lib/medios-pago'
 import type {
-  CajaDeMostrador, LineaDeConsumo, ResumenDeCaja, TurnoDeCaja, TurnoPorCobrar,
+  CajaDeMostrador, LineaDeConsumo, QrDisponible, ResumenDeCaja, TurnoDeCaja,
+  TurnoPorCobrar,
 } from '@/lib/api'
 import { hora, pesos } from '@/lib/fechas'
 import { AvisoDeError } from '@/components/listado'
 import { DialogoDeConsumo } from '@/components/DialogoDeConsumo'
+import { SeccionDeCobroConQr } from '@/components/CobroConQr'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -557,6 +559,16 @@ function CierreDeCuenta({ turno, medios, sucursalId, onCobrado, onError }: {
   const [medio, setMedio] = useState<string>('')
   const [enviando, setEnviando] = useState(false)
   const [cargandoBuffet, setCargandoBuffet] = useState(false)
+  const [qrDeLaInstancia, setQrDeLaInstancia] = useState<QrDisponible | null>(null)
+
+  // Si este complejo puede cobrar por QR. Se pregunta una vez por cuenta
+  // abierta; sin respuesta se asume que no, porque cobrar por QR es una forma
+  // más de cobrar y no un requisito para operar el mostrador.
+  useEffect(() => {
+    cobroQr.estado()
+      .then(setQrDeLaInstancia)
+      .catch(() => setQrDeLaInstancia({ disponible: false, auto_facturar: false }))
+  }, [])
   // Qué líneas de la cuenta se están cobrando en este movimiento. `null` = la
   // cuenta entera, que es el caso normal y el estado inicial.
   const [tildadas, setTildadas] = useState<Set<string> | null>(null)
@@ -616,6 +628,11 @@ function CierreDeCuenta({ turno, medios, sucursalId, onCobrado, onError }: {
     })),
   ]
 
+  // 🔑 El valor es el del backend (`servicios/caja.MEDIOS_PAGO`), no una
+  // constante de esta pantalla: la lista viene de `/api/caja/medios-pago` y
+  // duplicarla es cómo se llega a que la pantalla ofrezca un medio que el POST
+  // rechaza con 422.
+  const porQr = medio === 'mercadopago'
   const fraccionado = tildadas !== null
   const elegidas = lineas.filter((l) => !fraccionado || tildadas.has(l.clave))
   const sumaElegida = elegidas.reduce((suma, l) => suma + l.importe, 0)
@@ -658,6 +675,9 @@ function CierreDeCuenta({ turno, medios, sucursalId, onCobrado, onError }: {
               <input
                 type="checkbox"
                 className="size-3.5 shrink-0"
+                // Con MercadoPago el monto lo decide el backend: dejar tildar
+                // sugeriría que el QR va a cobrar lo elegido, y no lo hace.
+                disabled={porQr}
                 checked={!fraccionado || tildadas.has(l.clave)}
                 onChange={() => alternar(l.clave)}
               />
@@ -715,6 +735,53 @@ function CierreDeCuenta({ turno, medios, sucursalId, onCobrado, onError }: {
         </div>
       </div>
 
+      {/* 🔴 **Elegir MercadoPago acá lleva al QR, no registra un movimiento.**
+       *
+       * Lo reportó el humano el 2026-08-28: *"si quiero realizar un cobro y
+       * elijo mercadopago no me dirige para que la persona escanee el QR"*. El
+       * flujo existía entero —poner el monto en el cartel, poléar hasta que se
+       * acredite, facturar solo— pero **sólo se llegaba desde el detalle del
+       * turno**, que con la Caja convertida en punto de venta es justamente el
+       * camino que dejó de usarse. Seleccionar «MercadoPago» y apretar Cobrar
+       * anotaba el ingreso como si hubiera entrado, sin haber cobrado nada.
+       *
+       * ⚠️ **El QR cobra el pendiente ENTERO y una sola vez.** No respeta las
+       * líneas destildadas ni la división: el monto lo decide el backend
+       * —`cobro_qr.total_a_cobrar`— y la base admite **un solo pago aprobado por
+       * reserva** (`uq_pagos_reserva_aprobado`). Por eso con MercadoPago elegido
+       * esta pantalla no ofrece fraccionar: ofrecerlo sería prometer algo que el
+       * modelo no puede cumplir. Para fraccionar, se cobra cada parte por otro
+       * medio — o se cobra el resto en efectivo y el saldo por QR, que sí
+       * funciona porque el QR ahora pone lo que falta y no el total.
+       */}
+      {porQr ? (
+        qrDeLaInstancia?.disponible ? (
+          <div className="space-y-2 border-t pt-3">
+            <SeccionDeCobroConQr
+              reservaId={turno.reserva_id}
+              estado={turno.estado}
+              abierto
+              onCobrado={onCobrado}
+            />
+            {/* Lo que agrega esta línea sobre el texto del componente es **el
+                número**: el componente dice qué cobra, y acá se sabe cuánto.
+                Repetir lo de la factura automática pondría la misma frase dos
+                veces en la misma tarjeta. */}
+            <p className="text-xs text-muted-foreground">
+              Son {pesos(turno.pendiente)}, de una sola vez.
+            </p>
+          </div>
+        ) : (
+          // Sin credenciales cargadas no hay QR que ofrecer, y decirlo es mejor
+          // que un hueco: el operador ve el medio en la lista y espera algo.
+          <p className="border-t pt-3 text-sm text-muted-foreground">
+            Esta instancia no tiene MercadoPago configurado, así que el cobro se
+            registra a mano. Cargá las credenciales en Configuración para cobrar
+            con el QR del mostrador.
+          </p>
+        )
+      ) : null}
+
       {/* 🔑 **Dividir entre jugadores.** En una cancha de pádel lo normal no es
           que pague uno: pagan los cuatro, y a veces con medios distintos. Se
           divide **lo que se está por cobrar** —el monto de arriba, que por
@@ -725,7 +792,7 @@ function CierreDeCuenta({ turno, medios, sucursalId, onCobrado, onError }: {
           🔴 El medio de pago es el de arriba y se cambia **entre parte y
           parte**: es exactamente el caso en que uno paga en efectivo y otro
           transfiere, que es por lo que esto existe. */}
-      {division === null ? (
+      {porQr ? null : division === null ? (
         <div className="flex items-end gap-2 border-t pt-3">
           <div className="grid gap-1.5">
             <Label htmlFor="cuantos-jugadores">Jugadores</Label>
@@ -808,7 +875,13 @@ function CierreDeCuenta({ turno, medios, sucursalId, onCobrado, onError }: {
 
       <div className="flex flex-wrap gap-2">
         <Button
-          disabled={enviando || !monto.trim() || division !== null}
+          // Con el QR elegido el cobro lo cierra el poll, no este botón: el
+          // único caso en que sigue habilitado es la instancia sin credenciales,
+          // donde «mercadopago» significa una transferencia anotada a mano.
+          disabled={
+            enviando || !monto.trim() || division !== null
+            || (porQr && Boolean(qrDeLaInstancia?.disponible))
+          }
           onClick={async () => {
             setEnviando(true)
             try {
