@@ -10,7 +10,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-import { Wallet } from 'lucide-react'
+import { Trash2, Wallet } from 'lucide-react'
 
 import { caja, cajas as apiCajas } from '@/lib/api'
 import { useMediosDePago } from '@/lib/medios-pago'
@@ -493,10 +493,22 @@ function Movimientos({ movimientos, etiquetaDeMedio, onAnulado, onError }: {
   }
 
   return (
-    <div className="grid gap-1 border-t pt-3">
+    // 🔴 `flex flex-col` y **no** `grid gap-1`, que es lo que había.
+    //
+    // Un grid implícito dimensiona su columna a `max-content`, así que la fila
+    // crecía con el concepto más largo y se llevaba el importe y el botón fuera
+    // de la tarjeta — con el `min-w-0` puesto en la fila **y** en el texto, que
+    // no alcanzan. Medido en un navegador: la fila daba 554 dentro de un padre
+    // de 424; con `flex flex-col` da 424, y con `grid-cols-[minmax(0,1fr)]`
+    // también. Se elige el flex por ser el idioma del resto de la pantalla.
+    <div className="flex flex-col gap-1 border-t pt-3">
       <div className="text-sm font-medium">Movimientos</div>
       {movimientos.map((m) => (
-        <div key={m.id} className="flex items-center justify-between gap-2 text-sm">
+        <div key={m.id} className="flex min-w-0 items-center gap-2 text-sm">
+          {/* 🔴 `min-w-0` en la fila **y** en el texto. Sin el de la fila, el
+              `flex-1 truncate` del hijo no tiene contra qué achicarse: el
+              contenido empuja y el importe y el botón se salen de la tarjeta.
+              Medido en un navegador, no supuesto. */}
           <span className="min-w-0 flex-1 truncate" title={m.concepto}>
             {m.concepto}
             <span className="ml-1 text-muted-foreground">
@@ -504,13 +516,17 @@ function Movimientos({ movimientos, etiquetaDeMedio, onAnulado, onError }: {
             </span>
           </span>
           {/* El egreso se muestra en negativo: es lo que hace que la lista se
-              pueda sumar de arriba abajo y dé el esperado. */}
-          <span className={m.tipo === 'egreso' ? 'text-amber-700 dark:text-amber-500' : undefined}>
+              pueda sumar de arriba abajo y dé el esperado.
+
+              `shrink-0` y `tabular-nums`: el importe no se parte, y los dígitos
+              quedan en columna para poder sumarlos con la vista. */}
+          <span className={`shrink-0 tabular-nums${m.tipo === 'egreso' ? ' text-amber-700 dark:text-amber-500' : ''}`}>
             {m.tipo === 'egreso' ? '−' : ''}{pesos(String(m.monto))}
           </span>
           <Button
             variant="outline"
-            size="sm"
+            size="icon"
+            className="size-7 shrink-0"
             aria-label={`Anular ${m.concepto}`}
             disabled={anulando === m.id}
             onClick={async () => {
@@ -525,7 +541,12 @@ function Movimientos({ movimientos, etiquetaDeMedio, onAnulado, onError }: {
               }
             }}
           >
-            Anular
+            {/* Icono y no la palabra: con el texto, la acción se comía el
+                ancho de una fila que ya lleva concepto, medio e importe.
+                El nombre accesible lo da el `aria-label`, que además nombra
+                **cuál** movimiento — con veinte filas, veinte «Anular»
+                idénticos no le sirven a nadie que use lector de pantalla. */}
+            <Trash2 className="size-3.5" />
           </Button>
         </div>
       ))}
