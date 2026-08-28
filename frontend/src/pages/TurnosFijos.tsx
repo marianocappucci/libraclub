@@ -147,7 +147,7 @@ export function TurnosFijos() {
       },
       {
         id: 'acciones',
-        header: '',
+        header: () => <div className="text-right">Acciones</div>,
         cell: ({ row }) =>
           row.original.activa ? (
             <div className="flex justify-end gap-1">
@@ -155,7 +155,7 @@ export function TurnosFijos() {
                 Extender
               </Button>
               <Button
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 aria-label={`Dar de baja la cancha fija de ${row.original.cliente}`}
                 onClick={() => darDeBaja(row.original)}

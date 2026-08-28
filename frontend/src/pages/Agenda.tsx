@@ -126,7 +126,7 @@ export function Agenda() {
 
       {canchas.map((cancha) => (
         <section key={cancha.id} className="rounded-lg border bg-card">
-          <h2 className="border-b px-4 py-2 font-medium">
+          <h2 className="encabezado-de-cancha border-b px-4 py-2 font-medium">
             {cancha.nombre}
             <span className="ml-2 text-sm font-normal text-muted-foreground">
               {cancha.deporte} · turnos de {cancha.duracion_turno_min} min

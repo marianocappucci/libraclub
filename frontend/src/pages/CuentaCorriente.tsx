@@ -71,13 +71,13 @@ export function CuentaCorriente() {
       },
       {
         id: 'acciones',
-        header: '',
+        header: () => <div className="text-right">Acciones</div>,
         size: anchoColumnaAcciones(1),
         enableSorting: false,
         cell: ({ row }) => (
           <div className="flex justify-end">
             <Button
-              variant="ghost"
+              variant="outline"
               size="icon"
               aria-label={`Ver la cuenta de ${row.original.cliente}`}
               onClick={() => navegar(`/cuenta-corriente/${row.original.cliente_id}`)}
