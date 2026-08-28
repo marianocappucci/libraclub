@@ -438,7 +438,10 @@ function SeccionDeCobro({ reservaId, estado, abierto, onCobrado }: {
       </div>
 
       {datos.cobros.length > 0 && (
-        <ul className="grid gap-0.5 text-sm text-muted-foreground">
+        // `flex flex-col` y no `grid`: un grid implícito dimensiona su columna a
+        // `max-content` y la fila se lleva el importe fuera del recuadro. Mismo
+        // caso que la lista de movimientos de Caja, medido el 2026-08-28.
+        <ul className="flex flex-col gap-0.5 text-sm text-muted-foreground">
           {datos.cobros.map((c) => (
             <li key={c.id} className="flex justify-between gap-2">
               <span className="truncate">
