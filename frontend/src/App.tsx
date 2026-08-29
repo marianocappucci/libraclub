@@ -4,6 +4,8 @@ import { Agenda } from '@/pages/Agenda'
 import { Buffet } from '@/pages/Buffet'
 import { Caja } from '@/pages/Caja'
 import { MovimientosDeCaja } from '@/pages/MovimientosDeCaja'
+import { TurnosDeCaja } from '@/pages/TurnosDeCaja'
+import { TurnoDeCajaDetalle } from '@/pages/TurnoDeCajaDetalle'
 import { CuentaCorriente } from '@/pages/CuentaCorriente'
 import { CuentaCorrienteDetalle } from '@/pages/CuentaCorrienteDetalle'
 import { Horarios } from '@/pages/Horarios'
@@ -109,6 +111,12 @@ function Backoffice() {
           <Route path="/usuarios" element={<Usuarios />} />
           <Route path="/caja" element={<Caja />} />
           <Route path="/caja/movimientos" element={<MovimientosDeCaja />} />
+          {/* 🔴 El historial va ANTES del detalle: react-router elige por
+              especificidad y no por orden, pero dejarlas juntas y en este
+              orden es lo que hace legible que una es el listado de la otra.
+              El mismo criterio que `/facturas` y `/facturas/:id`. */}
+          <Route path="/caja/turnos" element={<TurnosDeCaja />} />
+          <Route path="/caja/turnos/:id" element={<TurnoDeCajaDetalle />} />
           <Route path="/cajas" element={<Cajas />} />
           <Route path="/buffet" element={<Buffet />} />
           <Route path="/cuenta-corriente" element={<CuentaCorriente />} />

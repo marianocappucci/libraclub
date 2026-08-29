@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-import { CalendarCheck, CupSoda, Receipt, Users, Wallet } from 'lucide-react'
+import { CalendarCheck, CupSoda, History, Receipt, Users, Wallet } from 'lucide-react'
 
 import {
   buffet, caja, cajas as apiCajas, cobroDelTurno, cobroQr, turnosPorCobrar,
@@ -69,7 +69,18 @@ export function Caja() {
 
   return (
     <div className="space-y-4">
-      <EncabezadoDePantalla titulo={<TituloPantalla icono={Wallet}>Caja</TituloPantalla>} />
+      {/* 🔑 **El acceso al historial va en el encabezado y no abajo, junto al
+          de movimientos.** Ese otro vive adentro del bloque del turno abierto,
+          así que sin caja abierta no se ve — y «sin caja abierta» es justo
+          cuando uno quiere mirar el cierre de ayer. Acá está siempre. */}
+      <EncabezadoDePantalla titulo={<TituloPantalla icono={Wallet}>Caja</TituloPantalla>}>
+        <Link
+          to="/caja/turnos"
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground underline-offset-4 hover:underline"
+        >
+          <History className="size-4" /> Turnos anteriores
+        </Link>
+      </EncabezadoDePantalla>
       <AvisoDeError mensaje={error} />
 
       {turno === null ? (
