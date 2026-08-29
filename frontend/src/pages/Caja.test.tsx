@@ -70,6 +70,9 @@ const estado = {
   cuentas: CUENTAS,
   consumos: [] as { descripcion: string; cantidad: number; precio_unitario: number; importe: number }[],
   qr: { disponible: true, auto_facturar: true },
+  //: Si esta instancia monta el simulador del QR. `false` = producción, y la
+    //  sonda contesta 404 igual que allá.
+  puedeSimular: true,
   //: Hace cuántos días se abrió el turno. 0 = hoy, que es lo normal.
   diasAbierto: 0,
 }
@@ -107,6 +110,7 @@ beforeEach(() => {
   estado.cuentas = CUENTAS
   estado.consumos = []
   estado.qr = { disponible: true, auto_facturar: true }
+  estado.puedeSimular = true
   estado.diasAbierto = 0
   vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
     const u = String(url)
@@ -129,6 +133,18 @@ beforeEach(() => {
       return Promise.resolve(json(estado.cuentas))
     }
     if (u.includes('/api/reservas/mp/estado')) return Promise.resolve(json(estado.qr))
+    // 🔴 Las dos del simulador van ANTES del `/mp-qr` de abajo: ese `includes`
+    // matchea las tres rutas.
+    if (u.includes('/mp-qr/simulacion')) {
+      // El 404 no es una falla: es cómo se dice «acá no hay simulador». La ruta
+      // vive adentro del router que en producción no se monta.
+      return Promise.resolve(
+        estado.puedeSimular ? json({ disponible: true }) : json({ detail: 'Not Found' }, 404),
+      )
+    }
+    if (u.includes('/mp-qr/simular')) {
+      return Promise.resolve(json({ estado: 'aprobado', simulado: true, monto: 12000 }))
+    }
     if (u.includes('/mp-qr')) {
       return Promise.resolve(json({ referencia: 'lc-41-abcd', monto: 14000 }, 201))
     }
@@ -617,6 +633,42 @@ describe('cobrar con MercadoPago', () => {
     expect(screen.getByText(/se puede registrar a mano/i)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Cobrar con QR/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Cobrar y cerrar la cuenta/ })).toBeEnabled()
+  })
+
+  it('🔑 y en una instancia de prueba se puede simular el cobro DESDE ACÁ', async () => {
+    /* ⚠️ **Este test existe porque los del simulador entran por
+     * `DetalleDeReserva`** (`components/CobroConQr.test.tsx`), y el pedido era
+     * el botón **en la Caja**. Que el componente lo renderice no prueba que la
+     * Caja lo muestre: acá se llega por otro camino —el selector de medio de
+     * pago— y con otro estado alrededor. Un test que comparte la premisa con el
+     * que quiere respaldar no la verifica.
+     *
+     * Sin credenciales el circuito no se puede recorrer de punta a punta: poner
+     * la orden falla al llamar a MercadoPago, así que no llega a existir el
+     * pago que después habría que sellar.
+     */
+    estado.qr = { disponible: false, auto_facturar: false }
+    await elegirMercadoPago()
+
+    expect(await screen.findByRole('button', { name: /Simular pago aprobado/ }))
+      .toBeInTheDocument()
+    expect(screen.getByText(/Instancia de prueba/i)).toBeInTheDocument()
+  })
+
+  it('🔴 pero en producción la Caja NO ofrece simular', async () => {
+    // El bundle es el MISMO en dev y en producción. Lo único que separa la
+    // instancia de un complejo de tener un botón que cierra turnos gratis es
+    // que la sonda conteste 404.
+    estado.qr = { disponible: false, auto_facturar: false }
+    estado.puedeSimular = false
+    await elegirMercadoPago()
+
+    // Control positivo: la sección del QR SÍ está en pantalla. Sin esto, un «no
+    // encontré el botón» porque la Caja no llegó a renderizar pasaría igual.
+    expect(await screen.findByText(/faltan las credenciales de\s+MercadoPago/i))
+      .toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Simular pago aprobado/ })).toBeNull()
+    expect(screen.queryByText(/Instancia de prueba/i)).toBeNull()
   })
 
   it('🔴 cambiar de cancha resetea el QR, no arrastra el de la anterior', async () => {

@@ -525,6 +525,30 @@ export const cobroQr = {
   bajar: (reservaId: number) => api.del(`/api/reservas/${reservaId}/mp-qr`),
   consultar: (reservaId: number) =>
     api.get<QrEstado>(`/api/reservas/${reservaId}/mp-status`),
+  /** Si esta instancia monta el simulador — o sea, si no es producción.
+   *
+   *  🔑 **Se pregunta al servidor y no se mira una variable de build.** El
+   *  bundle es el MISMO en dev y en producción: una bandera del frontend
+   *  mostraría el botón de simular en la instancia de un complejo.
+   *
+   *  La ruta vive adentro del router del simulador, así que su ausencia es la
+   *  respuesta: **404 significa que no se puede simular**. Quien la llame tiene
+   *  que mirar `ErrorDeApi.status`, no el texto del mensaje. */
+  simulacionDisponible: () =>
+    api.get<{ disponible: boolean }>('/api/reservas/mp-qr/simulacion'),
+  /** Hace de cuenta que alguien escaneó el QR y pagó. Sólo existe fuera de
+   *  producción. Deja lo mismo que el cobro real: el pago, el movimiento en la
+   *  caja del turno abierto y —si está prendida— la factura. */
+  simular: (reservaId: number) =>
+    api.post<QrSimulado>(`/api/reservas/${reservaId}/mp-qr/simular`, {}),
+}
+
+/** Lo que contesta el simulador: el resultado del cobro real más la marca. */
+export interface QrSimulado {
+  estado: string
+  simulado: boolean
+  monto: number
+  factura_id?: number | null
 }
 
 /** Las credenciales del QR. Sólo las lee la pantalla de Configuración, que es

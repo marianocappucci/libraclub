@@ -596,3 +596,191 @@ def test_el_toggle_de_la_automatica_sobrevive_a_recargar_la_config(api):
     assert api.get("/config/mercadopago").json()["auto_facturar"] is True
     assert cobro_qr.auto_facturar_prendida() is True
     assert config_manager.load().get("mp_auto_facturar_reservas") is True
+
+
+# -- El simulador, solo fuera de produccion --------------------------------
+#
+# Existe porque sin credenciales de MercadoPago NO SE PUEDE probar el circuito:
+# `poner_en_el_qr` falla al llamar a `crear_orden_qr`, asi que no llega a existir
+# el pago que despues habria que sellar. El portal ya tenia el suyo desde antes
+# ---`POST /api/portal/pagos/{id}/simular`--- y este copia su criterio.
+
+
+def test_en_produccion_el_simulador_NO_SE_CONSTRUYE():
+    """🔴 El test que más importa de este archivo.
+
+    El simulador acredita un cobro sin que haya entrado un peso: montado en la
+    instancia de un complejo, cualquiera con la URL cierra turnos gratis. Lo que
+    lo impide es que la **fábrica devuelve `None`** y el router no se monta — no
+    un `if` adentro del handler, que mal escrito deja el endpoint existiendo.
+
+    ⚠️ **Se mide la fábrica y no las rutas de la app.** La primera versión
+    construía una app con `entorno="prod"` y miraba `app.routes`: el assert
+    principal pasaba, pero **el control —que la ruta real siguiera estando—
+    fallaba**, con un set de cinco rutas que eran las de FastAPI por defecto. O
+    sea que la app que estaba mirando no era la que creía, y un assert sobre un
+    objeto que no se entiende no mide nada. La fábrica es una función pura: se
+    mide directo.
+    """
+    from app.routers.reservas import construir_router_de_simulacion_qr
+
+    for entorno in ("prod", "produccion", "producción", "production", "PROD"):
+        assert construir_router_de_simulacion_qr(entorno) is None, (
+            f"con entorno={entorno!r} el simulador se construye: acredita "
+            f"cobros que nadie pagó"
+        )
+
+
+def test_fuera_de_produccion_si_se_construye():
+    """El otro lado del control.
+
+    Sin esto, una fábrica que devolviera `None` **siempre** pasaría el test de
+    arriba — y el simulador no existiría en ningún lado.
+    """
+    from app.routers.reservas import construir_router_de_simulacion_qr
+
+    for entorno in ("dev", "development", "demo", "test", ""):
+        router = construir_router_de_simulacion_qr(entorno)
+        assert router is not None, f"con entorno={entorno!r} no se construye"
+        rutas = [r.path for r in router.routes]
+        assert "/api/reservas/{reserva_id}/mp-qr/simular" in rutas, rutas
+
+
+def test_el_simulador_cobra_y_deja_el_movimiento_en_la_caja(
+    api, sucursal, cancha, cliente, tarifa_base, abrir_caja,
+):
+    """El circuito completo, sin credenciales.
+
+    Es lo que el humano no podia probar: sin MercadoPago cargado no hay forma de
+    poner la orden ni de acreditarla.
+    """
+    abrir_caja(api, sucursal)
+    reserva = _reserva(api, cancha, cliente, precio="10000.00")
+
+    r = api.post(f"/api/reservas/{reserva['id']}/mp-qr/simular")
+    assert r.status_code == 200, r.text
+    assert r.json()["estado"] == "aprobado"
+    assert r.json()["simulado"] is True
+    assert r.json()["monto"] == 10000.0
+
+    # Y la plata esta en la caja del turno abierto, con el medio del QR.
+    resumen = api.get("/api/caja/turnos/actual").json()["resumen"]
+    assert resumen["pagos_por_medio"].get("mercadopago") == 10000.0, (
+        f"la plata no entro a la caja: {resumen['pagos_por_medio']}"
+    )
+    # El turno queda sin pendiente: es lo que el operador va a ver.
+    assert api.get(f"/api/reservas/{reserva['id']}/cobros").json()["pendiente"] == 0.0
+
+
+def test_el_simulador_exige_caja_abierta(
+    api, sucursal, cancha, cliente, tarifa_base,
+):
+    """Sin turno abierto la plata quedaria fuera del arqueo --- y el simulador
+    no es excusa para saltear eso. Mismo 409 que el cobro real."""
+    reserva = _reserva(api, cancha, cliente, precio="10000.00")
+    r = api.post(f"/api/reservas/{reserva['id']}/mp-qr/simular")
+    assert r.status_code == 409, r.text
+
+
+def test_el_simulador_no_cobra_dos_veces(
+    api, sucursal, cancha, cliente, tarifa_base, abrir_caja,
+):
+    """El indice `uq_pagos_reserva_aprobado` lo frena en la base, pero eso seria
+    un 500. Sale 409, que es lo que le dice al operador que ya esta cobrado."""
+    abrir_caja(api, sucursal)
+    reserva = _reserva(api, cancha, cliente, precio="10000.00")
+    assert api.post(f"/api/reservas/{reserva['id']}/mp-qr/simular").status_code == 200
+    segunda = api.post(f"/api/reservas/{reserva['id']}/mp-qr/simular")
+    assert segunda.status_code == 409, segunda.text
+
+
+# -- La sonda: como la pantalla de la Caja se entera ------------------------
+#
+# El boton de simular no puede aparecer en produccion, y la pantalla no tiene
+# como saberlo mirando el bundle: es el MISMO bundle en dev y en produccion. Lo
+# pregunta al servidor, y la respuesta es la existencia de la ruta.
+
+
+def test_la_sonda_vive_adentro_del_router_del_simulador():
+    """🔴 El punto entero del diseño, y por eso se asertan las DOS rutas juntas.
+
+    La alternativa descartada era que `/api/reservas/mp/estado` devolviera un
+    booleano calculado con el criterio de produccion. Eso son dos puertas al
+    mismo cuarto: el dia que dejen de coincidir, la pantalla ofrece un boton que
+    no existe, o lo esconde donde hace falta. Acá la sonda esta adentro del
+    router, asi que no hay criterio que repetir --- y este test lo fija: si
+    alguien la muda al router principal, la ruta de simular sigue estando pero
+    la sonda ya no viaja con ella, y esto se pone rojo.
+    """
+    from app.routers.reservas import construir_router_de_simulacion_qr
+
+    router = construir_router_de_simulacion_qr("dev")
+    assert router is not None
+    rutas = {r.path for r in router.routes}
+    assert rutas == {
+        "/api/reservas/mp-qr/simulacion",
+        "/api/reservas/{reserva_id}/mp-qr/simular",
+    }, rutas
+
+
+def test_en_produccion_no_hay_sonda_que_preguntar():
+    """El otro lado: si la fabrica devuelve None, no se monta ninguna de las dos.
+
+    Sin este assert, un simulador que montara la sonda por fuera del `if`
+    diria "se puede simular" en la instancia de un complejo.
+    """
+    from app.routers.reservas import construir_router_de_simulacion_qr
+
+    assert construir_router_de_simulacion_qr("prod") is None
+
+
+def test_la_sonda_contesta_en_la_app_de_dev(api):
+    """Que la ruta exista en el router no prueba que la app la sirva.
+
+    El montaje es un `if` aparte en `main.py`, y el prefijo del router podria no
+    ser el que el frontend pide. Se mide sobre la app armada, con el cliente
+    autenticado que usa el resto del archivo.
+    """
+    r = api.get("/api/reservas/mp-qr/simulacion")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"disponible": True}
+
+
+def test_la_sonda_no_se_come_la_ruta_del_turno(api, cancha, cliente, tarifa_base):
+    """El control de la de arriba: `mp-qr` no es un `reserva_id`.
+
+    `/api/reservas/mp-qr/simulacion` y `/api/reservas/{reserva_id}/cobros` tienen
+    los dos tres segmentos. Si el convertidor de `reserva_id` no fuera `int`, una
+    de las dos se comeria a la otra segun el orden de registro --- y el sintoma
+    seria un 422 en la pantalla del turno, no en la sonda.
+    """
+    reserva = _reserva(api, cancha, cliente, precio="10000.00")
+    r = api.get(f"/api/reservas/{reserva['id']}/cobros")
+    assert r.status_code == 200, r.text
+
+
+# -- El predicado de produccion, una sola definicion ------------------------
+
+
+def test_los_dos_simuladores_miran_el_MISMO_predicado():
+    """Hasta el 2026-08-29 la tupla de nombres estaba escrita literal en los dos
+    archivos. Sumar un nombre en uno dejaba el otro abierto, en silencio.
+
+    Se mide por comportamiento y no leyendo el fuente: se recorre la lista de
+    nombres y se exige que los dos simuladores contesten igual. Un nombre nuevo
+    en `NOMBRES_DE_PRODUCCION` queda cubierto solo.
+    """
+    from app.config import NOMBRES_DE_PRODUCCION, es_produccion
+    from app.routers.portal import construir_router_de_simulacion
+    from app.routers.reservas import construir_router_de_simulacion_qr
+
+    nombres = [*NOMBRES_DE_PRODUCCION, "PROD", "Produccion", "dev", "demo", "test", ""]
+    for nombre in nombres:
+        esperado = es_produccion(nombre)
+        assert (construir_router_de_simulacion(nombre) is None) is esperado, nombre
+        assert (construir_router_de_simulacion_qr(nombre) is None) is esperado, nombre
+
+    # El control: la lista tiene que traer casos de los dos lados, o el bucle
+    # de arriba pasaria con un `es_produccion` que devuelve siempre lo mismo.
+    assert any(es_produccion(n) for n in nombres)
+    assert any(not es_produccion(n) for n in nombres)

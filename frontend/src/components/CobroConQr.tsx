@@ -95,6 +95,9 @@ export function SeccionDeCobroConQr({ reservaId, estado, abierto, onCobrado }: {
   const [qr, setQr] = useState<EstadoQr>('idle')
   const [monto, setMonto] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /** Si esta instancia monta el simulador (o sea, no es producción). */
+  const [sePuedeSimular, setSePuedeSimular] = useState(false)
+  const [simulando, setSimulando] = useState(false)
   const pollRef = useRef<number | null>(null)
   const audioRef = useRef<AudioContext | null>(null)
 
@@ -116,8 +119,28 @@ export function SeccionDeCobroConQr({ reservaId, estado, abierto, onCobrado }: {
     setQr('idle')
     setError(null)
     setMonto(null)
+    setSePuedeSimular(false)
     cobroQr.estado()
-      .then(setDisponible)
+      .then((estadoMp) => {
+        setDisponible(estadoMp)
+        // 🔑 **Sólo se sondea si faltan las credenciales.** Con MercadoPago
+        // cargado el botón no se ofrece nunca, así que preguntar sería un 404
+        // por cada turno que se abre en **toda instancia de producción** —la
+        // única que no lo es tiene el simulador—. Ruido en el log, y de la
+        // clase que después nadie sabe si importa.
+        if (estadoMp.disponible) return
+        // Se le pregunta al servidor y no se mira una variable de build: el
+        // bundle es el mismo en dev y en producción, así que una bandera del
+        // frontend mostraría este botón en la instancia de un complejo, donde
+        // acredita cobros que nadie pagó. La ruta vive adentro del router del
+        // simulador: **si no se montó, no existe**, y el 404 es la respuesta.
+        return cobroQr.simulacionDisponible()
+          .then(() => setSePuedeSimular(true))
+          // Ante cualquier falla, no se ofrece. Esconder el botón en dev cuesta
+          // un click; mostrarlo en producción cuesta un turno cerrado sin
+          // cobrar. No se distingue el 404 del 500 a propósito.
+          .catch(() => setSePuedeSimular(false))
+      })
       // Sin respuesta, la sección no aparece: cobrar por QR es una forma más
       // de cobrar, no un requisito para operar el mostrador.
       .catch(() => setDisponible({ disponible: false, auto_facturar: false }))
@@ -133,6 +156,19 @@ export function SeccionDeCobroConQr({ reservaId, estado, abierto, onCobrado }: {
   // en cada apertura es peor que el medio segundo de nada.
   if (disponible === null) return null
 
+  if (qr === 'cobrado') {
+    return (
+      <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm dark:bg-emerald-950/30">
+        <div className="font-medium text-emerald-800 dark:text-emerald-400">
+          Cobrado por QR de MercadoPago
+        </div>
+        {disponible.auto_facturar && (
+          <div className="text-muted-foreground">La factura se emitió sola.</div>
+        )}
+      </div>
+    )
+  }
+
   // 🔴 **Acá había un `return null` y ese era el bug.** Sin credenciales el
   // detalle del turno no mostraba **nada**: ni el botón ni el motivo. El humano
   // lo reportó el 2026-08-28 —*"pongo pagar con MercadoPago y no me dirige a
@@ -143,11 +179,62 @@ export function SeccionDeCobroConQr({ reservaId, estado, abierto, onCobrado }: {
   // texto es cómo una termina diciendo una cosa y la otra otra.
   if (!disponible.disponible) {
     return (
-      <p className="text-sm text-muted-foreground">
-        Para cobrar con el QR del mostrador faltan las credenciales de
-        MercadoPago. Se cargan en Configuración → Mercado Pago.
-      </p>
+      <div className="space-y-2">
+        <p className="text-sm text-muted-foreground">
+          Para cobrar con el QR del mostrador faltan las credenciales de
+          MercadoPago. Se cargan en Configuración → Mercado Pago.
+        </p>
+        {/* 🔴 **Sólo fuera de producción, y quien lo decide es el servidor.**
+            Sin credenciales el circuito no se puede probar de punta a punta:
+            `poner_en_el_qr` falla al crear la orden, así que no llega a existir
+            el pago que después habría que sellar. Simular sólo la acreditación
+            no serviría.
+
+            📋 Misma redacción que el botón del portal
+            (`portal/DialogoDePago.tsx`), que es el que el humano ya usó: dos
+            textos distintos para lo mismo es cómo uno termina diciendo una cosa
+            y el otro otra. */}
+        {sePuedeSimular && (
+          <div className="space-y-2 rounded-md border border-dashed p-3">
+            <p className="text-xs text-muted-foreground">
+              Instancia de prueba: se puede simular el pago para recorrer el
+              circuito completo.
+            </p>
+            <AvisoDeError mensaje={error} />
+            <button
+              type="button"
+              disabled={simulando}
+              onClick={simular}
+              className={buttonVariants({ variant: 'outline' })}
+            >
+              <QrCode className="size-4" />
+              {simulando ? 'Simulando el pago…' : 'Simular pago aprobado'}
+            </button>
+          </div>
+        )}
+      </div>
     )
+  }
+
+  async function simular() {
+    if (reservaId === null) return
+    setError(null)
+    setSimulando(true)
+    try {
+      await cobroQr.simular(reservaId)
+    } catch (e) {
+      // El 409 de "ya está cobrado" o de "no hay caja abierta" llega acá con el
+      // mismo texto que le sale al cobro real, que es lo que se quiere probar.
+      setError((e as Error).message)
+      return
+    } finally {
+      setSimulando(false)
+    }
+    // Lo mismo que hace el poll cuando acredita de verdad: el cobro ya ocurrió
+    // del lado del servidor, así que la agenda —y con ella la sección de la
+    // factura que pudo haber salido sola— tienen que refrescarse.
+    setQr('cobrado')
+    onCobrado()
   }
 
   async function bajar() {
@@ -211,19 +298,6 @@ export function SeccionDeCobroConQr({ reservaId, estado, abierto, onCobrado }: {
         )
       }
     }, POLL_MS)
-  }
-
-  if (qr === 'cobrado') {
-    return (
-      <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm dark:bg-emerald-950/30">
-        <div className="font-medium text-emerald-800 dark:text-emerald-400">
-          Cobrado por QR de MercadoPago
-        </div>
-        {disponible.auto_facturar && (
-          <div className="text-muted-foreground">La factura se emitió sola.</div>
-        )}
-      </div>
-    )
   }
 
   if (qr === 'esperando') {

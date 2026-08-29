@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin, require_staff
+from app.config import es_produccion
 from app.db import obtener_sesion
 from app.models.enums import ESTADOS_QUE_OCUPAN, EstadoReserva
 from app.models.maestros import Cancha, Cliente
@@ -843,3 +844,102 @@ def catalogo_de_estados() -> dict[str, list[str]]:
         "todos": [estado.value for estado in EstadoReserva],
         "ocupan": [estado.value for estado in ESTADOS_QUE_OCUPAN],
     }
+
+# ── El simulador del cobro por QR, sólo fuera de producción ──────────────
+
+
+def construir_router_de_simulacion_qr(entorno: str) -> APIRouter | None:
+    """`POST /api/reservas/{id}/mp-qr/simular`, **si esto no es producción**.
+
+    🔴 **Es lo único que separa dev de cobrar turnos que nadie pagó.** Este
+    endpoint acredita un cobro sin que haya entrado un peso: montado en la
+    instancia de un complejo, cualquiera con la URL cierra turnos gratis. Por eso
+    devuelve `None` en producción y el router **no se monta** — no alcanza con un
+    `if` adentro del handler, porque un `if` mal escrito deja el endpoint
+    existiendo. Mismo criterio, y misma redacción, que
+    `portal.construir_router_de_simulacion`.
+
+    🔑 **Llama a las MISMAS funciones que el camino real**:
+    `crear_pago_de_mostrador`, `aplicar_pago_aprobado` y `_completar`. Un
+    simulador con lógica propia probaría un circuito que en producción no existe
+    — y el día que MercadoPago confirme de verdad se ejecutaría un camino que
+    nunca corrió. Lo único que se saltea es lo que **no se puede tener sin
+    credenciales**: crear la orden en MercadoPago y consultarla. Eso queda
+    explícito acá y no escondido.
+
+    ⚠️ **Y por eso cubre los dos pasos y no sólo la acreditación.** Sin
+    credenciales `poner_en_el_qr` falla al llamar a `crear_orden_qr`, así que no
+    llega a existir el pago que después habría que sellar: simular sólo la
+    segunda mitad no serviría para nada.
+    """
+    if es_produccion(entorno):
+        return None
+
+    simulador = APIRouter(prefix="/api/reservas", tags=["reservas"])
+
+    @simulador.get("/mp-qr/simulacion")
+    def hay_simulador(_: object = Depends(require_staff)):
+        """Cómo la pantalla de la Caja se entera de que puede ofrecer el botón.
+
+        🔑 **Vive adentro de este router y ése es todo el diseño.** La alternativa
+        era que el endpoint de estado devolviera un booleano calculado con el
+        mismo criterio de producción; eso es una **segunda puerta al mismo
+        cuarto**, y el día que las dos dejen de coincidir la pantalla ofrece un
+        botón que no existe — o, peor, lo esconde en la instancia donde hace
+        falta. Acá no hay criterio que repetir: si el simulador no se montó,
+        esta ruta tampoco existe y el frontend recibe un 404.
+
+        ⚠️ **Y es un GET, no un POST a la ruta real con un id inventado.** Así
+        sondea hoy el portal (`simularPago(-1)`, distinguiendo el 404 del error
+        por el texto del mensaje), que funciona pero mide la ausencia leyendo
+        una cadena de error: cambiarle la redacción al 404 le rompe la
+        detección. Un GET dedicado dice lo mismo sin escribir nada.
+
+        Pide staff igual que el resto del mostrador: no filtra nada, pero no hay
+        motivo para que un anónimo enumere qué instancia es de prueba.
+        """
+        return {"disponible": True}
+
+    @simulador.post("/{reserva_id}/mp-qr/simular")
+    async def simular_cobro_qr(
+        reserva_id: int,
+        sesion: Session = Depends(obtener_sesion),
+        usuario: dict = Depends(require_staff),
+    ):
+        """Hace de cuenta que alguien escaneó el QR y pagó. Sólo en dev y demo.
+
+        Deja todo lo que deja el cobro real: el pago aprobado, el movimiento en
+        la caja del turno abierto y —si la automática está prendida— la factura.
+        """
+        _exigir_base_de_caja()
+        reserva, cancha_nombre = _reserva_y_cancha(sesion, reserva_id)
+        cliente = sesion.get(Cliente, reserva.cliente_id) if reserva.cliente_id else None
+
+        try:
+            monto = cobro_qr.total_a_cobrar(reserva)
+        except cobro_qr.SinPrecio as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except cobro_qr.NadaQueCobrar as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+        try:
+            pago = servicio_pagos.crear_pago_de_mostrador(sesion, reserva, monto)
+        except servicio_pagos.PagoInvalido as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+        servicio_pagos.aplicar_pago_aprobado(
+            sesion, pago, payment_id=f"simulado-{pago.id}", estado_mp="approved"
+        )
+        try:
+            resultado = await cobro_qr._completar(
+                sesion, pago, reserva, cliente, cancha_nombre, usuario
+            )
+        except servicio_caja.SinTurnoAbierto as exc:
+            # 🔑 Mismo 409 que el cobro real: sin caja abierta la plata quedaría
+            # fuera del arqueo, y el simulador no es excusa para saltearlo.
+            raise HTTPException(409, str(exc)) from exc
+        sesion.commit()
+        return {**resultado, "simulado": True, "monto": float(monto)}
+
+    return simulador
+
