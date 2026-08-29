@@ -252,3 +252,136 @@ def test_no_se_anula_un_movimiento_que_no_es_del_turno_abierto(api, sucursal, ab
 # quedar registrados"*. Los tests de lo que esto protege del lado de las
 # reservas ---el pendiente que vuelve, y que las dos pantallas coincidan---
 # estan en `test_cobro_del_turno.py`, donde viven los helpers de reserva.
+
+
+# -- La caja predeterminada -------------------------------------------------
+#
+# Ser la predeterminada significa dos cosas REALES, medidas y no supuestas: el
+# motor lista las cajas con `ORDER BY es_default DESC, nombre` ---asi que
+# encabeza la lista, y la pantalla de Caja ofrece la primera elegida al abrir---
+# y el motor se niega a borrarla.
+
+
+def _crear_caja(api, sucursal, nombre):
+    r = api.post("/api/cajas", json={
+        "nombre": nombre, "descripcion": "", "medios_pago": ["efectivo"],
+        "sucursal_id": sucursal.id})
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_marcar_una_caja_como_predeterminada(api, sucursal):
+    """⚠️ **La primera se marca a proposito antes de marcar la segunda.**
+
+    La version anterior de este test solo creaba las dos y marcaba la segunda,
+    y despues asertaba que la primera NO fuera predeterminada ---cosa que ya era
+    cierta antes de tocar nada---. La mutacion de sacar el `UPDATE ... es_default=0`
+    sobrevivia: el assert pasaba por el estado inicial, no por el cambio.
+
+    Marcando la primera primero, el assert de abajo mide el apagado de verdad.
+    """
+    primera = _crear_caja(api, sucursal, "Barra")
+    segunda = _crear_caja(api, sucursal, "Quincho")
+
+    assert api.post(f"/api/cajas/{primera['id']}/predeterminada").status_code == 200
+    # Control del punto de partida: la primera SI quedo marcada, o el assert
+    # final no distinguiria "se apago" de "nunca estuvo prendida".
+    iniciales = {c["id"]: c for c in api.get(f"/api/cajas?sucursal_id={sucursal.id}").json()}
+    assert iniciales[primera["id"]]["es_default"] is True
+
+    r = api.post(f"/api/cajas/{segunda['id']}/predeterminada")
+    assert r.status_code == 200, r.text
+    assert r.json()["es_default"] is True
+
+    # 🔴 Y el control de que el cambio PERSISTIO. Un write sin commit no falla:
+    # devuelve la fila que acaba de escribir en su propia transaccion y despues
+    # se pierde. Se relee por otra consulta.
+    cajas = {c["id"]: c for c in api.get(f"/api/cajas?sucursal_id={sucursal.id}").json()}
+    assert cajas[segunda["id"]]["es_default"] is True
+    # Hay UNA predeterminada por sede, no varias: la primera se apago.
+    assert cajas[primera["id"]]["es_default"] is False, (
+        "quedaron dos cajas predeterminadas en la misma sede"
+    )
+
+
+def test_LA_PREDETERMINADA_DE_UNA_SEDE_NO_APAGA_LA_DE_LA_OTRA(api, sucursal, sesion):
+    """🔴 El motivo por el que esto NO usa `set_default_caja` del motor.
+
+    Esa funcion hace `UPDATE cajas SET es_default=0` **sin filtrar nada**. En
+    Contalibra esta bien porque no tiene sedes; aca marcar la predeterminada de
+    una sucursal le borraria la de la otra, y el sintoma seria que el mostrador
+    de la otra sede abre el turno sobre el cajon equivocado sin que nadie haya
+    tocado nada ahi.
+    """
+    from app.models.maestros import Sucursal
+
+    otra = Sucursal(nombre="Sede Norte")
+    sesion.add(otra)
+    sesion.commit()
+
+    de_aca = _crear_caja(api, sucursal, "Barra")
+    de_alla = api.post("/api/cajas", json={
+        "nombre": "Barra Norte", "descripcion": "", "medios_pago": ["efectivo"],
+        "sucursal_id": otra.id}).json()
+
+    api.post(f"/api/cajas/{de_aca['id']}/predeterminada")
+    api.post(f"/api/cajas/{de_alla['id']}/predeterminada")
+
+    # La de la otra sede sigue siendo la suya.
+    de_aca_ahora = next(
+        c for c in api.get(f"/api/cajas?sucursal_id={sucursal.id}").json()
+        if c["id"] == de_aca["id"]
+    )
+    assert de_aca_ahora["es_default"] is True, (
+        "marcar la predeterminada de una sede apago la de la otra"
+    )
+    # Y el control positivo: la segunda TAMBIEN quedo marcada, o sea que el
+    # endpoint hizo algo y el assert de arriba no pasa por no haber cambiado nada.
+    de_alla_ahora = next(
+        c for c in api.get(f"/api/cajas?sucursal_id={otra.id}").json()
+        if c["id"] == de_alla["id"]
+    )
+    assert de_alla_ahora["es_default"] is True
+
+
+def test_la_predeterminada_ENCABEZA_la_lista_de_su_sede(api, sucursal):
+    """Es lo que hace que la pantalla de Caja la ofrezca elegida: preselecciona
+    la primera activa, y el motor ordena por `es_default DESC, nombre`."""
+    _crear_caja(api, sucursal, "Barra")          # alfabeticamente primera
+    quincho = _crear_caja(api, sucursal, "Quincho")
+
+    # Control de la premisa: sin marcar nada, la primera es la alfabetica.
+    primeras = api.get(f"/api/cajas?sucursal_id={sucursal.id}").json()
+    assert primeras[0]["nombre"] == "Barra"
+
+    api.post(f"/api/cajas/{quincho['id']}/predeterminada")
+    despues = api.get(f"/api/cajas?sucursal_id={sucursal.id}").json()
+    assert despues[0]["id"] == quincho["id"], (
+        f"la predeterminada no encabeza la lista: {[c['nombre'] for c in despues]}"
+    )
+
+
+def test_marcar_una_caja_que_no_existe_da_404(api):
+    assert api.post("/api/cajas/999999/predeterminada").status_code == 404
+
+
+def test_marcar_la_predeterminada_es_de_admin(api, sucursal):
+    """Decide sobre que cajon abre el turno el mostrador: es configuracion."""
+    caja = _crear_caja(api, sucursal, "Barra")
+    api.post("/api/usuarios", json={
+        "username": "encargado-cajas", "name": "Encargado",
+        "password": "clave-enc", "role": "staff"})
+    staff = TestClient(
+        crear_app(Config(
+            database_url=os.environ["DATABASE_URL"], entorno="test", debug=False,
+            directorio_de_datos="/tmp/libraclub-test-datos",
+            libracore_database_url=_url_core(),
+        )),
+        base_url="https://testserver",
+    )
+    assert staff.post(
+        "/auth/login", json={"username": "encargado-cajas", "password": "clave-enc"}
+    ).status_code == 200
+    assert staff.post(f"/api/cajas/{caja['id']}/predeterminada").status_code == 403
+    # El control: el admin si puede.
+    assert api.post(f"/api/cajas/{caja['id']}/predeterminada").status_code == 200

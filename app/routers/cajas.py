@@ -124,6 +124,21 @@ def editar(
         raise HTTPException(422, str(e)) from e
 
 
+@router.post("/{caja_id}/predeterminada", response_model=CajaSalida)
+def predeterminada(caja_id: int, _: object = Depends(require_admin)) -> CajaSalida:
+    """Deja esta caja como la predeterminada de su sede.
+
+    Es la que la pantalla de Caja ofrece elegida al abrir el turno, y la que el
+    motor se niega a borrar. Con un solo mostrador no cambia nada visible; con
+    dos, decide cuál sale por defecto.
+    """
+    exigir_base()
+    caja = servicio.marcar_predeterminada(caja_id)
+    if caja is None:
+        raise HTTPException(404, "no existe esa caja")
+    return _salida(caja)
+
+
 @router.delete("/{caja_id}", status_code=204)
 def borrar(caja_id: int, _: object = Depends(require_admin)) -> None:
     """Baja de un mostrador.

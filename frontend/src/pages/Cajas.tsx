@@ -17,7 +17,7 @@ import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 import { BadgeEstado } from 'libra-ui/badge-estado'
-import { Plus, Wallet } from 'lucide-react'
+import { Plus, Star, Wallet } from 'lucide-react'
 
 import { cajas as api } from '@/lib/api'
 import type { CajaDeMostrador } from '@/lib/api'
@@ -45,6 +45,9 @@ export function Cajas() {
   const [editando, setEditando] = useState<CajaDeMostrador | null>(null)
   const [abierto, setAbierto] = useState(false)
   const [aBorrar, setABorrar] = useState<CajaDeMostrador | null>(null)
+  //: Qué caja se está marcando. El id y no un booleano: con dos mostradores,
+  //  un booleano deshabilitaría los dos botones a la vez.
+  const [marcando, setMarcando] = useState<number | null>(null)
 
   const recargar = useCallback(() => {
     if (actual === null) return
@@ -57,6 +60,24 @@ export function Cajas() {
   }, [actual])
 
   useEffect(recargar, [recargar])
+
+  const marcarPredeterminada = useCallback(async (caja: CajaDeMostrador) => {
+    setMarcando(caja.id)
+    setError(null)
+    try {
+      await api.predeterminada(caja.id)
+    } catch (e) {
+      setError((e as Error).message)
+      return
+    } finally {
+      setMarcando(null)
+    }
+    // 🔑 Se recarga la lista entera y no se parchea la fila: marcar una **apaga
+    // la anterior**, así que el cambio es de dos filas y no de una. Parchear
+    // sólo la tocada dejaría dos pastillas de «Predeterminada» en pantalla
+    // hasta el próximo refresco.
+    recargar()
+  }, [recargar])
 
   const columnas = useMemo<ColumnDef<CajaDeMostrador>[]>(() => {
     const base: ColumnDef<CajaDeMostrador>[] = [
@@ -79,22 +100,55 @@ export function Cajas() {
         id: 'estado',
         header: 'Estado',
         cell: ({ row }) => (
-          <BadgeEstado tono={row.original.activo ? 'ok' : 'neutro'}>
-            {row.original.activo ? 'Activa' : 'Dada de baja'}
-          </BadgeEstado>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <BadgeEstado tono={row.original.activo ? 'ok' : 'neutro'}>
+              {row.original.activo ? 'Activa' : 'Dada de baja'}
+            </BadgeEstado>
+            {/* 🔑 **La marca va acá y no en una columna propia.** Es una sola
+                caja por sede: una columna entera para una celda con contenido y
+                el resto vacías ocupa ancho y no dice más que esto. */}
+            {row.original.es_default && (
+              <BadgeEstado tono="curso">Predeterminada</BadgeEstado>
+            )}
+          </div>
         ),
       },
     ]
     if (!puedeEscribir) return base
     return [
       ...base,
+      {
+        id: 'predeterminada',
+        header: '',
+        size: 190,
+        cell: ({ row }) => {
+          // 🔑 Sobre la que YA es predeterminada no se ofrece el botón: apretarlo
+          // no haría nada y un control que no cambia nada enseña que la pantalla
+          // no responde. Se ve la pastilla de la columna Estado en su lugar.
+          if (row.original.es_default) return null
+          // Tampoco sobre una dada de baja: sería elegir como predeterminado un
+          // cajón sobre el que no se puede abrir turno.
+          if (!row.original.activo) return null
+          return (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={marcando === row.original.id}
+              onClick={() => marcarPredeterminada(row.original)}
+            >
+              <Star className="size-4" />
+              {marcando === row.original.id ? 'Marcando…' : 'Hacer predeterminada'}
+            </Button>
+          )
+        },
+      },
       columnaDeAcciones<CajaDeMostrador>({
         onEditar: (c) => { setEditando(c); setAbierto(true) },
         onBorrar: setABorrar,
         nombreDe: (c) => c.nombre,
       }),
     ]
-  }, [puedeEscribir, etiquetaDeMedio])
+  }, [puedeEscribir, etiquetaDeMedio, marcando, marcarPredeterminada])
 
   if (actual === null) {
     return <p className="text-muted-foreground">Elegí una sucursal para ver sus cajas.</p>

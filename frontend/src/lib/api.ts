@@ -420,6 +420,13 @@ export const cajas = {
     medios_pago?: string[]
     activo: boolean
   }) => api.put<CajaDeMostrador>(`/api/cajas/${id}`, datos),
+  /** Deja esta caja como la predeterminada **de su sede**.
+   *
+   *  Es la que la Caja ofrece elegida al abrir el turno, y la que el motor se
+   *  niega a borrar. El alcance por sucursal lo garantiza el backend: marcar
+   *  la de una sede no toca la de la otra. */
+  predeterminada: (id: number) =>
+    api.post<CajaDeMostrador>(`/api/cajas/${id}/predeterminada`, {}),
   borrar: (id: number) => api.del<void>(`/api/cajas/${id}`),
 }
 

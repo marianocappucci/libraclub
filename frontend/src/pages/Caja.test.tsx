@@ -199,6 +199,33 @@ describe('abrir el turno sobre un mostrador', () => {
     })
   })
 
+  it('🔑 viene elegida la PREDETERMINADA de la sede, no la primera', async () => {
+    /* 🔴 Andaba igual antes de que esto fuera explícito, y ése era el problema:
+     * el motor lista con `ORDER BY es_default DESC, nombre`, así que la
+     * predeterminada encabezaba y `activas[0]` la agarraba de rebote. Lo que el
+     * mostrador ve elegido dependía de un `ORDER BY` de LibraCore que este
+     * producto no controla y que ningún test de acá miraba.
+     *
+     * Acá las cajas llegan en el orden «equivocado» a propósito —el Buffet es
+     * el predeterminado pero viene segundo— así que la única forma de pasar es
+     * mirando `es_default`. */
+    estado.mostradores = [
+      { ...MOSTRADORES[0], es_default: false },
+      { ...MOSTRADORES[1], es_default: true },
+    ]
+    montar()
+    const selector = await screen.findByLabelText('Caja')
+    expect((selector as HTMLSelectElement).value).toBe('6')
+  })
+
+  it('y sin ninguna predeterminada, la primera — el control del de arriba', async () => {
+    // Sin esto, una preselección que siempre eligiera la última pasaría el test
+    // anterior por el motivo equivocado.
+    montar()
+    const selector = await screen.findByLabelText('Caja')
+    expect((selector as HTMLSelectElement).value).toBe('5')
+  })
+
   it('🔴 sin mostradores lo dice, y no deja abrir', async () => {
     // El mostrador no puede resolverlo —crear una caja es de admin—, así que un
     // formulario que no funciona sin decir por qué manda a adivinar.

@@ -508,6 +508,42 @@ def borrar_caja(caja_id: int) -> None:
     db_caja.delete_caja_config(caja_id)
 
 
+def marcar_predeterminada(caja_id: int) -> dict | None:
+    """Deja esta caja como la predeterminada **de su sucursal**.
+
+    🔴 **No se usa `db_caja.set_default_caja` del motor, y no es por gusto.**
+    Esa función hace `UPDATE cajas SET es_default=0` **sin filtrar nada**, y en
+    [[contalibra]] está bien porque no tiene sedes. Acá las cajas pertenecen a
+    una sucursal: marcar la predeterminada de una sede **le borraría la de la
+    otra**, y el síntoma sería que el mostrador de la otra sede abre el turno
+    sobre el cajón equivocado sin que nadie haya tocado nada ahí.
+
+    🔑 **Qué significa ser la predeterminada, medido y no supuesto.** Dos
+    cosas, las dos reales: el motor lista las cajas con
+    `ORDER BY es_default DESC, nombre`, así que ésta encabeza la lista —y la
+    pantalla de Caja la ofrece elegida al abrir el turno—; y el motor **se niega
+    a borrarla**, que es lo que evita quedarse sin ninguna.
+
+    ⚠️ Las cajas viejas sin `sucursal_id` se tratan como su propio grupo. No es
+    un caso hipotético: las que nacieron antes del 2026-08-28 quedaron en
+    `NULL`, y meterlas en la misma bolsa que las de una sede haría que marcar
+    cualquiera de las dos apagara a la otra.
+    """
+    caja = db_caja.get_caja_config(caja_id)
+    if caja is None:
+        return None
+    sucursal_id = caja.get("sucursal_id")
+    with libracore_core.get_connection() as conexion:
+        if sucursal_id is None:
+            conexion.execute("UPDATE cajas SET es_default=0 WHERE sucursal_id IS NULL")
+        else:
+            conexion.execute(
+                "UPDATE cajas SET es_default=0 WHERE sucursal_id=?", (sucursal_id,)
+            )
+        conexion.execute("UPDATE cajas SET es_default=1 WHERE id=?", (caja_id,))
+    return db_caja.get_caja_config(caja_id)
+
+
 #: Cómo se llama la caja que se crea sola para una sucursal que no tenía
 #: ninguna. Se puede renombrar desde la pantalla; el nombre sólo importa la
 #: primera vez.

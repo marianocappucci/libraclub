@@ -130,7 +130,15 @@ function Apertura({ onAbierta, onError, ultimoCierre }: {
       .then((cs) => {
         const activas = cs.filter((c) => c.activo)
         setMostradores(activas)
-        if (activas.length > 0) setElegida(String(activas[0].id))
+        // 🔑 **La predeterminada se busca, no se asume que viene primera.**
+        // Funcionaba igual antes ---el motor lista con
+        // `ORDER BY es_default DESC, nombre`, así que la predeterminada
+        // encabezaba--- pero eso ataba lo que el mostrador ve elegido a un
+        // `ORDER BY` de LibraCore que este producto no controla y que ningún
+        // test de acá mira. Ahora lo dice el código: la predeterminada de la
+        // sede, y si no hay ninguna la primera que venga.
+        const porDefecto = activas.find((c) => c.es_default) ?? activas[0]
+        if (porDefecto) setElegida(String(porDefecto.id))
       })
       .catch((e: Error) => onError(e.message))
   }, [actual, onError])
