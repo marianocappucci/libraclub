@@ -13,6 +13,7 @@ const EXISTENTE: Cliente = {
   documento: '04123456',
   cuit: '20-04123456-3',
   activo: true,
+  acepta_avisos: true,
   observaciones: 'Juega los martes',
 }
 
@@ -101,5 +102,24 @@ describe('formulario de cliente', () => {
     expect(llamadas.find((l) => l.metodo === 'PUT')!.cuerpo).toMatchObject({
       activo: false,
     })
+  })
+
+  it('🔑 el que pide no recibir avisos se apaga desde acá', async () => {
+    // Sin esta casilla, honrar un «no me escriban más» —que llega por
+    // teléfono— sería un UPDATE a mano en la base. El alta nace en `true`
+    // porque quien deja su email al reservar espera que le llegue el turno.
+    const onGuardado = abrir(EXISTENTE)
+    const casilla = screen.getByRole('checkbox', { name: /recibe avisos/i })
+    expect(casilla).toBeChecked()
+
+    await userEvent.click(casilla)
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+    await waitFor(() => expect(onGuardado).toHaveBeenCalled())
+
+    const cuerpo = llamadas.find((l) => l.metodo === 'PUT')!.cuerpo
+    expect(cuerpo).toMatchObject({ acepta_avisos: false })
+    // El control: apagar los avisos no da de baja al cliente. Son dos casillas
+    // distintas y es fácil que la segunda escriba sobre la primera.
+    expect(cuerpo).toMatchObject({ activo: true })
   })
 })

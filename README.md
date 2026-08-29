@@ -118,6 +118,28 @@ suponerlo.
 > de correo saliente ni instancia de demo pública. Declararlos sin que existan
 > del otro lado da pestañas que contestan 404.
 
+## Tareas programadas
+
+Dos scripts que **no corren solos**: viven en el cron del host de la instancia y
+sin esa línea el producto no falla, simplemente deja de hacer una parte de su
+trabajo sin avisar. Se instalan por instancia, y conviene verificarlas mirando el
+log —no suponiéndolas.
+
+| Script | Cada | Qué pasa si no está |
+|---|---|---|
+| `scripts/vencer_provisorias.py` | 5 min | El turno que alguien empezó a reservar por el portal y abandonó **queda retenido para siempre**: la cancha de las 20:00 del viernes deja de venderse |
+| `scripts/enviar_avisos.py` | 5 min | **No sale ningún aviso** — ni confirmación, ni recordatorio, ni cancelación. Es el interruptor de la función (ADR-015) |
+
+```bash
+*/5 * * * * docker exec libraclub-dev python /app/scripts/vencer_provisorias.py >> /var/log/libraclub-provisorias.log 2>&1
+*/5 * * * * docker exec libraclub-dev python /app/scripts/enviar_avisos.py >> /var/log/libraclub-avisos.log 2>&1
+```
+
+> 🔴 **Correr el script a mano no verifica un cron.** Prueba el script, no la
+> entrada: hay que ver la línea disparar en `syslog` y su log escrito. Un `%` en
+> un crontab se convierte en salto de línea, así que una línea que corre perfecto
+> a mano se puede partir al instalarla.
+
 ## Tests
 
 Corren **contra PostgreSQL real**, nunca contra SQLite: una suite verde sobre

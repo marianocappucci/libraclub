@@ -27,7 +27,10 @@ RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: entre tests en vez de recrear el schema: recrear cuesta segundos por test y
 #: además volvería a correr la migración, que es lo que se quiere probar una vez
 #: y no cien.
-TABLAS = "reservas, series, tarifas, feriados, canchas, clientes, sucursales"
+#: `avisos` va explícita aunque el `CASCADE` la alcanzaría por su FK contra
+#: `reservas`: una tabla que sólo se limpia de rebote deja de limpiarse el día
+#: que alguien le saca la FK, y el síntoma es un test que ve avisos de otro.
+TABLAS = "avisos, reservas, series, tarifas, feriados, canchas, clientes, sucursales"
 
 
 #: Secreto de firma de sesión para la suite. Fijo y evidente: no es una clave,

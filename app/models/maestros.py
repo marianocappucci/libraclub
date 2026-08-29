@@ -128,6 +128,14 @@ class Cliente(Base, Auditable, Anotable):
     documento: Mapped[str | None] = mapped_column(String(20), nullable=True)
     cuit: Mapped[str | None] = mapped_column(String(13), nullable=True)
     activo: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    #: Si quiere recibir confirmaciones y recordatorios de sus turnos.
+    #:
+    #: Arranca en `True` —quien deja su email al reservar espera que le llegue el
+    #: turno— y el que dice «no me escriban más» se apaga acá. Es una columna del
+    #: cliente y no una lista de bajas aparte: la baja tiene que viajar con él,
+    #: si no, el día que se exporte o se migre la tabla se pierde y le vuelven a
+    #: escribir justamente a quien pidió que no.
+    acepta_avisos: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     __table_args__ = (
         Index("ix_clientes_nombre", "nombre"),

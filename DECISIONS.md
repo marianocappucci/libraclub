@@ -406,3 +406,58 @@ repo— y por eso depende de que nadie escanee entre un cobro y el siguiente.
 **El rol.** Cobrar es `staff`; facturar a mano sigue siendo `admin`. La factura
 que sale sola no rompe esa línea: quien decidió que se emita fue el dueño, al
 prender el toggle en Configuración — el encargado no elige nada.
+
+## ADR-015 — Los avisos se deducen de las reservas; `avisos` es el registro, no la cola
+
+**Fecha:** 2026-08-29 · **Estado:** aceptada
+
+El producto tiene que mandar confirmación, recordatorio y cancelación: es lo que
+manda todo el rubro y lo primero que se nombra al comparar contra Turnito,
+Canchero, ATC o EasyCancha. La forma obvia es una **cola** — cuando se confirma
+un turno se encolan sus avisos con su fecha de envío, y un worker despacha lo
+vencido.
+
+**No se hizo así.** Hoy hay **tres** caminos que dejan una reserva confirmada y
+ninguno pasa por los otros dos:
+
+1. `servicios/reservas.crear()` — el mostrador, que nace `CONFIRMADA`;
+2. `servicios/reservas.cambiar_estado()` — el botón de la agenda;
+3. `servicios/pagos.aplicar_pago_aprobado()` — el webhook de MercadoPago, que
+   escribe `reserva.estado = EstadoReserva.CONFIRMADA` **a mano**.
+
+Con una cola hay que acordarse de encolar en los tres. El día que aparezca un
+cuarto —una reserva desde el panel, una importación de planilla— el síntoma **no
+es un error**: es que no le llega el mail al cliente, y eso no lo descubre nadie.
+Un aviso que no sale no rompe nada, que es justamente lo que lo hace difícil de
+encontrar. Lo mismo del otro lado: una cola obliga a *desencolar* desde cada
+camino que cancela.
+
+**La decisión:** el barrido le pregunta a `reservas` qué corresponde avisar, y
+`avisos` guarda sólo lo ya intentado — `enviado`, `fallido` u `omitido`. Un
+camino nuevo queda cubierto sin tocar el servicio. Lo que impide mandar dos veces
+es `uq_avisos_reserva_tipo_canal` — `(reserva_id, tipo, canal, horas_antes)` con
+`NULLS NOT DISTINCT` — y no un `if`: dos corridas del cron superpuestas pasan las
+dos por el `if` antes de que cualquiera escriba.
+
+**Lo que se paga:** una consulta por regla en cada corrida (con índice y acotada
+por fecha), y que la confirmación sale con la granularidad del cron —hasta 5
+minutos— en vez de instantánea.
+
+**La ventana de dos horas de la confirmación es parte de la decisión.** Sin ella,
+la primera corrida encuentra *todas* las reservas futuras ya confirmadas
+—cargadas durante meses, sin que nadie prometiera un mail— y le escribe a cada
+cliente por cada turno. El precio es que si el cron estuvo caído más de dos horas
+esas confirmaciones no salen, y es el lado correcto para equivocarse. Los
+**recordatorios no llevan ventana**: la primera corrida sí manda los de las
+próximas 24 h, y eso es el producto funcionando.
+
+**El cron es el interruptor.** No hay un `avisos_activos` en la configuración:
+dos interruptores para lo mismo terminan en desacuerdo, y el día que el dueño
+diga «no me manda los mails» habría que adivinar cuál de los dos está apagado. El
+día que haga falta apagarlo desde la pantalla, el flag **reemplaza** al cron como
+interruptor; no se suma.
+
+**El canal no trae SMTP propio.** `TransporteEmail` usa `libraauth.email_sender`
+y `resolver_smtp_config`: el mismo servidor que ya configura «Configuración →
+Correo» y que manda el mail de recuperación de contraseña. Un segundo lugar donde
+cargar un SMTP es un lugar más donde cargarlo mal.
