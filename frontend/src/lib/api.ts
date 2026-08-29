@@ -62,6 +62,7 @@ export interface Sucursal {
   telefono: string | null
   email: string | null
   punto_venta_arca: number | null
+  horas_de_cancelacion: number | null
   activa: boolean
   observaciones: string | null
 }
@@ -79,6 +80,10 @@ export interface SucursalEntrada {
    *  numeración entre ellas. `null` no colisiona — una sucursal que todavía no
    *  factura puede quedar sin punto de venta. */
   punto_venta_arca: number | null
+  /** Con cuántas horas de anticipación hay que cancelar para que se devuelva la
+   *  seña. `null` = esta sucursal no devuelve nada automáticamente, que es el
+   *  default: cancelar siempre se puede, lo que cambia es si vuelve la plata. */
+  horas_de_cancelacion: number | null
   activa: boolean
   observaciones: string | null
 }
@@ -1244,4 +1249,26 @@ export const torneos = {
     api.post<PartidoDeTorneo>(`/api/torneos/partidos/${partidoId}/resultado`, { parciales }),
   borrarResultado: (partidoId: number) =>
     api.del(`/api/torneos/partidos/${partidoId}/resultado`),
+}
+
+/** Una devolución de seña que el complejo debe y todavía no hizo. */
+export interface DevolucionPendiente {
+  id: number
+  reserva_id: number
+  monto: string
+  referencia: string
+  payment_id: string | null
+  detalle_devolucion: string | null
+  created_at: string
+}
+
+export const devoluciones = {
+  pendientes: () => api.get<DevolucionPendiente[]>('/api/devoluciones'),
+  // Contesta 200 aunque siga pendiente, con el motivo adentro: un error HTTP
+  // haria que la pantalla muestre «algo salio mal» y esconda justamente el
+  // texto que dice que arreglar.
+  reintentar: (pagoId: number) =>
+    api.post<{ pago_id: number; estado: string; detalle: string }>(
+      `/api/devoluciones/${pagoId}/reintentar`, {},
+    ),
 }

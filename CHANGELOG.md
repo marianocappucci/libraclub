@@ -7,6 +7,24 @@ versionado [SemVer](https://semver.org/lang/es/).
 
 ### Agregado
 
+- **Política de cancelación y devolución de la seña** (ADR-016, parte de F2):
+  cada sucursal declara con cuántas horas de anticipación hay que cancelar para
+  que la seña vuelva, y si el turno se cancela a tiempo **se devuelve sola** por
+  MercadoPago. Es lo que Alquila Tu Cancha vende como funcionalidad propia y lo
+  que a este producto le faltaba: hasta hoy cancelar era gratis y la seña se
+  quedaba donde estaba, ni devuelta ni anotada como no devuelta.
+
+  **Cancelar siempre se puede**: la ventana decide la plata, no si el jugador
+  puede soltar el turno. Y **la cancelación no se cae porque falle la
+  devolución**: si MercadoPago no contesta, el turno igual queda libre y la deuda
+  queda anotada como `devolución pendiente`, visible en su pantalla y
+  reintentable por el dueño. Reintentar dos veces no devuelve dos veces.
+
+  La política **arranca apagada** (`NULL`): las instancias que ya existen siguen
+  comportándose igual hasta que alguien cargue el número en la sucursal. El cobro
+  de mostrador no se devuelve por API —ya entró a la caja— y el resultado lo dice.
+  Migración `0010`. 18 tests de backend y 3 de frontend, 9/9 mutaciones muertas.
+
 - **Avisos al cliente por email** (ADR-015, parte de F2): confirmación cuando el
   turno queda tomado, recordatorio 24 h y 2 h antes, y aviso de cancelación. Es
   lo que mandan los cuatro competidores más vendidos del mercado argentino, y

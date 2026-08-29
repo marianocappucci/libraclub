@@ -47,6 +47,7 @@ from app.routers import buffet as buffet_router
 from app.routers import caja as caja_router
 from app.routers import cajas as cajas_router
 from app.routers import cuenta_corriente as cuenta_corriente_router
+from app.routers import devoluciones as devoluciones_router
 from app.routers import facturacion as facturacion_router
 from app.routers import facturas as facturas_router
 from app.routers import mercadopago as mercadopago_router
@@ -345,6 +346,12 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # rol — el listado lo lee el mostrador para elegir dónde abrir el turno;
     # el alta, la edición y la baja son de admin.
     app.include_router(cajas_router.router)
+
+    # Las devoluciones de seña que quedaron pendientes. El listado es de staff
+    # —el encargado tiene que poder contestarle al jugador que llama— y el
+    # reintento, de admin: mover plata hacia afuera es del dueño. Cada endpoint
+    # declara su rol adentro.
+    app.include_router(devoluciones_router.router)
 
     # La cuenta corriente. Mismo criterio que la caja: el mostrador fía y cobra
     # —es quien está frente al cliente—, y la lista de deudores es de admin.

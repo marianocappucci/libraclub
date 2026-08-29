@@ -13,7 +13,7 @@
 import { Outlet } from 'react-router-dom'
 import { createLayout } from 'libra-ui/Layout'
 import {
-  CalendarDays, Clock, CreditCard, CupSoda, LayoutGrid, MapPin, NotebookText, Receipt, Repeat, ScrollText, Settings, Tags, Trophy, UserCog, Users, Wallet,
+  CalendarDays, Clock, CreditCard, CupSoda, LayoutGrid, MapPin, NotebookText, Receipt, Repeat, ScrollText, Settings, Tags, Trophy, Undo2, UserCog, Users, Wallet,
 } from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
@@ -159,6 +159,11 @@ const Cascaron = createLayout<Usuario>({
         // `adminOnly` porque el router lleva `require_admin`: el mostrador
         // cobra, pero conciliar lo que entró a la cuenta es del dueño.
         { to: '/mp-bandeja', label: 'Pagos MercadoPago', icon: CreditCard, adminOnly: true },
+        // Ver la deuda es de staff --el encargado tiene que poder
+        // contestarle al jugador que llama-- aunque reintentar sea de
+        // admin. Es la excepcion al criterio de la linea de arriba, y por
+        // eso va sin adminOnly.
+        { to: '/devoluciones', label: 'Devoluciones', icon: Undo2 },
         { to: '/usuarios', label: 'Usuarios', icon: UserCog, adminOnly: true },
         // Junto a Usuarios y no en Configuración: se mira para responder
         // "quién hizo esto", que es una pregunta sobre la gente y no sobre

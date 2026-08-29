@@ -16,6 +16,7 @@ function vacia(): SucursalEntrada {
     telefono: null,
     email: null,
     punto_venta_arca: null,
+    horas_de_cancelacion: null,
     activa: true,
     observaciones: null,
   }
@@ -51,6 +52,7 @@ export function FormularioDeSucursal({
             telefono: sucursal.telefono,
             email: sucursal.email,
             punto_venta_arca: sucursal.punto_venta_arca,
+            horas_de_cancelacion: sucursal.horas_de_cancelacion,
             activa: sucursal.activa,
             observaciones: sucursal.observaciones,
           }
@@ -169,9 +171,31 @@ export function FormularioDeSucursal({
           </p>
 
           <label className="block space-y-1">
+            <span className="text-sm font-medium">
+              Horas de anticipación para devolver la seña
+            </span>
+            <Input
+              type="number"
+              min={1}
+              max={720}
+              value={datos.horas_de_cancelacion ?? ''}
+              onChange={(e) =>
+                set('horas_de_cancelacion', e.target.value ? Number(e.target.value) : null)
+              }
+            />
+          </label>
+          <p className="text-xs text-muted-foreground">
+            Cancelar siempre se puede; esto decide si se devuelve la plata. Con
+            24, el que cancela con un día o más de anticipación recibe la seña de
+            vuelta en su Mercado Pago. <strong>Vacío significa que no se devuelve
+            nada automáticamente</strong>, que es como funciona hasta que se
+            cargue un número.
+          </p>
+
+          <label className="block space-y-1">
             <span className="text-sm font-medium">Observaciones</span>
             <Input
-              
+
               value={datos.observaciones ?? ''}
               onChange={(e) => set('observaciones', e.target.value)}
             />

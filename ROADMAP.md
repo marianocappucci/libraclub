@@ -42,17 +42,26 @@ la pantalla abierta.
 ADR-015), por email y con el SMTP que ya configura la pantalla de Correo. Los
 manda `scripts/enviar_avisos.py` desde el cron, y **ese cron es el interruptor**.
 
+**La política de cancelación: hecha** (2026-08-29, ADR-016). Ventana por
+sucursal, devolución automática de la seña por MercadoPago cuando se cancela a
+tiempo, y la deuda anotada y reintentable cuando la devolución falla.
+
 Lo que sigue abierto de esta fase, en orden:
 
-1. **La política de cancelación**, que es lo que le falta al aviso para cerrar el
-   círculo: ventana configurable por cancha, qué pasa con la seña y **devolución
-   automática** a MercadoPago. Hoy se cancela y no se devuelve nada solo.
-2. **El ausentismo**: `AUSENTE` existe como estado y se puede marcar, pero no se
+1. **El ausentismo**: `AUSENTE` existe como estado y se puede marcar, pero no se
    cuenta por cliente ni bloquea al reincidente. Es lo que ATC vende como tarjeta
    en garantía y Dónde Juego como lista negra.
-3. **WhatsApp** como segundo canal. El vocabulario ya lo contempla
+2. **WhatsApp** como segundo canal. El vocabulario ya lo contempla
    (`CanalAviso.WHATSAPP`) y el barrido elige por transporte: falta el
    transporte, las plantillas aprobadas y el proveedor.
+3. **El aviso de cancelación no dice qué pasó con la seña.** El portal sí se lo
+   dice al jugador en el momento de cancelar —que es cuando más le importa— pero
+   el mail que sale después no lo repite. Para hacerlo, `redactar` tendría que
+   mirar el pago, y hoy es una función pura que sólo recibe la reserva: es un
+   cambio de forma, no una línea más de texto.
+4. **La devolución de un cobro de mostrador**, que hoy queda dicha y no hecha:
+   ese pago ya entró a la caja, así que devolverlo es un egreso de caja y no una
+   llamada a la API. Necesita decidirse junto con el arqueo.
 
 ## F3 — Caja y factura
 
