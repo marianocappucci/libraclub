@@ -112,81 +112,137 @@ export function DetalleDeReserva({
   // sobre por qué no se puede cubrir con un test.
   return (
     <Dialog open={abierto} onOpenChange={(o) => { if (!o) onCerrar() }}>
-      <DialogContent>
+      {/* 🔑 **Más ancho que el resto de los diálogos, y a propósito.** Este no
+          es un formulario: es el mostrador entero de un turno —consumo, QR,
+          cobro, factura, cuenta corriente—, y apilado en los 448 px que da el
+          `sm:max-w-md` del componente base no entraba en pantalla ni de casualidad.
+          `cn` es twMerge, así que este `sm:max-w-3xl` le gana al del default.
+
+          El `sm:w-[calc(100%-3rem)]` no es decorativo: `DialogContent` trae
+          `w-full`, y sin un tope propio entre 640 px y 768 px de viewport el
+          diálogo quedaría pegado a los dos bordes de la ventana. */}
+      <DialogContent className="sm:w-[calc(100%-3rem)] sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{estado === 'bloqueo' ? 'Bloqueo' : 'Reserva'}</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4">
-          <div className="rounded-md bg-muted px-3 py-2 text-sm">
-            <div className="font-medium">{cancha.nombre}</div>
-            <div className="text-muted-foreground">
-              {fecha(turno.comienza_at)} · {hora(turno.comienza_at)} a{' '}
-              {hora(turno.termina_at)}
-            </div>
-            <div className="text-muted-foreground">
-              {turno.cliente ?? turno.motivo ?? '—'} · {NOMBRE[estado] ?? estado}
+        {/* 🔴 **Dos columnas desde `sm`, no una pila.** Las secciones crecen
+            hacia abajo —el buffet suma una línea por producto, el cobro una por
+            movimiento— y el diálogo terminaba más alto que el `max-h-[85vh]`
+            del componente base: se veía por scroll, de a pedazos, y las
+            acciones del turno quedaban abajo de todo.
+
+            Las columnas son **explícitas y no auto-flow**: cada sección se
+            esconde sola cuando la instancia no tiene buffet, o facturación, o
+            credenciales de MercadoPago, así que un `grid` de hijos sueltos
+            reacomodaría todo en cuanto una devuelva `null`. Con dos envoltorios
+            fijos, lo que falta deja un hueco y lo demás no se mueve.
+
+            Abajo de `sm` se apila igual que siempre: en un celular dos columnas
+            de 160 px no son una mejora.
+
+            El `gap-3` —y no el `gap-4` de antes— sale de medirlo en un
+            navegador a 1366×625, o sea un 1366×768 con la barra del navegador
+            puesta, que es la pantalla del mostrador: el caso corriente se
+            pasaba **13 px** del `max-h-[85vh]`. Los 4 px por separación los
+            devuelven. */}
+        <div className="grid items-start gap-3 sm:grid-cols-2">
+          {/* La cabecera cruza las dos columnas —es del turno entero— y va en
+              una línea: tres renglones apilados acá arriba son 40 px de alto
+              que después le faltan al contenido. */}
+          <div className="rounded-md bg-muted px-3 py-2 text-sm sm:col-span-2">
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <span className="font-medium">{cancha.nombre}</span>
+              <span className="text-muted-foreground">
+                {fecha(turno.comienza_at)} · {hora(turno.comienza_at)} a{' '}
+                {hora(turno.termina_at)}
+              </span>
+              <span className="text-muted-foreground">·</span>
+              <span className="text-muted-foreground">
+                {turno.cliente ?? turno.motivo ?? '—'} · {NOMBRE[estado] ?? estado}
+              </span>
             </div>
           </div>
 
-          <SeccionDeConsumo
-            turno={turno}
-            cancha={cancha}
-            abierto={abierto}
-            onCambio={onCambiada}
-          />
-          <SeccionDeCobroConQr
-            reservaId={turno.reserva_id}
-            estado={estado}
-            abierto={abierto}
-            onCobrado={onCambiada}
-          />
-          <SeccionDeCobro
-            reservaId={turno.reserva_id}
-            estado={estado}
-            abierto={abierto}
-            onCobrado={onCambiada}
-          />
-          <SeccionDeFactura reservaId={turno.reserva_id} abierto={abierto} />
-          <SeccionDeCuentaCorriente turno={turno} abierto={abierto} />
+          {/* Izquierda: lo que se le carga al turno y el comprobante que sale de
+              eso. El orden consumo → factura es el mismo de antes y el mismo en
+              que se hacen las cosas — ver la nota de `SeccionDeConsumo`. */}
+          <div className="space-y-3">
+            <SeccionDeConsumo
+              turno={turno}
+              cancha={cancha}
+              abierto={abierto}
+              onCambio={onCambiada}
+            />
+            <SeccionDeFactura reservaId={turno.reserva_id} abierto={abierto} />
+          </div>
 
-          {acciones.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Una reserva {NOMBRE[estado]?.toLowerCase()} ya no se puede cambiar.
-            </p>
-          ) : (
-            <>
-              <label className="block space-y-1">
-                <span className="text-sm font-medium">
-                  Motivo <span className="text-muted-foreground">(obligatorio para cancelar)</span>
-                </span>
-                <Input
-                  
-                  value={motivo}
-                  onChange={(e) => setMotivo(e.target.value)}
-                />
-              </label>
+          {/* Derecha: las tres maneras de que el turno quede saldado —el QR del
+              mostrador, el cobro por medio de pago, y fiarlo a la cuenta
+              corriente—. Juntas porque son alternativas entre sí: el encargado
+              elige una, y verlas en la misma columna es lo que hace que se lea
+              como una elección. */}
+          <div className="space-y-3">
+            <SeccionDeCobroConQr
+              reservaId={turno.reserva_id}
+              estado={estado}
+              abierto={abierto}
+              onCobrado={onCambiada}
+            />
+            <SeccionDeCobro
+              reservaId={turno.reserva_id}
+              estado={estado}
+              abierto={abierto}
+              onCobrado={onCambiada}
+            />
+            <SeccionDeCuentaCorriente turno={turno} abierto={abierto} />
+          </div>
 
-              <AvisoDeError mensaje={error} />
+          {/* El pie también cruza las dos columnas: cambiar el estado es del
+              turno, no de una de las mitades. */}
+          <div className="sm:col-span-2">
+            {acciones.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Una reserva {NOMBRE[estado]?.toLowerCase()} ya no se puede cambiar.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                <AvisoDeError mensaje={error} />
 
-              <div className="flex flex-wrap justify-end gap-2">
-                {acciones.map((a) => (
-                  <button
-                    key={a.estado}
-                    type="button"
-                    disabled={enviando}
-                    onClick={() => accionar(a.estado, Boolean(a.peligro))}
-                    className={`rounded-md px-3 py-2 text-sm disabled:opacity-50 ${
-                      a.peligro
-                        ? 'border border-red-300 text-red-800 hover:bg-red-50'
-                        : 'bg-primary text-primary-foreground'
-                    }`}
-                  >
-                    {a.texto}
-                  </button>
-                ))}
+                {/* El motivo al lado de los botones y no arriba: es el campo de
+                    la acción que está al lado —cancelar—, y en una fila propia
+                    de ancho completo se comía otro renglón del alto. */}
+                <div className="flex flex-wrap items-end justify-between gap-2">
+                  <label className="min-w-0 flex-1 space-y-1 sm:max-w-xs">
+                    <span className="text-sm font-medium">
+                      Motivo <span className="text-muted-foreground">(obligatorio para cancelar)</span>
+                    </span>
+                    <Input
+                      value={motivo}
+                      onChange={(e) => setMotivo(e.target.value)}
+                    />
+                  </label>
+
+                  <div className="flex flex-wrap justify-end gap-2">
+                    {acciones.map((a) => (
+                      <button
+                        key={a.estado}
+                        type="button"
+                        disabled={enviando}
+                        onClick={() => accionar(a.estado, Boolean(a.peligro))}
+                        className={`rounded-md px-3 py-2 text-sm disabled:opacity-50 ${
+                          a.peligro
+                            ? 'border border-red-300 text-red-800 hover:bg-red-50'
+                            : 'bg-primary text-primary-foreground'
+                        }`}
+                      >
+                        {a.texto}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
-            </>
-          )}
+            )}
+          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -259,7 +315,11 @@ function SeccionDeCobro({ reservaId, estado, abierto, onCobrado }: {
 
   return (
     <div className="grid gap-2 rounded-lg border p-3">
-      <div className="flex items-center justify-between text-sm">
+      {/* `flex-wrap`: en la columna de ~350 px que da el diálogo de dos
+          columnas, un «Pendiente $ 38.400,00 de $ 47.400,00» al lado del título
+          lo comprime hasta partirlo en «Cobro del / turno». Que baje el importe
+          es mejor que que se parta el nombre de la sección. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-2 text-sm">
         <span className="font-medium">Cobro del turno</span>
         <span className={datos.pendiente > 0 ? 'text-muted-foreground' : 'text-emerald-700'}>
           {datos.pendiente > 0
