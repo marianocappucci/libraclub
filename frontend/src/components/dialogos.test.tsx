@@ -50,7 +50,7 @@ const TURNO = {
   reserva_id: 5,
   estado: 'confirmada',
   cliente: 'Ana Gomez',
-  motivo: null,
+  motivo: null, cobrado: false,
 }
 const CANCHA = {
   id: 1, sucursal_id: 1, nombre: 'Cancha 1', deporte: 'padel',

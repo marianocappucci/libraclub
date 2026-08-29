@@ -123,6 +123,9 @@ export interface Turno {
   estado: string | null
   cliente: string | null
   motivo: string | null
+  /** Si el turno ya no debe nada —alquiler más buffet—. Lo calcula el backend
+   *  contra la caja; la grilla sólo lo dibuja. */
+  cobrado: boolean
 }
 
 export interface Semana {

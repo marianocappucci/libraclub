@@ -105,7 +105,7 @@ function turno(estado: string) {
     reserva_id: 5,
     estado,
     cliente: 'Ana Gomez',
-    motivo: null,
+    motivo: null, cobrado: false,
   }
 }
 

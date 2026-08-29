@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -27,7 +28,9 @@ def del_dia(
     cancha = sesion.get(Cancha, cancha_id)
     if cancha is None:
         raise HTTPException(404, "No existe esa cancha.")
-    return disponibilidad.grilla_del_dia(sesion, cancha, dia or hoy())
+    return disponibilidad.marcar_cobrados(
+        sesion, disponibilidad.grilla_del_dia(sesion, cancha, dia or hoy())
+    )
 
 
 @router.get("/semana")
@@ -46,6 +49,20 @@ def de_la_semana(
     """
     inicio = desde or (hoy() - timedelta(days=hoy().weekday()))
     grilla = disponibilidad.grilla_de_la_semana(sesion, sucursal_id, inicio)
+    # 🔑 **Un solo lote para la semana entera.** Se pregunta acá y no adentro de
+    # `grilla_de_la_semana` porque esa función llama a `grilla_del_dia` 7 veces
+    # por cancha: marcar ahí serían decenas de conexiones a la base del motor
+    # por cada refresco de la pantalla.
+    saldadas = disponibilidad.reservas_saldadas(
+        sesion,
+        (
+            turno.reserva_id
+            for por_dia in grilla.values()
+            for turnos in por_dia.values()
+            for turno in turnos
+            if turno.reserva_id is not None
+        ),
+    )
     return {
         "desde": inicio.isoformat(),
         "hasta": (inicio + timedelta(days=6)).isoformat(),
@@ -55,7 +72,12 @@ def de_la_semana(
             # desempaquetando el objeto.
             str(cancha_id): {
                 dia: [
-                    TurnoSalida.model_validate(turno, from_attributes=True)
+                    TurnoSalida.model_validate(
+                        replace(turno, cobrado=True)
+                        if turno.reserva_id in saldadas
+                        else turno,
+                        from_attributes=True,
+                    )
                     for turno in turnos
                 ]
                 for dia, turnos in por_dia.items()
