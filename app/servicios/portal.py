@@ -28,8 +28,9 @@ from sqlalchemy.orm import Session
 from app.models.enums import EstadoReserva, OrigenReserva
 from app.models.maestros import Cancha, Cliente, CuentaDeJugador
 from app.models.reservas import EstadoPago, PagoDeReserva, Reserva
+from app.servicios import cancelacion as servicio_cancelacion
+from app.servicios import devoluciones, tarifario
 from app.servicios import reservas as servicio_reservas
-from app.servicios import tarifario
 from app.tiempo import ahora
 
 #: Cuánto se le retiene el turno al jugador para que complete el pago.
@@ -234,20 +235,30 @@ def mis_reservas(sesion: Session, cuenta: CuentaDeJugador, *, limite: int = 50) 
     ]
 
 
-def cancelar(sesion: Session, cuenta: CuentaDeJugador, reserva_id: int) -> Reserva:
-    """El jugador cancela **su** reserva.
+def cancelar(
+    sesion: Session,
+    cuenta: CuentaDeJugador,
+    reserva_id: int,
+    *,
+    pasarela: devoluciones.Pasarela,
+) -> servicio_cancelacion.Resultado:
+    """El jugador cancela **su** reserva, y la seña se resuelve por política.
 
     🔴 La comprobación de dueño va primero y por `cliente_id`: sin ella,
     `POST /portal/reservas/<cualquier id>/cancelar` cancelaría la de otro. Es la
     clase de agujero que un portal público tiene por defecto si uno se olvida.
+
+    Devuelve el `Resultado` entero y no la reserva: lo que el jugador necesita
+    saber no es que el turno quedó cancelado —eso lo hizo él— sino **qué pasó
+    con la plata**. Ver `servicios/cancelacion.py`.
     """
     reserva = sesion.get(Reserva, reserva_id)
     if reserva is None or reserva.cliente_id != cuenta.cliente_id:
         # Mismo error para "no existe" y "no es tuya": distinguirlos diría
         # cuáles ids existen.
         raise TurnoNoDisponible("No encontramos esa reserva.")
-    return servicio_reservas.cambiar_estado(
-        sesion, reserva.id, EstadoReserva.CANCELADA, motivo="Cancelada por el jugador"
+    return servicio_cancelacion.cancelar(
+        sesion, reserva.id, motivo="Cancelada por el jugador", pasarela=pasarela
     )
 
 

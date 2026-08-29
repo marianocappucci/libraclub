@@ -33,7 +33,8 @@ from app.schemas.reservas import (
 )
 from app.servicios import buffet as servicio_buffet
 from app.servicios import caja as servicio_caja
-from app.servicios import cobro_qr, disponibilidad, tarifario
+from app.servicios import cancelacion as servicio_cancelacion
+from app.servicios import cobro_qr, devoluciones, disponibilidad, tarifario
 from app.servicios import facturacion as servicio_facturacion
 from app.servicios import pagos as servicio_pagos
 from app.servicios import reservas as servicio
@@ -152,9 +153,23 @@ def cambiar_estado(
     sesion: Session = Depends(obtener_sesion),
     _: object = Depends(require_staff),
 ):
-    reserva = _traducir(servicio.cambiar_estado)(
-        sesion, reserva_id, datos.estado, datos.motivo
-    )
+    # 🔑 **Cancelar desde el mostrador pasa por la MISMA política que el
+    # portal.** Un turno pagado por internet que el encargado cancela genera la
+    # misma devolución: si este camino usara `cambiar_estado` a secas, la seña
+    # se devolvería o no según quién apretó el botón, que no es una regla de
+    # negocio sino un accidente de la implementación.
+    if datos.estado is EstadoReserva.CANCELADA:
+        resultado = _traducir(servicio_cancelacion.cancelar)(
+            sesion,
+            reserva_id,
+            motivo=datos.motivo or "Cancelada desde el mostrador",
+            pasarela=devoluciones.pasarela_de_la_instancia(),
+        )
+        reserva = resultado.reserva
+    else:
+        reserva = _traducir(servicio.cambiar_estado)(
+            sesion, reserva_id, datos.estado, datos.motivo
+        )
     sesion.commit()
     sesion.refresh(reserva)
     return reserva

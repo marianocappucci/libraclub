@@ -20,6 +20,15 @@ class SucursalEntrada(BaseModel):
     telefono: str | None = Field(default=None, max_length=40)
     email: str | None = Field(default=None, max_length=120)
     punto_venta_arca: int | None = Field(default=None, ge=1, le=99999)
+    #: Con cuántas horas de anticipación hay que cancelar para que se devuelva la
+    #: seña. `None` = esta sucursal no devuelve nada automáticamente, que es el
+    #: default y lo que hacían todas antes de que la política existiera.
+    #:
+    #: El tope de 720 h son 30 días: no es una regla de negocio, es el freno al
+    #: dedo que escribe 2400 pensando en minutos y deja una política que **nunca**
+    #: se cumple —o sea, una devolución que no se hace nunca y nadie entiende por
+    #: qué—.
+    horas_de_cancelacion: int | None = Field(default=None, ge=1, le=720)
     activa: bool = True
     observaciones: str | None = None
 

@@ -12,6 +12,7 @@ const EXISTENTE: Sucursal = {
   telefono: '2324-401122',
   email: 'centro@complejo.com',
   punto_venta_arca: 3,
+  horas_de_cancelacion: 24,
   activa: true,
   observaciones: 'La del techo nuevo',
 }
@@ -91,7 +92,24 @@ describe('formulario de sucursal', () => {
       telefono: '2324-401122',
       observaciones: 'La del techo nuevo',
       activa: true,
+      // La política de cancelación viaja igual que el punto de venta: mandar
+      // sólo el nombre la borraría, y con ella la devolución automática de la
+      // seña — sin que nadie lo haya pedido.
+      horas_de_cancelacion: 24,
     })
+  })
+
+  it('🔑 vaciar la ventana de cancelación manda null, no cero', async () => {
+    // `0` sería una política de «devolvemos hasta el minuto cero», o sea
+    // siempre. `null` es «esta sucursal no devuelve automáticamente», que es lo
+    // que el operador quiso decir al borrar el campo. Un `Number('')` da `0` y
+    // por eso el `set` mira si el string está vacío antes de convertir.
+    const onGuardada = abrir(EXISTENTE)
+    await userEvent.clear(screen.getByRole('spinbutton', { name: /horas de anticipación/i }))
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+    await waitFor(() => expect(onGuardada).toHaveBeenCalled())
+
+    expect(llamadas.find((l) => l.metodo === 'PUT')!.cuerpo.horas_de_cancelacion).toBeNull()
   })
 
   it('no llama a la API sin nombre', async () => {

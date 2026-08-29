@@ -33,6 +33,7 @@ from app.models.maestros import Cancha, CuentaDeJugador
 from app.models.reservas import PagoDeReserva, Reserva
 from app.portal_sesion import borrar_cookie, crear_cookie, cuenta_actual, exigir_jugador
 from app.routers.mp_bandeja import REFERENCIAS_PROPIAS
+from app.servicios import devoluciones
 from app.servicios import pagos as servicio_pagos
 from app.servicios import partidos as servicio_partidos
 from app.servicios import portal as servicio
@@ -251,13 +252,28 @@ def cancelar(
     cuenta: CuentaDeJugador = Depends(_jugador),
 ):
     try:
-        reserva = servicio.cancelar(sesion, cuenta, reserva_id)
+        resultado = servicio.cancelar(
+            sesion, cuenta, reserva_id, pasarela=devoluciones.pasarela_de_la_instancia()
+        )
     except servicio.TurnoNoDisponible as e:
         raise HTTPException(404, str(e)) from e
     except Exception as e:  # transición inválida
         raise HTTPException(409, str(e)) from e
     sesion.commit()
-    return {"id": reserva.id, "estado": reserva.estado.value}
+    # 🔑 **El mensaje es lo que hace útil a esta respuesta.** Sin él, el que
+    # canceló con dos días de anticipación y el que canceló media hora antes ven
+    # exactamente lo mismo, y el segundo llama por teléfono a preguntar por su
+    # seña.
+    #
+    # 🔴 Va `para_el_jugador` y **no** `detalle`: el detalle nombra la
+    # configuración del complejo —«no tiene MercadoPago configurado»— y esto está
+    # expuesto a internet sin sesión. Es la misma regla que el resto del módulo.
+    return {
+        "id": resultado.reserva.id,
+        "estado": resultado.reserva.estado.value,
+        "detalle": resultado.para_el_jugador,
+        "devolucion": resultado.devolucion.value if resultado.devolucion else None,
+    }
 
 
 # ── «Falta uno»: completar el equipo de un partido ya reservado ──────────

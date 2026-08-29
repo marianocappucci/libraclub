@@ -52,6 +52,22 @@ class Sucursal(Base, Auditable, Anotable):
     #: Se completa en F3, cuando entre la facturación.
     punto_venta_arca: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    #: Con cuántas horas de anticipación hay que cancelar para que **se devuelva
+    #: la seña**. Cancelar siempre se puede; lo que cambia es si el complejo
+    #: devuelve la plata.
+    #:
+    #: 🔴 **`NULL` significa «no hay devolución automática», y es el default a
+    #: propósito.** Una migración que deje esta columna en 24 le prende la
+    #: devolución de plata a todas las instancias que ya existen, sin que nadie
+    #: lo haya decidido. La política se enciende cargando el número en la
+    #: pantalla de la sucursal.
+    #:
+    #: Vive en la sucursal y no en la cancha porque la política es del complejo:
+    #: «devolvemos si avisás con un día» no cambia según en qué cancha ibas a
+    #: jugar. Si algún día cambia, la columna baja a `canchas` con el mismo
+    #: nombre y esta pasa a ser el default.
+    horas_de_cancelacion: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     activa: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     canchas: Mapped[list[Cancha]] = relationship(back_populates="sucursal")
