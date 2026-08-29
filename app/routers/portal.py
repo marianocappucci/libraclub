@@ -27,6 +27,7 @@ from libracore import config_manager, mp_api, mp_sync
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
+from app.config import es_produccion
 from app.db import obtener_sesion
 from app.models.maestros import Cancha, CuentaDeJugador
 from app.models.reservas import PagoDeReserva, Reserva
@@ -504,7 +505,7 @@ def construir_router_de_simulacion(entorno: str) -> APIRouter | None:
     sin credenciales —la firma y la consulta a MercadoPago—, y eso queda
     explícito acá y no escondido.
     """
-    if entorno.lower() in ("prod", "produccion", "producción", "production"):
+    if es_produccion(entorno):
         return None
 
     simulador = APIRouter(prefix="/api/portal", tags=["portal público"])

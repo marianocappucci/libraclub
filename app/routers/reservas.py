@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin, require_staff
+from app.config import es_produccion
 from app.db import obtener_sesion
 from app.models.enums import ESTADOS_QUE_OCUPAN, EstadoReserva
 from app.models.maestros import Cancha, Cliente
@@ -871,10 +872,33 @@ def construir_router_de_simulacion_qr(entorno: str) -> APIRouter | None:
     llega a existir el pago que después habría que sellar: simular sólo la
     segunda mitad no serviría para nada.
     """
-    if entorno.lower() in ("prod", "produccion", "producción", "production"):
+    if es_produccion(entorno):
         return None
 
     simulador = APIRouter(prefix="/api/reservas", tags=["reservas"])
+
+    @simulador.get("/mp-qr/simulacion")
+    def hay_simulador(_: object = Depends(require_staff)):
+        """Cómo la pantalla de la Caja se entera de que puede ofrecer el botón.
+
+        🔑 **Vive adentro de este router y ése es todo el diseño.** La alternativa
+        era que el endpoint de estado devolviera un booleano calculado con el
+        mismo criterio de producción; eso es una **segunda puerta al mismo
+        cuarto**, y el día que las dos dejen de coincidir la pantalla ofrece un
+        botón que no existe — o, peor, lo esconde en la instancia donde hace
+        falta. Acá no hay criterio que repetir: si el simulador no se montó,
+        esta ruta tampoco existe y el frontend recibe un 404.
+
+        ⚠️ **Y es un GET, no un POST a la ruta real con un id inventado.** Así
+        sondea hoy el portal (`simularPago(-1)`, distinguiendo el 404 del error
+        por el texto del mensaje), que funciona pero mide la ausencia leyendo
+        una cadena de error: cambiarle la redacción al 404 le rompe la
+        detección. Un GET dedicado dice lo mismo sin escribir nada.
+
+        Pide staff igual que el resto del mostrador: no filtra nada, pero no hay
+        motivo para que un anónimo enumere qué instancia es de prueba.
+        """
+        return {"disponible": True}
 
     @simulador.post("/{reserva_id}/mp-qr/simular")
     async def simular_cobro_qr(

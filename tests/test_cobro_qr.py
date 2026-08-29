@@ -692,3 +692,95 @@ def test_el_simulador_no_cobra_dos_veces(
     assert api.post(f"/api/reservas/{reserva['id']}/mp-qr/simular").status_code == 200
     segunda = api.post(f"/api/reservas/{reserva['id']}/mp-qr/simular")
     assert segunda.status_code == 409, segunda.text
+
+
+# -- La sonda: como la pantalla de la Caja se entera ------------------------
+#
+# El boton de simular no puede aparecer en produccion, y la pantalla no tiene
+# como saberlo mirando el bundle: es el MISMO bundle en dev y en produccion. Lo
+# pregunta al servidor, y la respuesta es la existencia de la ruta.
+
+
+def test_la_sonda_vive_adentro_del_router_del_simulador():
+    """🔴 El punto entero del diseño, y por eso se asertan las DOS rutas juntas.
+
+    La alternativa descartada era que `/api/reservas/mp/estado` devolviera un
+    booleano calculado con el criterio de produccion. Eso son dos puertas al
+    mismo cuarto: el dia que dejen de coincidir, la pantalla ofrece un boton que
+    no existe, o lo esconde donde hace falta. Acá la sonda esta adentro del
+    router, asi que no hay criterio que repetir --- y este test lo fija: si
+    alguien la muda al router principal, la ruta de simular sigue estando pero
+    la sonda ya no viaja con ella, y esto se pone rojo.
+    """
+    from app.routers.reservas import construir_router_de_simulacion_qr
+
+    router = construir_router_de_simulacion_qr("dev")
+    assert router is not None
+    rutas = {r.path for r in router.routes}
+    assert rutas == {
+        "/api/reservas/mp-qr/simulacion",
+        "/api/reservas/{reserva_id}/mp-qr/simular",
+    }, rutas
+
+
+def test_en_produccion_no_hay_sonda_que_preguntar():
+    """El otro lado: si la fabrica devuelve None, no se monta ninguna de las dos.
+
+    Sin este assert, un simulador que montara la sonda por fuera del `if`
+    diria "se puede simular" en la instancia de un complejo.
+    """
+    from app.routers.reservas import construir_router_de_simulacion_qr
+
+    assert construir_router_de_simulacion_qr("prod") is None
+
+
+def test_la_sonda_contesta_en_la_app_de_dev(api):
+    """Que la ruta exista en el router no prueba que la app la sirva.
+
+    El montaje es un `if` aparte en `main.py`, y el prefijo del router podria no
+    ser el que el frontend pide. Se mide sobre la app armada, con el cliente
+    autenticado que usa el resto del archivo.
+    """
+    r = api.get("/api/reservas/mp-qr/simulacion")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"disponible": True}
+
+
+def test_la_sonda_no_se_come_la_ruta_del_turno(api, cancha, cliente, tarifa_base):
+    """El control de la de arriba: `mp-qr` no es un `reserva_id`.
+
+    `/api/reservas/mp-qr/simulacion` y `/api/reservas/{reserva_id}/cobros` tienen
+    los dos tres segmentos. Si el convertidor de `reserva_id` no fuera `int`, una
+    de las dos se comeria a la otra segun el orden de registro --- y el sintoma
+    seria un 422 en la pantalla del turno, no en la sonda.
+    """
+    reserva = _reserva(api, cancha, cliente, precio="10000.00")
+    r = api.get(f"/api/reservas/{reserva['id']}/cobros")
+    assert r.status_code == 200, r.text
+
+
+# -- El predicado de produccion, una sola definicion ------------------------
+
+
+def test_los_dos_simuladores_miran_el_MISMO_predicado():
+    """Hasta el 2026-08-29 la tupla de nombres estaba escrita literal en los dos
+    archivos. Sumar un nombre en uno dejaba el otro abierto, en silencio.
+
+    Se mide por comportamiento y no leyendo el fuente: se recorre la lista de
+    nombres y se exige que los dos simuladores contesten igual. Un nombre nuevo
+    en `NOMBRES_DE_PRODUCCION` queda cubierto solo.
+    """
+    from app.config import NOMBRES_DE_PRODUCCION, es_produccion
+    from app.routers.portal import construir_router_de_simulacion
+    from app.routers.reservas import construir_router_de_simulacion_qr
+
+    nombres = [*NOMBRES_DE_PRODUCCION, "PROD", "Produccion", "dev", "demo", "test", ""]
+    for nombre in nombres:
+        esperado = es_produccion(nombre)
+        assert (construir_router_de_simulacion(nombre) is None) is esperado, nombre
+        assert (construir_router_de_simulacion_qr(nombre) is None) is esperado, nombre
+
+    # El control: la lista tiene que traer casos de los dos lados, o el bucle
+    # de arriba pasaria con un `es_produccion` que devuelve siempre lo mismo.
+    assert any(es_produccion(n) for n in nombres)
+    assert any(not es_produccion(n) for n in nombres)
