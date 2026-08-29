@@ -4,7 +4,7 @@ import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
 import { LayoutGrid, Plus } from 'lucide-react'
 
-import { canchas as api } from '@/lib/api'
+import { canchas as api, NOMBRE_DE_DEPORTE } from '@/lib/api'
 import type { Cancha } from '@/lib/api'
 import { useSucursal } from '@/context/SucursalContext'
 import { useAuth } from '@/context/AuthContext'
@@ -67,7 +67,12 @@ export function Canchas() {
           </span>
         ),
       },
-      { accessorKey: 'deporte', header: sortableHeader('Deporte') },
+      {
+        accessorKey: 'deporte',
+        header: sortableHeader('Deporte'),
+        cell: ({ row }) =>
+          NOMBRE_DE_DEPORTE[row.original.deporte] ?? row.original.deporte,
+      },
       {
         accessorKey: 'duracion_turno_min',
         header: sortableHeader('Turno'),

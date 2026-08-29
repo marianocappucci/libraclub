@@ -27,7 +27,7 @@ const TURNO: Turno = {
   reserva_id: null,
   estado: null,
   cliente: null,
-  motivo: null,
+  motivo: null, cobrado: false,
 }
 
 /** Las llamadas que el diálogo hizo, para poder asertar sobre el cuerpo. */

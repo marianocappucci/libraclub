@@ -6,7 +6,7 @@ import { EncabezadoDePantalla } from 'libra-ui/acciones'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 import { Plus, Trophy } from 'lucide-react'
 
-import { torneos as api } from '@/lib/api'
+import { NOMBRE_DE_DEPORTE, torneos as api } from '@/lib/api'
 import type { TorneoEnLista } from '@/lib/api'
 import { useSucursal } from '@/context/SucursalContext'
 import { useAuth } from '@/context/AuthContext'
@@ -44,7 +44,7 @@ export function Torneos() {
           <span>
             <span className="block font-medium">{row.original.nombre}</span>
             <span className="block text-xs text-muted-foreground">
-              {NOMBRE_DE_FORMATO[row.original.formato]} · {row.original.deporte}
+              {NOMBRE_DE_FORMATO[row.original.formato]} · {NOMBRE_DE_DEPORTE[row.original.deporte] ?? row.original.deporte}
             </span>
           </span>
         ),

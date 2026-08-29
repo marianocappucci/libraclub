@@ -3,15 +3,24 @@ import { Layout } from '@/components/Layout'
 import { Agenda } from '@/pages/Agenda'
 import { Buffet } from '@/pages/Buffet'
 import { Caja } from '@/pages/Caja'
+import { MovimientosDeCaja } from '@/pages/MovimientosDeCaja'
+import { TurnosDeCaja } from '@/pages/TurnosDeCaja'
+import { TurnoDeCajaDetalle } from '@/pages/TurnoDeCajaDetalle'
+import { CajaPorMedio } from '@/pages/CajaPorMedio'
 import { CuentaCorriente } from '@/pages/CuentaCorriente'
 import { CuentaCorrienteDetalle } from '@/pages/CuentaCorrienteDetalle'
 import { Horarios } from '@/pages/Horarios'
+import { Cajas } from '@/pages/Cajas'
 import { Canchas } from '@/pages/Canchas'
 import { Configuracion } from '@/pages/Configuracion'
+import { FacturaDetalle } from '@/pages/FacturaDetalle'
+import { FacturaNueva } from '@/pages/FacturaNueva'
+import { Facturas } from '@/pages/Facturas'
 import { Clientes } from '@/pages/Clientes'
 import { Login } from '@/pages/Login'
 import { ForgotPassword, ResetPassword } from '@/pages/PasswordReset'
 import { Logs } from '@/pages/Logs'
+import { MpBandeja } from '@/pages/MpBandeja'
 import { Sucursales } from '@/pages/Sucursales'
 import { Tarifas } from '@/pages/Tarifas'
 import { Torneo } from '@/pages/Torneo'
@@ -102,6 +111,15 @@ function Backoffice() {
           <Route path="/sucursales" element={<Sucursales />} />
           <Route path="/usuarios" element={<Usuarios />} />
           <Route path="/caja" element={<Caja />} />
+          <Route path="/caja/movimientos" element={<MovimientosDeCaja />} />
+          {/* 🔴 El historial va ANTES del detalle: react-router elige por
+              especificidad y no por orden, pero dejarlas juntas y en este
+              orden es lo que hace legible que una es el listado de la otra.
+              El mismo criterio que `/facturas` y `/facturas/:id`. */}
+          <Route path="/caja/turnos" element={<TurnosDeCaja />} />
+          <Route path="/caja/turnos/:id" element={<TurnoDeCajaDetalle />} />
+          <Route path="/caja/por-medio" element={<CajaPorMedio />} />
+          <Route path="/cajas" element={<Cajas />} />
           <Route path="/buffet" element={<Buffet />} />
           <Route path="/cuenta-corriente" element={<CuentaCorriente />} />
           {/* Mismo criterio que el detalle de torneo: al lado del listado y no
@@ -110,6 +128,20 @@ function Backoffice() {
             path="/cuenta-corriente/:id"
             element={<CuentaCorrienteDetalle />}
           />
+          <Route path="/facturas" element={<Facturas />} />
+          {/* Al lado del listado y no anidado, mismo criterio que el
+              detalle de torneo y el de cuenta corriente: no comparten nada
+              salvo el camino. */}
+          {/* ANTES que `/facturas/:id`: react-router elige por especificidad
+              y no por orden, pero dejarlo escrito arriba evita la duda al
+              leerlo — "nueva" no es un id. */}
+          <Route path="/facturas/nueva" element={<FacturaNueva />} />
+          <Route path="/facturas/:id" element={<FacturaDetalle />} />
+          {/* La bandeja de MercadoPago. Misma ruta que en Contalibra y
+              Restolibra: es la misma pantalla del kit y el mismo prefijo
+              de API, y una tercera URL para lo mismo sólo obligaría a
+              acordarse de cuál usa cada producto. */}
+          <Route path="/mp-bandeja" element={<MpBandeja />} />
           <Route path="/configuracion" element={<Configuracion />} />
           <Route path="/logs" element={<Logs />} />
           {/* Las rutas no llevan guarda de rol: el permiso lo decide el

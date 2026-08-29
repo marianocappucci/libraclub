@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { diaISO, fecha, fechaHora, hora, lunesDeLaSemana, nombreDelDia, pesos } from './fechas'
+import { diaISO, fecha, fechaHora, hora, lunesDeLaSemana, nombreDelDia, pesos, diasDeDiferencia } from './fechas'
 
 describe('formateo de fechas', () => {
   it('muestra dd-mm-aaaa, no el ISO ni el formato del navegador', () => {
@@ -68,5 +68,33 @@ describe('🔴 las fechas sin hora no se corren un día', () => {
     // la agenda: un turno de las 22:00 de Argentina llega como 01:00 UTC del
     // día siguiente y tiene que mostrarse en el día del complejo.
     expect(fecha('2026-09-02T01:00:00Z')).toBe('01-09-2026')
+  })
+})
+
+describe('diasDeDiferencia', () => {
+  it('🔴 cuenta DÍAS de calendario, no tiempo transcurrido', () => {
+    // Abierto ayer a las 23:00, mirado hoy a las 08:00: nueve horas, **un
+    // día**. Lo que importa para una caja es que cambió la jornada.
+    // Dividir la diferencia por 86.400.000 diría 0 y dejaría pasar justo el
+    // caso que esto viene a detectar.
+    expect(diasDeDiferencia('2026-08-27T23:00:00-03:00', new Date('2026-08-28T08:00:00-03:00')))
+      .toBe(1)
+  })
+
+  it('🔑 el mismo día da cero, aunque hayan pasado horas', () => {
+    // El control del de arriba: sin esto, un helper que siempre devuelve 1
+    // pasaría igual.
+    expect(diasDeDiferencia('2026-08-28T08:00:00-03:00', new Date('2026-08-28T23:30:00-03:00')))
+      .toBe(0)
+  })
+
+  it('🔴 y la semana del turno que lo motivó da siete', () => {
+    expect(diasDeDiferencia('2026-08-21T22:16:21-03:00', new Date('2026-08-28T15:00:00-03:00')))
+      .toBe(7)
+  })
+
+  it('🔑 sin fecha no explota', () => {
+    expect(diasDeDiferencia(null)).toBe(0)
+    expect(diasDeDiferencia(undefined)).toBe(0)
   })
 })

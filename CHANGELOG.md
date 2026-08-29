@@ -7,6 +7,23 @@ versionado [SemVer](https://semver.org/lang/es/).
 
 ### Agregado
 
+- **Avisos al cliente por email** (ADR-015, parte de F2): confirmación cuando el
+  turno queda tomado, recordatorio 24 h y 2 h antes, y aviso de cancelación. Es
+  lo que mandan los cuatro competidores más vendidos del mercado argentino, y
+  este producto no mandaba nada: había SMTP —lo usan el reset de clave y el envío
+  de la factura— pero ninguna reserva disparaba un mail.
+
+  **No hay cola**: el barrido le pregunta a las reservas qué corresponde avisar y
+  `avisos` registra sólo lo intentado, así que los turnos confirmados por el
+  webhook de MercadoPago —que escribe el estado a mano— quedan cubiertos igual
+  que los del mostrador. Lo que impide el envío doble es un índice único, no un
+  `if`. El canal usa el SMTP que ya configura «Configuración → Correo».
+
+  El cliente que pide no recibir se apaga en `clientes.acepta_avisos`. Lo manda
+  `scripts/enviar_avisos.py` desde el cron, cada 5 minutos: **ese cron es el
+  interruptor de la función**. Migración `0009`. 20 tests, 9 de 9 mutaciones
+  muertas.
+
 - **Cobro con QR de MercadoPago y factura automática** (ADR-014): desde el
   detalle de un turno confirmado o jugado, «Cobrar con QR» pone el total —la
   cancha **más** el consumo de buffet— en el QR impreso del mostrador y espera a

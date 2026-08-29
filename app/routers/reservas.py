@@ -6,7 +6,8 @@ El router valida, delega y traduce errores a códigos. Las reglas están en
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -14,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin, require_staff
+from app.config import es_produccion
 from app.db import obtener_sesion
 from app.models.enums import ESTADOS_QUE_OCUPAN, EstadoReserva
 from app.models.maestros import Cancha, Cliente
@@ -29,6 +31,8 @@ from app.schemas.reservas import (
     SerieEntrada,
     SerieSalida,
 )
+from app.servicios import buffet as servicio_buffet
+from app.servicios import caja as servicio_caja
 from app.servicios import cobro_qr, disponibilidad, tarifario
 from app.servicios import facturacion as servicio_facturacion
 from app.servicios import pagos as servicio_pagos
@@ -185,6 +189,166 @@ class FacturaSalida(BaseModel):
     cae_vto: str = ""
 
 
+class CobroDeTurnoEntrada(BaseModel):
+    #: Cuánto entra ahora. Puede ser menos que el total: una seña es eso.
+    monto: Decimal = Field(gt=0)
+    medio_pago: str
+    referencia_externa: str = ""
+    #: Qué parte de la cuenta se está pagando: "sólo el alquiler", "2× Gaseosa".
+    #:
+    #: 🔑 **Es un agregado al concepto, no el concepto.** Quien arma el texto
+    #: sigue siendo el backend —dos pantallas escribiendo el suyo terminan con
+    #: dos formatos para el mismo hecho—; esto es el dato que la pantalla tiene
+    #: y el backend no: cuál de las líneas de la cuenta se está cobrando.
+    #:
+    #: 🔴 Sin esto el cobro fraccionado es indistinguible de una seña. Un turno
+    #: de 14.000 donde el dueño de la cancha paga 11.600 y cada jugador su
+    #: consumo deja tres movimientos con el mismo concepto y montos raros, y al
+    #: día siguiente nadie puede reconstruir qué pagó quién.
+    detalle: str = Field(default="", max_length=120)
+
+
+class CobroDeTurno(BaseModel):
+    id: int
+    fecha: str
+    monto: float
+    medio_pago: str
+    concepto: str
+    #: A qué comprobante quedó atado. `null` mientras el turno no se facturó.
+    factura_id: int | None = None
+
+
+class EstadoDeCobro(BaseModel):
+    #: Alquiler + buffet consumido. Es el mismo número que factura el turno.
+    total: float
+    cobrado: float
+    pendiente: float
+    cobros: list[CobroDeTurno]
+
+
+def _exigir_base_de_caja() -> None:
+    """503 con el nombre de la variable si la instancia no tiene base de LibraCore.
+
+    La caja vive del lado del motor. Sin esto el mostrador recibiría un error de
+    conexión de psycopg, que no dice qué hay que configurar.
+    """
+    if not servicio_facturacion.hay_base():
+        raise HTTPException(
+            503,
+            "La caja no está configurada en esta instancia: falta "
+            "LIBRACLUB_LIBRACORE_DATABASE_URL.",
+        )
+
+
+def _estado_de_cobro(reserva: Reserva) -> EstadoDeCobro:
+    """Cuánto vale el turno, cuánto entró y cuánto falta.
+
+    🔑 **El total se arma igual que el del comprobante** —alquiler más buffet
+    consumido— y no desde `reserva.precio` a secas. Si salieran de dos lados, la
+    pantalla diría «pendiente $0» sobre un turno con tres gaseosas sin cobrar.
+    """
+    precio = Decimal(str(reserva.precio or 0))
+    total = precio + servicio_buffet.total_consumido(reserva.id)
+    cobros = servicio_caja.cobros_de_reserva(reserva.id)
+    cobrado = sum((Decimal(str(c["monto"])) for c in cobros), Decimal("0"))
+    return EstadoDeCobro(
+        total=float(total),
+        cobrado=float(cobrado),
+        # `max(0, ...)`: un cobro de más no se muestra como pendiente negativo.
+        pendiente=float(max(Decimal("0"), total - cobrado)),
+        cobros=[
+            CobroDeTurno(
+                id=c["id"], fecha=str(c["fecha"]), monto=float(c["monto"]),
+                medio_pago=c.get("medio_pago") or "", concepto=c.get("concepto") or "",
+                factura_id=c.get("factura_id"),
+            )
+            for c in cobros
+        ],
+    )
+
+
+@router.get("/{reserva_id}/cobros", response_model=EstadoDeCobro)
+def ver_cobros(
+    reserva_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    _: object = Depends(require_staff),
+):
+    """Lo cobrado de un turno. De mostrador: es quien cobra."""
+    _exigir_base_de_caja()
+    reserva = sesion.get(Reserva, reserva_id)
+    if reserva is None:
+        raise HTTPException(404, "no existe esa reserva")
+    return _estado_de_cobro(reserva)
+
+
+@router.post("/{reserva_id}/cobros", response_model=EstadoDeCobro, status_code=201)
+def cobrar_turno(
+    reserva_id: int,
+    datos: CobroDeTurnoEntrada,
+    sesion: Session = Depends(obtener_sesion),
+    usuario: dict = Depends(require_staff),
+):
+    """Registra plata de este turno en la caja abierta, atada a su comprobante.
+
+    🔑 **Es lo que la pantalla de Caja no puede hacer.** Ahí el cobro se carga
+    como monto más concepto libre, sin vínculo con nada: sirve para un ingreso
+    suelto y deja el comprobante del turno viéndose «sin cobrar». Acá el
+    movimiento nace sabiendo de qué reserva es y, si ya se facturó, contra qué
+    comprobante va.
+
+    Si todavía no se facturó, `factura_id` queda en `None` y lo completa
+    `facturar_reserva` cuando se emita — ver `servicios/caja.py`.
+
+    **No exige que el monto sea el pendiente**: una seña es un cobro parcial, y
+    un vuelto mal contado es un problema del mostrador, no algo que la API tenga
+    que impedir.
+
+    🔑 **Y esa misma libertad es la que permite fraccionar la cuenta.** Pedido
+    del humano el 2026-08-28: un turno de cancha se cierra como una mesa de
+    restaurante — *"se puede pagar solo la cancha y después cada uno paga
+    individual lo que pidió"*. Eso son N cobros parciales contra la misma
+    reserva, que es exactamente lo que esta ruta ya hacía para la seña. Lo único
+    que hizo falta agregar es `detalle`, para que los N movimientos no queden
+    con el mismo texto y montos sin explicación.
+
+    ⚠️ **Lo que NO hay es liquidación por línea.** El sistema sabe cuánto entró
+    contra la reserva, no qué línea quedó saldada: `detalle` es texto para el
+    arqueo, no un vínculo. Alcanza para el mostrador —el pendiente baja y se ve
+    quién pagó qué— y **no** alcanzaría para dividir automáticamente entre
+    jugadores. Si eso hace falta, es un modelo nuevo, no un campo más.
+    """
+    _exigir_base_de_caja()
+    reserva = sesion.get(Reserva, reserva_id)
+    if reserva is None:
+        raise HTTPException(404, "no existe esa reserva")
+
+    cancha = sesion.get(Cancha, reserva.cancha_id)
+    cliente = sesion.get(Cliente, reserva.cliente_id) if reserva.cliente_id else None
+    # El concepto lo arma el backend y no la pantalla: es el texto que después
+    # se lee en el arqueo y en el historial de caja, y dos pantallas escribiendo
+    # el suyo terminan con dos formatos para el mismo hecho.
+    concepto = (
+        f"Turno {a_local(reserva.comienza_at):%d-%m-%Y %H:%M}"
+        f" — {cancha.nombre if cancha else 'cancha'}"
+        f"{f' — {cliente.nombre}' if cliente else ''}"
+        # El detalle va al final y sólo si vino: es lo que distingue «pagó el
+        # alquiler» de «pagó sus consumos» cuando la cuenta se fracciona entre
+        # varios, que en una cancha con buffet es lo normal y no la excepción.
+        f"{f' ({datos.detalle.strip()})' if datos.detalle.strip() else ''}"
+    )
+    try:
+        servicio_caja.registrar_ingreso(
+            usuario, datos.monto, concepto, datos.medio_pago,
+            referencia=servicio_caja.referencia_de_cobro(reserva.id),
+            factura_id=reserva.factura_id,
+        )
+    except servicio_caja.SinTurnoAbierto as e:
+        raise HTTPException(409, str(e)) from e
+    except servicio_caja.MedioDePagoInvalido as e:
+        raise HTTPException(422, str(e)) from e
+    return _estado_de_cobro(reserva)
+
+
 @router.post("/{reserva_id}/facturar", response_model=FacturaSalida, status_code=201)
 async def facturar(
     reserva_id: int,
@@ -318,6 +482,11 @@ async def poner_en_el_qr(
         raise HTTPException(400, str(exc)) from exc
     except cobro_qr.SinPrecio as exc:
         raise HTTPException(422, str(exc)) from exc
+    except cobro_qr.NadaQueCobrar as exc:
+        # 409 y no 422: el pedido está bien formado, lo que no admite la
+        # operación es que el turno ya esté cobrado. Mismo criterio que el
+        # `PagoInvalido` de abajo.
+        raise HTTPException(409, str(exc)) from exc
     except servicio_pagos.PagoInvalido as exc:
         # 409 y no 400: el pedido está bien formado, lo que no admite la
         # operación es el estado del turno.
@@ -555,6 +724,104 @@ def _con_zona(valor: datetime) -> datetime:
     return valor if valor.tzinfo is not None else valor.replace(tzinfo=TZ)
 
 
+class TurnoPorCobrar(BaseModel):
+    """Un turno con plata pendiente, como lo ve el mostrador."""
+
+    reserva_id: int
+    cancha_id: int
+    cancha: str
+    deporte: str
+    comienza_at: datetime
+    termina_at: datetime
+    cliente: str
+    #: 🔑 Lo usa el cobro con QR, que sólo se ofrece sobre un turno `confirmada`
+    #: o `jugada` — cobrar uno cancelado no es un caso de uso, es un error. Sin
+    #: este campo la Caja tendría que pedir la reserva entera para saberlo.
+    estado: str
+    total: float
+    cobrado: float
+    pendiente: float
+
+
+@router.get("/agenda/por-cobrar", response_model=list[TurnoPorCobrar])
+def por_cobrar(
+    sucursal_id: int,
+    limite: int = Query(default=60, ge=1, le=200),
+    sesion: Session = Depends(obtener_sesion),
+    _: object = Depends(require_staff),
+):
+    """Los turnos del día que todavía deben plata. Es el selector de la Caja.
+
+    🔑 **No se puede usar `/agenda/proximas` para esto**, aunque el nombre
+    invite: esa ruta filtra `comienza_at >= ahora`, y el turno que se cobra en el
+    mostrador es justamente el que **está terminando**. A las 21:00, el turno de
+    20:00 a 21:30 ya no es "próximo" — y es el que tiene al cliente parado del
+    otro lado del mostrador.
+
+    🔴 **La ventana es el día local, con las dos cotas.** La de abajo es obvia;
+    la de arriba **no es de comodidad**: el filtro por pendiente se aplica en
+    Python, después de traer las filas, así que un `LIMIT` sin cota superior se
+    llenaría con los turnos de la semana que viene —todos impagos, porque
+    todavía no se jugaron— y los de hoy quedarían afuera **sin que nada avise**.
+    Acotando el día, el `limite` deja de ser un recorte y pasa a ser una válvula.
+
+    Un turno impago de anteayer, entonces, no está acá — y no hace falta: el
+    detalle de la reserva linkea a la Caja con ese turno ya elegido, que es el
+    camino para cualquier reserva fuera de la ventana.
+    """
+    _exigir_base_de_caja()
+    hoy = a_local(ahora()).date()
+    desde = datetime.combine(hoy, time.min, tzinfo=TZ)
+    hasta = desde + timedelta(days=1)
+    filas = sesion.execute(
+        select(Reserva, Cancha, Cliente)
+        .join(Cancha, Reserva.cancha_id == Cancha.id)
+        .outerjoin(Cliente, Reserva.cliente_id == Cliente.id)
+        .where(
+            Cancha.sucursal_id == sucursal_id,
+            Reserva.estado.in_(ESTADOS_QUE_OCUPAN),
+            Reserva.comienza_at >= desde,
+            Reserva.comienza_at < hasta,
+        )
+        .order_by(Reserva.comienza_at)
+        .limit(limite)
+    ).all()
+
+    # 🔑 Los dos totales salen **por lote**. Pedirlos reserva por reserva abre y
+    # cierra una conexión a la base del motor por fila: con la grilla de un día
+    # completo son decenas por refresco de pantalla.
+    ids = [reserva.id for reserva, _cancha, _cliente in filas]
+    consumido = servicio_buffet.consumido_de_reservas(ids)
+    cobrado = servicio_caja.cobrado_de_reservas(ids)
+
+    salida = []
+    for reserva, cancha, cliente in filas:
+        # Mismo total que `_estado_de_cobro` y que el comprobante: alquiler más
+        # buffet. Si saliera de `reserva.precio` a secas, el mostrador diría que
+        # no falta nada sobre un turno con tres gaseosas sin cobrar.
+        total = Decimal(str(reserva.precio or 0)) + consumido.get(reserva.id, Decimal("0"))
+        entro = cobrado.get(reserva.id, Decimal("0"))
+        pendiente = max(Decimal("0"), total - entro)
+        if pendiente <= 0:
+            continue
+        salida.append(
+            TurnoPorCobrar(
+                reserva_id=reserva.id,
+                cancha_id=cancha.id,
+                cancha=cancha.nombre,
+                deporte=cancha.deporte.value,
+                comienza_at=reserva.comienza_at,
+                termina_at=reserva.termina_at,
+                cliente=(cliente.nombre if cliente else "") or reserva.motivo or "",
+                estado=reserva.estado.value,
+                total=float(total),
+                cobrado=float(entro),
+                pendiente=float(pendiente),
+            )
+        )
+    return salida
+
+
 @router.get("/agenda/proximas", response_model=list[ReservaSalida])
 def proximas(
     sucursal_id: int,
@@ -577,3 +844,102 @@ def catalogo_de_estados() -> dict[str, list[str]]:
         "todos": [estado.value for estado in EstadoReserva],
         "ocupan": [estado.value for estado in ESTADOS_QUE_OCUPAN],
     }
+
+# ── El simulador del cobro por QR, sólo fuera de producción ──────────────
+
+
+def construir_router_de_simulacion_qr(entorno: str) -> APIRouter | None:
+    """`POST /api/reservas/{id}/mp-qr/simular`, **si esto no es producción**.
+
+    🔴 **Es lo único que separa dev de cobrar turnos que nadie pagó.** Este
+    endpoint acredita un cobro sin que haya entrado un peso: montado en la
+    instancia de un complejo, cualquiera con la URL cierra turnos gratis. Por eso
+    devuelve `None` en producción y el router **no se monta** — no alcanza con un
+    `if` adentro del handler, porque un `if` mal escrito deja el endpoint
+    existiendo. Mismo criterio, y misma redacción, que
+    `portal.construir_router_de_simulacion`.
+
+    🔑 **Llama a las MISMAS funciones que el camino real**:
+    `crear_pago_de_mostrador`, `aplicar_pago_aprobado` y `_completar`. Un
+    simulador con lógica propia probaría un circuito que en producción no existe
+    — y el día que MercadoPago confirme de verdad se ejecutaría un camino que
+    nunca corrió. Lo único que se saltea es lo que **no se puede tener sin
+    credenciales**: crear la orden en MercadoPago y consultarla. Eso queda
+    explícito acá y no escondido.
+
+    ⚠️ **Y por eso cubre los dos pasos y no sólo la acreditación.** Sin
+    credenciales `poner_en_el_qr` falla al llamar a `crear_orden_qr`, así que no
+    llega a existir el pago que después habría que sellar: simular sólo la
+    segunda mitad no serviría para nada.
+    """
+    if es_produccion(entorno):
+        return None
+
+    simulador = APIRouter(prefix="/api/reservas", tags=["reservas"])
+
+    @simulador.get("/mp-qr/simulacion")
+    def hay_simulador(_: object = Depends(require_staff)):
+        """Cómo la pantalla de la Caja se entera de que puede ofrecer el botón.
+
+        🔑 **Vive adentro de este router y ése es todo el diseño.** La alternativa
+        era que el endpoint de estado devolviera un booleano calculado con el
+        mismo criterio de producción; eso es una **segunda puerta al mismo
+        cuarto**, y el día que las dos dejen de coincidir la pantalla ofrece un
+        botón que no existe — o, peor, lo esconde en la instancia donde hace
+        falta. Acá no hay criterio que repetir: si el simulador no se montó,
+        esta ruta tampoco existe y el frontend recibe un 404.
+
+        ⚠️ **Y es un GET, no un POST a la ruta real con un id inventado.** Así
+        sondea hoy el portal (`simularPago(-1)`, distinguiendo el 404 del error
+        por el texto del mensaje), que funciona pero mide la ausencia leyendo
+        una cadena de error: cambiarle la redacción al 404 le rompe la
+        detección. Un GET dedicado dice lo mismo sin escribir nada.
+
+        Pide staff igual que el resto del mostrador: no filtra nada, pero no hay
+        motivo para que un anónimo enumere qué instancia es de prueba.
+        """
+        return {"disponible": True}
+
+    @simulador.post("/{reserva_id}/mp-qr/simular")
+    async def simular_cobro_qr(
+        reserva_id: int,
+        sesion: Session = Depends(obtener_sesion),
+        usuario: dict = Depends(require_staff),
+    ):
+        """Hace de cuenta que alguien escaneó el QR y pagó. Sólo en dev y demo.
+
+        Deja todo lo que deja el cobro real: el pago aprobado, el movimiento en
+        la caja del turno abierto y —si la automática está prendida— la factura.
+        """
+        _exigir_base_de_caja()
+        reserva, cancha_nombre = _reserva_y_cancha(sesion, reserva_id)
+        cliente = sesion.get(Cliente, reserva.cliente_id) if reserva.cliente_id else None
+
+        try:
+            monto = cobro_qr.total_a_cobrar(reserva)
+        except cobro_qr.SinPrecio as exc:
+            raise HTTPException(422, str(exc)) from exc
+        except cobro_qr.NadaQueCobrar as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+        try:
+            pago = servicio_pagos.crear_pago_de_mostrador(sesion, reserva, monto)
+        except servicio_pagos.PagoInvalido as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+        servicio_pagos.aplicar_pago_aprobado(
+            sesion, pago, payment_id=f"simulado-{pago.id}", estado_mp="approved"
+        )
+        try:
+            resultado = await cobro_qr._completar(
+                sesion, pago, reserva, cliente, cancha_nombre, usuario
+            )
+        except servicio_caja.SinTurnoAbierto as exc:
+            # 🔑 Mismo 409 que el cobro real: sin caja abierta la plata quedaría
+            # fuera del arqueo, y el simulador no es excusa para saltearlo.
+            raise HTTPException(409, str(exc)) from exc
+        sesion.commit()
+        return {**resultado, "simulado": True, "monto": float(monto)}
+
+    return simulador
+

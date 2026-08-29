@@ -7,6 +7,7 @@ el primer import y un test que quiera otra base ya llega tarde.
 
 from __future__ import annotations
 
+import logging
 import os
 
 from fastapi import Depends, FastAPI
@@ -39,20 +40,29 @@ from libracore.respaldo import Instancia
 from app import db
 from app.auth import UserRepository, construir_session_auth, require_admin
 from app.config import Config
+from app.models.maestros import Sucursal
 from app.routers import admin, disponibilidad, maestros, reservas, salud, torneos
 from app.routers import auth as auth_router
 from app.routers import buffet as buffet_router
 from app.routers import caja as caja_router
+from app.routers import cajas as cajas_router
 from app.routers import cuenta_corriente as cuenta_corriente_router
 from app.routers import facturacion as facturacion_router
+from app.routers import facturas as facturas_router
 from app.routers import mercadopago as mercadopago_router
+from app.routers import mp_bandeja as mp_bandeja_router
 from app.routers import portal as portal_router
 from app.routers import resumen as resumen_router
 
 # Con alias: más abajo hay una variable local `usuarios` con el repositorio, y
 # sin el alias el import queda pisado.
 from app.routers import usuarios as usuarios_router
+from app.routers.facturacion import exigir_base
+from app.servicios import caja as servicio_caja
 from app.servicios import facturacion
+from app.servicios import facturacion as servicio_facturacion
+
+_log = logging.getLogger(__name__)
 
 #: Qué entra al log de actividad: `{clase del modelo: nombre legible}`.
 #:
@@ -157,6 +167,26 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # su lado, y ninguna de las dos delata que falta la otra.
     ensure_demo_user(usuarios)
 
+    # Una caja por sucursal, para las instancias que ya venían andando.
+    #
+    # 🔑 **Sin esto, subir esta versión deja al mostrador sin poder abrir el
+    # turno**: desde ahora el turno se abre SOBRE una caja, no habría ninguna
+    # para elegir, y crearla es de admin. Es idempotente — en el segundo
+    # arranque no crea nada.
+    #
+    # Va detrás de `hay_base()` porque las cajas viven en LibraCore: una
+    # instancia sin facturación configurada arranca igual, sin cajas y sin caja
+    # que abrir, exactamente como antes de este cambio.
+    if servicio_facturacion.hay_base():
+        with db.fabrica_de_sesiones()() as sesion_bootstrap:
+            sedes = [
+                (fila.id, fila.nombre)
+                for fila in sesion_bootstrap.query(Sucursal).filter_by(activa=True).all()
+            ]
+        creadas = servicio_caja.asegurar_cajas_de_todas(sedes)
+        if creadas:
+            _log.info("Se crearon %s cajas iniciales, una por sucursal", creadas)
+
     app = FastAPI(
         title="LibraClub",
         description="Gestión de complejos deportivos — familia Libra",
@@ -260,17 +290,61 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # Sin `/api` a propósito: es el prefijo que consume el kit — ver el módulo.
     app.include_router(facturacion_router.router, dependencies=[Depends(require_admin)])
 
+    # Los comprobantes: los doce endpoints del motor —listado, alta manual,
+    # detalle, duplicar, autorizar, cobrar, mandar por mail, borrar, nota de
+    # crédito y nota de débito— más el PDF, que es de este producto.
+    #
+    # Admin para todo, también para leer, y es distinto del resto de la
+    # facturación: la factura de SU reserva la ve el mostrador desde el turno
+    # (`GET /api/reservas/{id}/factura`, `require_staff`). Lo que es de admin es
+    # ver TODO lo facturado por el complejo de una sentada, y emitir a mano —
+    # mismo criterio que el historial de caja y el log de actividad.
+    #
+    # 🔑 **Van los DOS**, y el orden no importa: el del motor no tiene ninguna
+    # ruta `/{id}/pdf`, así que no se pisan.
+    # 🔴 `exigir_base` va en el montaje y no adentro del motor: el factory es de
+    # LibraCore, y ahí la base SIEMPRE existe. Acá no —un complejo que todavía no
+    # factura levanta igual—, y sin esta guarda sus doce endpoints contestarían
+    # un error de conexión de psycopg en vez del 503 que nombra la variable que
+    # falta. Lo agarró `test_sin_base_de_libracore_el_listado_lo_DICE`, que se
+    # escribió para el listado hecho a mano y sobrevivió al reemplazo.
+    app.include_router(
+        facturas_router.comprobantes,
+        dependencies=[Depends(require_admin), Depends(exigir_base)],
+    )
+    app.include_router(
+        facturas_router.router,
+        dependencies=[Depends(require_admin), Depends(exigir_base)],
+    )
+
     # `GET`/`PUT /config/mercadopago`: con qué cuenta cobra el QR del mostrador.
     # Admin por el mismo motivo que ARCA — quien escriba acá cambia a qué cuenta
     # va la plata del complejo. El mostrador *usa* el QR sin poder leer esto:
     # `GET /api/reservas/mp/estado` le dice si está configurado, y nada más.
     app.include_router(mercadopago_router.router, dependencies=[Depends(require_admin)])
 
+    # La bandeja de MercadoPago: conciliar lo que entró y facturarlo. Es la
+    # del motor, con el reparto por `external_reference` de este producto —
+    # ver `routers/mp_bandeja.py`.
+    #
+    # 🔑 Admin, y con `exigir_base`: la bandeja vive en la base de LibraCore,
+    # así que un complejo sin facturación configurada tiene que recibir el
+    # 503 que nombra la variable y no un error de conexión de psycopg.
+    app.include_router(
+        mp_bandeja_router.router,
+        dependencies=[Depends(require_admin), Depends(exigir_base)],
+    )
+
     # La caja por turno. Sin `dependencies` acá: cada endpoint declara su rol —
     # el mostrador abre y cobra en su propia caja, el historial es de admin, y
     # cerrar depende del turno, no sólo de quién pide.
 
     app.include_router(caja_router.router)
+
+    # Las cajas: los mostradores de cada sucursal. Cada endpoint declara su
+    # rol — el listado lo lee el mostrador para elegir dónde abrir el turno;
+    # el alta, la edición y la baja son de admin.
+    app.include_router(cajas_router.router)
 
     # La cuenta corriente. Mismo criterio que la caja: el mostrador fía y cobra
     # —es quien está frente al cliente—, y la lista de deudores es de admin.
@@ -300,6 +374,12 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     simulador = portal_router.construir_router_de_simulacion(config.entorno)
     if simulador is not None:
         app.include_router(simulador)
+
+    # Y el del cobro por QR del mostrador, por lo mismo: acredita un cobro sin
+    # que haya entrado un peso. El `if` va acá y no adentro del handler.
+    simulador_qr = reservas.construir_router_de_simulacion_qr(config.entorno)
+    if simulador_qr is not None:
+        app.include_router(simulador_qr)
 
     resumen = resumen_router.construir_router()
     if resumen is not None:

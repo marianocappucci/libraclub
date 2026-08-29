@@ -69,6 +69,48 @@ class OrigenReserva(enum.Enum):
     SERIE = "serie"
 
 
+class TipoAviso(enum.Enum):
+    """Qué le estamos diciendo al cliente.
+
+    No hay `RECORDATORIO_24H` y `RECORDATORIO_2H` separados: la anticipación es
+    un número —`avisos.horas_antes`— y no parte del nombre. Con el nombre, el
+    día que el complejo quiera avisar con 48 h el enum miente o hay que agregar
+    un valor y migrar el tipo de PostgreSQL para cambiar una constante.
+    """
+
+    CONFIRMACION = "confirmacion"
+    RECORDATORIO = "recordatorio"
+    CANCELACION = "cancelacion"
+
+
+class CanalAviso(enum.Enum):
+    """Por dónde sale.
+
+    `WHATSAPP` ya está en el vocabulario aunque todavía no haya transporte que
+    lo mande: el barrido lo filtra por transporte disponible, no por enum. Es
+    barato ahora y es un `ALTER TYPE` sobre una tabla con datos después.
+    """
+
+    EMAIL = "email"
+    WHATSAPP = "whatsapp"
+
+
+class EstadoAviso(enum.Enum):
+    """En qué terminó el intento.
+
+    No existe `PENDIENTE`, y es la decisión de diseño de la tabla: `avisos` es
+    el **registro de lo que se intentó**, no una cola de lo que falta. Lo que
+    falta se deduce de las reservas en cada barrida (ver `servicios/avisos.py`).
+    """
+
+    ENVIADO = "enviado"
+    FALLIDO = "fallido"
+    #: El cliente no tiene por dónde recibirlo, o pidió no recibir. Se anota
+    #: igual: sin la fila, la barrida siguiente vuelve a evaluarlo y el operador
+    #: que pregunta *"¿por qué no le llegó?"* no tiene dónde mirar.
+    OMITIDO = "omitido"
+
+
 class AlcanceDia(enum.Enum):
     """A qué días aplica una tarifa.
 

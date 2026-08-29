@@ -73,3 +73,27 @@ class Config:
                 f"{url.split(':', 1)[0]!r}. PostgreSQL es el único motor de la familia."
             )
         return url
+
+
+#: Los nombres con los que este ecosistema escribe "producción" en `ENTORNO`.
+#: Están todos porque el valor lo escribe una persona en un `.env`, y el que
+#: falte acá es una instancia de producción tratada como si fuera dev.
+NOMBRES_DE_PRODUCCION = ("prod", "produccion", "producción", "production")
+
+
+def es_produccion(entorno: str) -> bool:
+    """Si este `ENTORNO` es producción. **Una sola definición, a propósito.**
+
+    🔴 Es el predicado que decide si se montan los simuladores — el del portal,
+    que confirma reservas sin que nadie pague, y el del cobro por QR, que
+    acredita cobros sin que entre un peso. Hasta el 2026-08-29 la tupla estaba
+    escrita **literal en los dos archivos**: dos puertas al mismo cuarto, y
+    sumar un nombre en una dejaba la otra abierta sin que nada se pusiera rojo.
+
+    🔑 **Y no aparece una tercera copia para la pantalla.** La Caja necesita
+    saber si el simulador existe para ofrecer el botón, pero no vuelve a
+    evaluar esto: pregunta por `GET /api/reservas/mp-qr/simulacion`, que vive
+    **adentro del router del simulador**. Si el router no se montó, esa ruta
+    tampoco existe y el 404 es la respuesta. Una sola puerta.
+    """
+    return entorno.lower() in NOMBRES_DE_PRODUCCION

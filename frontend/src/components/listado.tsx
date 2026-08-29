@@ -33,6 +33,13 @@ export function AvisoDeError({ mensaje }: { mensaje: string | null }) {
 
 /** La columna de Editar y Borrar, al extremo derecho.
  *
+ *  🔑 **Lleva título y los botones llevan borde**, que es la convención de la
+ *  familia y lo que hace Contalibra en 12 de sus 17 columnas de acciones. Hasta
+ *  el 2026-08-28 acá el `header` era `''` y los botones `ghost`: una columna sin
+ *  encabezado en una tabla que sí lo tiene en todas las demás, y dos iconos
+ *  sueltos sin nada que los delimite. El día que entró la bandeja de MercadoPago
+ *  —que viene del kit y usa `outline`— quedaron los dos estilos en la misma app.
+ *
  *  El `size` sale de `anchoColumnaAcciones` del kit y no de un número escrito
  *  acá: TanStack le da 150px por default a toda columna, que en esta sobra y le
  *  come lugar a las que tienen datos.
@@ -50,14 +57,14 @@ export function columnaDeAcciones<T>({ onEditar, onBorrar, nombreDe }: {
 }): ColumnDef<T, unknown> {
   return {
     id: 'acciones',
-    header: '',
+    header: () => <div className="text-right">Acciones</div>,
     size: anchoColumnaAcciones(2),
     // Sin ordenar ni buscar: no hay dato acá.
     enableSorting: false,
     cell: ({ row }: { row: { original: T } }) => (
       <div className="flex justify-end gap-1">
         <Button
-          variant="ghost"
+          variant="outline"
           size="icon"
           aria-label={`Editar ${nombreDe(row.original)}`}
           onClick={() => onEditar(row.original)}
@@ -65,7 +72,7 @@ export function columnaDeAcciones<T>({ onEditar, onBorrar, nombreDe }: {
           <Pencil className="size-4" />
         </Button>
         <Button
-          variant="ghost"
+          variant="outline"
           size="icon"
           aria-label={`Borrar ${nombreDe(row.original)}`}
           onClick={() => onBorrar(row.original)}

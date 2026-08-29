@@ -164,7 +164,7 @@ def test_el_consumo_de_una_reserva_descuenta_stock_y_queda_colgado(
 
 
 def test_el_consumo_cargado_a_la_reserva_NO_entra_a_la_caja(
-    api, sucursal, cancha, cliente, tarifa_base, gaseosa
+    api, sucursal, cancha, cliente, tarifa_base, gaseosa, abrir_caja,
 ):
     """🔴 Si entrara acá **y** al cobrar la reserva, se cobraría dos veces.
 
@@ -173,7 +173,7 @@ def test_el_consumo_cargado_a_la_reserva_NO_entra_a_la_caja(
     """
     _reponer(api, sucursal, gaseosa["item_id"], 24)
     reserva = _reserva(api, cancha, cliente)
-    api.post("/api/caja/turnos", json={"monto_inicial": "0"})
+    abrir_caja(api, sucursal, "0")
 
     api.post(f"/api/buffet/consumos?sucursal_id={sucursal.id}", json={
         "lineas": [{"item_id": gaseosa["item_id"], "cantidad": "2"}],
@@ -184,11 +184,11 @@ def test_el_consumo_cargado_a_la_reserva_NO_entra_a_la_caja(
         "el consumo de una reserva no se cobra al cargarlo")
 
 
-def test_la_venta_de_mostrador_SI_entra_a_la_caja(api, sucursal, gaseosa):
+def test_la_venta_de_mostrador_SI_entra_a_la_caja(api, sucursal, gaseosa, abrir_caja):
     """Control del test de arriba: si nada entrara nunca a la caja, aquél
     pasaría igual sin probar la distinción."""
     _reponer(api, sucursal, gaseosa["item_id"], 24)
-    api.post("/api/caja/turnos", json={"monto_inicial": "0"})
+    abrir_caja(api, sucursal, "0")
 
     r = api.post(f"/api/buffet/consumos?sucursal_id={sucursal.id}", json={
         "lineas": [{"item_id": gaseosa["item_id"], "cantidad": "1"}],

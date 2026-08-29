@@ -35,12 +35,11 @@ turnos.** En una instancia de producción el endpoint no se monta.
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import secrets
 from datetime import datetime
 from decimal import Decimal
 
+from libracore.mp_webhook import verificar_firma
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -57,6 +56,15 @@ class PagoInvalido(ValueError):
     pass
 
 
+#: Con qué arranca toda referencia de MercadoPago de este producto.
+#:
+#: 🔑 Está acá y no repetido en cada lugar que lo necesita porque la bandeja del
+#: motor filtra por él: dos copias que divergen dejarían un filtro que no
+#: matchea, y los pagos de reservas —ya resueltos por el webhook— empezarían a
+#: aparecer en la bandeja como si nadie los hubiera conciliado.
+PREFIJO_DE_REFERENCIA = "lc-"
+
+
 def nueva_referencia(reserva_id: int) -> str:
     """La referencia externa que viaja a MercadoPago y vuelve en el webhook.
 
@@ -64,7 +72,7 @@ def nueva_referencia(reserva_id: int) -> str:
     porque un pago rechazado se reintenta, y la referencia tiene que ser distinta
     para que el `UNIQUE` no bloquee el segundo intento.
     """
-    return f"lc-{reserva_id}-{secrets.token_hex(6)}"
+    return f"{PREFIJO_DE_REFERENCIA}{reserva_id}-{secrets.token_hex(6)}"
 
 
 def crear_pago(sesion: Session, reserva: Reserva, monto: Decimal) -> PagoDeReserva:
@@ -247,7 +255,7 @@ def marcar_vencidos(sesion: Session, momento: datetime | None = None) -> int:
 
 
 def firma_valida(
-    *, cuerpo: bytes, x_signature: str, x_request_id: str, payment_id: str, secreto: str
+    *, x_signature: str, x_request_id: str, payment_id: str, secreto: str
 ) -> bool:
     """Si la notificación viene de verdad de MercadoPago.
 
@@ -255,21 +263,23 @@ def firma_valida(
     webhook es público —tiene que serlo, lo llama MercadoPago— así que la firma
     es lo único que separa una notificación real de una inventada.
 
-    El template lo define MercadoPago: `id:<payment>;request-id:<req>;ts:<ts>`,
-    firmado con HMAC-SHA256 y la clave secreta de la aplicación. Misma
-    implementación que Contalibra, que ya la tiene en producción.
+    🔑 **El HMAC lo hace el motor** desde el 2026-08-27. Estaba escrito dos
+    veces y el docstring de esta función ya lo admitía —*"misma implementación
+    que Contalibra"*—: el mismo algoritmo, la misma plantilla y la misma
+    comparación en tiempo constante, en dos lugares que había que acordarse de
+    actualizar juntos si MercadoPago cambiaba el esquema.
+
+    🔴 **Lo que NO se delega es el guard del secreto vacío**, y es a propósito.
+    `verificar_firma` del motor no lo chequea: con `secret=""` calcula el HMAC
+    con clave vacía y compara. Peor todavía, el webhook del motor **saltea la
+    verificación entera** si no hay secreto configurado. Acá eso no puede pasar:
+    sin secreto no se verifica nada, y procesar sin verificar es peor que no
+    procesar — cualquiera confirmaría reservas. Hay un test que lo fija.
+
+    > El parámetro `cuerpo` se retiró: no se usaba. La plantilla de MercadoPago
+    > es `id:<payment>;request-id:<req>;ts:<ts>` y **el cuerpo no entra en la
+    > firma**; tenerlo ahí sugería lo contrario.
     """
-    ts = v1 = ""
-    for parte in x_signature.split(","):
-        parte = parte.strip()
-        if parte.startswith("ts="):
-            ts = parte[3:]
-        elif parte.startswith("v1="):
-            v1 = parte[3:]
-    if not ts or not v1 or not secreto:
+    if not secreto:
         return False
-    template = f"id:{payment_id};request-id:{x_request_id};ts:{ts}"
-    esperado = hmac.new(secreto.encode(), template.encode(), hashlib.sha256).hexdigest()
-    # `compare_digest` y no `==`: comparar hashes con `==` corta en el primer
-    # byte distinto y filtra información por el tiempo de respuesta.
-    return hmac.compare_digest(esperado, v1)
+    return verificar_firma(x_signature, x_request_id, payment_id, secreto)

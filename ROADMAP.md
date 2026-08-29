@@ -38,6 +38,22 @@ la pantalla abierta.
 > El hold con vencimiento y el constraint de exclusión ya están en F1
 > justamente para que esta fase no tenga que inventarlos.
 
+**Confirmaciones, recordatorios y aviso de cancelación: hechos** (2026-08-29,
+ADR-015), por email y con el SMTP que ya configura la pantalla de Correo. Los
+manda `scripts/enviar_avisos.py` desde el cron, y **ese cron es el interruptor**.
+
+Lo que sigue abierto de esta fase, en orden:
+
+1. **La política de cancelación**, que es lo que le falta al aviso para cerrar el
+   círculo: ventana configurable por cancha, qué pasa con la seña y **devolución
+   automática** a MercadoPago. Hoy se cancela y no se devuelve nada solo.
+2. **El ausentismo**: `AUSENTE` existe como estado y se puede marcar, pero no se
+   cuenta por cliente ni bloquea al reincidente. Es lo que ATC vende como tarjeta
+   en garantía y Dónde Juego como lista negra.
+3. **WhatsApp** como segundo canal. El vocabulario ya lo contempla
+   (`CanalAviso.WHATSAPP`) y el barrido elige por transporte: falta el
+   transporte, las plantillas aprobadas y el proveedor.
+
 ## F3 — Caja y factura
 
 Caja por sucursal, conciliación de la reserva contra el cobro, punto de venta

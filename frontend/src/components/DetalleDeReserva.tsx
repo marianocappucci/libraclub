@@ -1,15 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  agenda, buffet, cobroQr, cuentaCorriente, facturacion, TIPO_DE_FACTURA,
+  agenda, buffet, cobroDelTurno, cuentaCorriente, facturacion, TIPO_DE_FACTURA,
 } from '@/lib/api'
-import type { Cancha, Factura, LineaDeConsumo, QrDisponible, Turno } from '@/lib/api'
+import type {
+  Cancha, EstadoDeCobro, Factura, LineaDeConsumo, Turno,
+} from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
 import { fecha, hora, pesos } from '@/lib/fechas'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { useMediosDePago } from '@/lib/medios-pago'
 import { AvisoDeError } from '@/components/listado'
+import { SeccionDeCobroConQr } from '@/components/CobroConQr'
 import { buttonVariants } from '@/components/ui/button'
 import { DialogoDeConsumo } from '@/components/DialogoDeConsumo'
 
@@ -135,6 +140,12 @@ export function DetalleDeReserva({
             abierto={abierto}
             onCobrado={onCambiada}
           />
+          <SeccionDeCobro
+            reservaId={turno.reserva_id}
+            estado={estado}
+            abierto={abierto}
+            onCobrado={onCambiada}
+          />
           <SeccionDeFactura reservaId={turno.reserva_id} abierto={abierto} />
           <SeccionDeCuentaCorriente turno={turno} abierto={abierto} />
 
@@ -183,177 +194,7 @@ export function DetalleDeReserva({
 }
 
 
-/** Cobrar el turno con el QR de MercadoPago del mostrador.
- *
- * 🔑 **No hay ninguna imagen de QR acá, y no falta nada.** Es el modelo de QR
- * fijo por punto de venta: el cartel del mostrador no cambia nunca; lo que el
- * botón cambia es *cuánto cobra* cuando el cliente lo escanea. Lo que se cobra
- * es el turno entero — la cancha **más** el consumo de buffet.
- *
- * 🔴 **Cancelar baja el monto del cartel.** Una orden que queda puesta le sigue
- * cobrando ese monto a quien escanee, aunque el encargado haya cerrado el
- * diálogo hace media hora.
- */
-const POLL_MS = 3000
-/** Cinco minutos: pasado eso el cliente ya se fue del mostrador. */
-const ESPERA_MAXIMA_MS = 5 * 60 * 1000
-
-/** Los estados en los que tiene sentido cobrar. Espeja `ESTADOS_COBRABLES` del
- *  backend, que es quien decide de verdad: `jugada` entra porque en un complejo
- *  el grupo suele pagar al terminar. */
 const COBRABLES = ['confirmada', 'jugada']
-
-type EstadoQr = 'idle' | 'poniendo' | 'esperando' | 'cobrado'
-
-function SeccionDeCobroConQr({ reservaId, estado, abierto, onCobrado }: {
-  reservaId: number | null
-  estado: string
-  abierto: boolean
-  onCobrado: () => void
-}) {
-  const [disponible, setDisponible] = useState<QrDisponible | null>(null)
-  const [qr, setQr] = useState<EstadoQr>('idle')
-  const [monto, setMonto] = useState<number | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const pollRef = useRef<number | null>(null)
-
-  const frenarPoll = useCallback(() => {
-    if (pollRef.current !== null) {
-      window.clearInterval(pollRef.current)
-      pollRef.current = null
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!abierto) return
-    setQr('idle')
-    setError(null)
-    setMonto(null)
-    cobroQr.estado()
-      .then(setDisponible)
-      // Sin respuesta, la sección no aparece: cobrar por QR es una forma más
-      // de cobrar, no un requisito para operar el mostrador.
-      .catch(() => setDisponible({ disponible: false, auto_facturar: false }))
-  }, [abierto])
-
-  // Sin esto el poll sigue corriendo contra un turno que ya no está en
-  // pantalla: cada 3 segundos sale un request.
-  useEffect(() => frenarPoll, [frenarPoll])
-
-  if (reservaId === null || !disponible?.disponible || !COBRABLES.includes(estado)) {
-    return null
-  }
-
-  async function bajar() {
-    if (reservaId === null) return
-    try {
-      await cobroQr.bajar(reservaId)
-    } catch {
-      // Si falla, la orden queda en la caja y el encargado puede volver a
-      // ponerla. Hacer fallar una cancelación por esto sería peor.
-    }
-  }
-
-  async function cobrar() {
-    if (reservaId === null) return
-    setError(null)
-    setQr('poniendo')
-    try {
-      setMonto((await cobroQr.poner(reservaId)).monto)
-    } catch (e) {
-      setError((e as Error).message)
-      setQr('idle')
-      return
-    }
-    setQr('esperando')
-    const hasta = Date.now() + ESPERA_MAXIMA_MS
-    pollRef.current = window.setInterval(async () => {
-      let resultado
-      try {
-        resultado = await cobroQr.consultar(reservaId)
-      } catch (e) {
-        frenarPoll()
-        setQr('idle')
-        setError((e as Error).message)
-        return
-      }
-      if (resultado.estado === 'aprobado') {
-        frenarPoll()
-        setQr('cobrado')
-        // Refresca la agenda y, con ella, la sección de la factura que pudo
-        // haber salido sola.
-        onCobrado()
-        return
-      }
-      if (resultado.estado === 'rechazado') {
-        frenarPoll()
-        setQr('idle')
-        setError('El pago fue rechazado o cancelado en MercadoPago.')
-        return
-      }
-      if (Date.now() > hasta) {
-        frenarPoll()
-        void bajar()
-        setQr('idle')
-        setError(
-          'Se agotó la espera y se bajó el monto del QR. Si el cliente pagó '
-          + 'igual, fijate en MercadoPago antes de volver a cobrar.',
-        )
-      }
-    }, POLL_MS)
-  }
-
-  if (qr === 'cobrado') {
-    return (
-      <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm dark:bg-emerald-950/30">
-        <div className="font-medium text-emerald-800 dark:text-emerald-400">
-          Cobrado por QR de MercadoPago
-        </div>
-        {disponible.auto_facturar && (
-          <div className="text-muted-foreground">La factura se emitió sola.</div>
-        )}
-      </div>
-    )
-  }
-
-  if (qr === 'esperando') {
-    return (
-      <div className="space-y-2 rounded-md border px-3 py-2 text-sm">
-        <p>
-          El QR de la caja ya está cobrando{' '}
-          <strong>{monto === null ? '' : pesos(monto)}</strong>. Pedile al
-          cliente que lo escanee.
-        </p>
-        <button
-          type="button"
-          onClick={() => { frenarPoll(); void bajar(); setQr('idle') }}
-          className="text-sm text-red-800 underline underline-offset-2"
-        >
-          Cancelar el cobro por QR
-        </button>
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-2">
-      <AvisoDeError mensaje={error} />
-      <button
-        type="button"
-        disabled={qr === 'poniendo'}
-        onClick={cobrar}
-        className={buttonVariants({ variant: 'outline' })}
-      >
-        {qr === 'poniendo' ? 'Preparando el QR…' : 'Cobrar con QR'}
-      </button>
-      <p className="text-xs text-muted-foreground">
-        Pone el total del turno —cancha y buffet— en el QR impreso del mostrador
-        {disponible.auto_facturar ? ' y factura solo al acreditarse' : ''}.
-      </p>
-    </div>
-  )
-}
-
 
 /** La factura de la reserva: la muestra si existe, y si no ofrece emitirla.
  *
@@ -366,6 +207,139 @@ function SeccionDeCobroConQr({ reservaId, estado, abierto, onCobrado }: {
  * siempre — por eso se dice "pendiente de CAE" y no se muestra un error rojo,
  * que mandaría a buscar un problema que no está.
  */
+/** Lo cobrado del turno, y el botón para cobrar lo que falta.
+ *
+ * 🔑 **Va acá y no en la pantalla de Caja** porque es el único lugar donde se
+ * sabe de qué reserva es la plata. En Caja el cobro se carga como monto más
+ * concepto libre: sirve para un ingreso suelto y deja el comprobante del turno
+ * viéndose «sin cobrar», que es exactamente lo que este flujo viene a cerrar.
+ *
+ * El monto arranca en el pendiente y **se puede bajar**: una seña es un cobro
+ * parcial, y es la mitad del modelo que `facturar_reserva` declara —la seña y el
+ * saldo, dos movimientos contra la misma factura—.
+ *
+ * ⚠️ Si el complejo no tiene facturación configurada, el endpoint contesta 503 y
+ * la sección **no aparece**: no es un error que mostrar, es que esta instancia
+ * no lleva caja contra LibraCore.
+ */
+function SeccionDeCobro({ reservaId, estado, abierto, onCobrado }: {
+  reservaId: number | null
+  estado: string
+  abierto: boolean
+  onCobrado: () => void
+}) {
+  const [datos, setDatos] = useState<EstadoDeCobro | null>(null)
+  const [monto, setMonto] = useState('')
+  const [medio, setMedio] = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const { medios, etiqueta: etiquetaDeMedio } = useMediosDePago()
+
+  useEffect(() => {
+    if (!abierto || reservaId === null) return
+    setError(null)
+    cobroDelTurno
+      .ver(reservaId)
+      .then((d) => {
+        setDatos(d)
+        setMonto(d.pendiente > 0 ? String(d.pendiente) : '')
+      })
+      .catch(() => setDatos(null))
+  }, [abierto, reservaId])
+
+  // El medio por defecto espera a que la lista llegue: con `''` el cobro entra
+  // sin medio y el arqueo por medio no cuadra. Mismo cuidado que en Caja.
+  useEffect(() => {
+    if (!medio && medios.length > 0) setMedio(medios[0].valor)
+  }, [medio, medios])
+
+  if (reservaId === null || datos === null) return null
+  // Un bloqueo o una reserva cancelada no se cobran.
+  if (!COBRABLES.includes(estado)) return null
+
+  return (
+    <div className="grid gap-2 rounded-lg border p-3">
+      <div className="flex items-center justify-between text-sm">
+        <span className="font-medium">Cobro del turno</span>
+        <span className={datos.pendiente > 0 ? 'text-muted-foreground' : 'text-emerald-700'}>
+          {datos.pendiente > 0
+            ? `Pendiente ${pesos(String(datos.pendiente))} de ${pesos(String(datos.total))}`
+            : `Cobrado ${pesos(String(datos.cobrado))}`}
+        </span>
+      </div>
+
+      {datos.cobros.length > 0 && (
+        // `flex flex-col` y no `grid`: un grid implícito dimensiona su columna a
+        // `max-content` y la fila se lleva el importe fuera del recuadro. Mismo
+        // caso que la lista de movimientos de Caja, medido el 2026-08-28.
+        <ul className="flex flex-col gap-0.5 text-sm text-muted-foreground">
+          {datos.cobros.map((c) => (
+            <li key={c.id} className="flex justify-between gap-2">
+              <span className="truncate">
+                {fecha(c.fecha)} · {etiquetaDeMedio(c.medio_pago)}
+              </span>
+              <span>{pesos(String(c.monto))}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
+      {datos.pendiente > 0 && (
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="grid gap-1">
+            <Label htmlFor="monto-cobro" className="text-xs">Monto</Label>
+            <Input
+              id="monto-cobro"
+              className="h-8 w-28"
+              inputMode="decimal"
+              value={monto}
+              onChange={(e) => setMonto(e.target.value)}
+            />
+          </div>
+          <div className="grid gap-1">
+            <Label htmlFor="medio-cobro" className="text-xs">Medio</Label>
+            <select
+              id="medio-cobro"
+              className="h-8 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
+              value={medio}
+              onChange={(e) => setMedio(e.target.value)}
+            >
+              {medios.map((m) => (
+                <option key={m.valor} value={m.valor}>{m.etiqueta}</option>
+              ))}
+            </select>
+          </div>
+          <button
+            className={buttonVariants({ size: 'sm' })}
+            disabled={enviando || !monto.trim() || !medio}
+            onClick={async () => {
+              setEnviando(true)
+              setError(null)
+              try {
+                const d = await cobroDelTurno.registrar(reservaId, {
+                  monto, medio_pago: medio,
+                })
+                setDatos(d)
+                setMonto(d.pendiente > 0 ? String(d.pendiente) : '')
+                onCobrado()
+              } catch (e) {
+                setError((e as Error).message)
+              } finally {
+                setEnviando(false)
+              }
+            }}
+          >
+            {enviando ? 'Cobrando…' : 'Cobrar'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 function SeccionDeFactura(
   { reservaId, abierto }: { reservaId: number | null; abierto: boolean },
 ) {
@@ -394,13 +368,33 @@ function SeccionDeFactura(
     const tipo = TIPO_DE_FACTURA[factura.tipo] ?? factura.tipo
     const numero = `${String(factura.punto_venta).padStart(4, '0')}-${String(factura.numero).padStart(8, '0')}`
     return (
-      <div className="rounded-md border px-3 py-2 text-sm">
-        <div className="font-medium">Factura {tipo} {numero}</div>
-        <div className="text-muted-foreground">
-          {factura.cae
-            ? `CAE ${factura.cae}`
-            : 'Pendiente de CAE — la instancia todavía no tiene certificado de ARCA'}
+      <div className="flex items-start justify-between gap-2 rounded-md border px-3 py-2 text-sm">
+        <div>
+          <div className="font-medium">Factura {tipo} {numero}</div>
+          <div className="text-muted-foreground">
+            {factura.cae
+              ? `CAE ${factura.cae}`
+              : 'Pendiente de CAE — la instancia todavía no tiene certificado de ARCA'}
+          </div>
         </div>
+        {/* El PDF también acá y no sólo en el listado: éste es el momento en que
+            alguien lo quiere —se acaba de facturar el turno y hay que dárselo al
+            cliente—.
+
+            Sólo para admin, por el mismo motivo que el botón de emitir: el
+            endpoint del PDF lleva `require_admin`, así que al encargado el link
+            le daría 403. El bloque de arriba —el número y el CAE— sí lo ve,
+            porque eso viene de `/api/reservas/{id}/factura`, que es de staff. */}
+        {user?.role === 'admin' && (
+          <a
+            href={facturacion.urlDelPdf(factura.id)}
+            target="_blank"
+            rel="noreferrer"
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+          >
+            Ver PDF
+          </a>
+        )}
       </div>
     )
   }

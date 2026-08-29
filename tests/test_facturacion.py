@@ -166,6 +166,7 @@ def test_una_url_que_no_es_postgres_no_se_acepta(monkeypatch):
 # se pueda facturar dos veces. **El CAE real queda sin verificar** hasta que haya
 # un certificado de homologación.
 
+from datetime import date  # noqa: E402
 from decimal import Decimal  # noqa: E402
 
 from app.servicios import facturacion as servicio  # noqa: E402
@@ -278,3 +279,316 @@ def test_facturar_es_de_admin(api, cancha, cliente, tarifa_base, engine):
     assert staff.post(f"/api/reservas/{reserva['id']}/facturar").status_code == 403
     # Control: ver la factura sí puede.
     assert staff.get(f"/api/reservas/{reserva['id']}/factura").status_code == 200
+
+
+# ── El listado y el PDF ───────────────────────────────────────────────────
+#
+# Lo que se prueba acá es la vista de arriba: `GET /api/facturas` y el PDF. El
+# detalle de un comprobante sigue siendo el diálogo de la reserva, que ya tiene
+# sus tests más arriba.
+
+
+def _facturar(api, cancha, cliente, comienza: str) -> dict:
+    """Una reserva con precio, facturada. Devuelve el comprobante."""
+    r = api.post(
+        "/api/reservas",
+        json={"cancha_id": cancha.id, "cliente_id": cliente.id,
+              "comienza_at": comienza, "duracion_min": 90},
+    )
+    assert r.status_code == 201, r.text
+    emitida = api.post(f"/api/reservas/{r.json()['id']}/facturar")
+    assert emitida.status_code == 201, emitida.text
+    return emitida.json()
+
+
+def test_el_listado_trae_las_facturas_emitidas(api, cancha, cliente, tarifa_base):
+    """🔑 **Dos, y no una.** Con una sola factura, un listado que devolviera
+    siempre "la última" —o que ignorara la paginación— pasaría igual.
+
+    Se emiten por la API de reservas, que es el único camino por el que nacen
+    los comprobantes de este producto: sembrarlas escribiendo directo en
+    `facturas` probaría el SELECT contra filas que la aplicación nunca escribió.
+    """
+    assert api.get("/api/facturas").json()["items"] == [], "arranca vacío"
+
+    primera = _facturar(api, cancha, cliente, "2026-09-01T20:00:00-03:00")
+    segunda = _facturar(api, cancha, cliente, "2026-09-02T20:00:00-03:00")
+
+    pagina = api.get("/api/facturas").json()
+    assert pagina["total"] == 2
+    assert pagina["total_pages"] == 1
+    assert pagina["page"] == 1
+
+    numeros = {f["numero"] for f in pagina["items"]}
+    assert numeros == {primera["numero"], segunda["numero"]}
+
+    # El cliente y el importe salen del listado, no del POST: es lo que la
+    # pantalla va a mostrar.
+    fila = next(f for f in pagina["items"] if f["numero"] == primera["numero"])
+    assert fila["cliente_razon"] == cliente.nombre
+    assert fila["total"] == primera["total"]
+    assert fila["tipo"] == servicio.FACTURA_C
+
+
+def test_el_listado_filtra_por_fecha(api, cancha, cliente, tarifa_base):
+    """El filtro corta de verdad.
+
+    Las dos facturas llevan la fecha de HOY —`facturar_reserva` estampa
+    `date.today()`, no la fecha del turno—, así que el corte se prueba contra
+    mañana. El control es la consulta sin filtro: sin él, un `desde` que
+    devuelve cero se cumpliría también si el listado estuviera roto.
+    """
+    from datetime import date, timedelta
+
+    _facturar(api, cancha, cliente, "2026-09-01T20:00:00-03:00")
+    _facturar(api, cancha, cliente, "2026-09-02T20:00:00-03:00")
+    assert api.get("/api/facturas").json()["total"] == 2, "control: sin filtro están"
+
+    hoy = date.today().isoformat()
+    manana = (date.today() + timedelta(days=1)).isoformat()
+    assert api.get(f"/api/facturas?desde={hoy}&hasta={hoy}").json()["total"] == 2
+    assert api.get(f"/api/facturas?desde={manana}").json()["total"] == 0
+
+
+def test_el_listado_busca_por_cliente(api, cancha, cliente, tarifa_base):
+    """⚠️ Con el nombre **tal cual está escrito**.
+
+    `get_facturas_filtradas` usa `LIKE`, y `libracore.db.core` no lo traduce a
+    `ILIKE`: sobre PostgreSQL la búsqueda distingue mayúsculas. No se asierta lo
+    contrario a propósito —un test que exigiera que `juan` no encuentre a `Juan`
+    congelaría el defecto—; el arreglo es del motor y toca también a Contalibra
+    y Restolibra.
+    """
+    _facturar(api, cancha, cliente, "2026-09-01T20:00:00-03:00")
+
+    encontrado = api.get(f"/api/facturas?q={cliente.nombre}").json()
+    assert encontrado["total"] == 1
+    assert encontrado["items"][0]["cliente_razon"] == cliente.nombre
+
+    assert api.get("/api/facturas?q=nadie-con-ese-nombre").json()["total"] == 0
+
+
+def test_el_pdf_del_comprobante_se_genera(api, cancha, cliente, tarifa_base):
+    """200, un PDF de verdad, y el número en el nombre del archivo."""
+    factura = _facturar(api, cancha, cliente, "2026-09-01T20:00:00-03:00")
+
+    r = api.get(f"/api/facturas/{factura['id']}/pdf")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "application/pdf"
+    # Los bytes, no el status: un 200 con un cuerpo vacío o con el `index.html`
+    # de la SPA también daría 200.
+    assert r.content.startswith(b"%PDF"), r.content[:40]
+    assert len(r.content) > 1000, "un PDF con el comprobante adentro no pesa 200 bytes"
+    assert str(factura["numero"]).zfill(8) in r.headers["content-disposition"]
+
+
+def test_el_pdf_de_un_comprobante_que_no_existe_da_404(api):
+    assert api.get("/api/facturas/99999/pdf").status_code == 404
+
+
+def test_el_listado_es_de_admin(api, cancha, cliente, tarifa_base):
+    """El mostrador ve la factura de SU turno; todo lo facturado es del dueño.
+
+    El control es la misma consulta como admin: sin él, un 403 se cumpliría
+    también si la ruta no existiera.
+    """
+    _facturar(api, cancha, cliente, "2026-09-01T20:00:00-03:00")
+    api.post("/api/usuarios", json={
+        "username": "mostrador", "name": "Mostrador", "password": "clave-mostrador",
+        "role": "staff",
+    })
+    staff = TestClient(crear_app(_config(_url_core())), base_url="https://testserver")
+    assert staff.post(
+        "/auth/login", json={"username": "mostrador", "password": "clave-mostrador"}
+    ).status_code == 200
+
+    assert staff.get("/api/facturas").status_code == 403
+    assert staff.get("/api/facturas/1/pdf").status_code == 403
+    # Control: el admin sí, por la misma ruta.
+    assert api.get("/api/facturas").status_code == 200
+
+
+def test_sin_base_de_libracore_el_listado_lo_DICE(engine, sesion, monkeypatch):
+    """503 nombrando la variable, igual que la config de ARCA. Un complejo que
+    todavía no factura tiene que poder entrar a la pantalla y entender por qué
+    está vacía."""
+    monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
+    monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
+    AuthBase.metadata.drop_all(engine)
+    AuthBase.metadata.create_all(engine)
+    cliente = TestClient(crear_app(_config(None)), base_url="https://testserver")
+    assert cliente.post(
+        "/auth/login", json={"username": USUARIO, "password": CLAVE}
+    ).status_code == 200
+
+    r = cliente.get("/api/facturas")
+    assert r.status_code == 503, r.text
+    assert "LIBRACLUB_LIBRACORE_DATABASE_URL" in r.text
+    AuthBase.metadata.drop_all(engine)
+
+
+def test_la_ruta_de_la_PANTALLA_no_la_intercepta_la_api(api):
+    """🔴 El error que ya pasó con el log de actividad, en este mismo producto.
+
+    El router del kit se montaba en `/logs` —que es la URL de la **pantalla**—,
+    y FastAPI resuelve sus rutas antes que el catch-all de la SPA: entrar a
+    `/logs` devolvía el JSON crudo del endpoint en vez del listado. Por eso este
+    producto monta todo bajo `/api`.
+
+    La pantalla de comprobantes vive en `/facturas` y la API en `/api/facturas`.
+    El día que alguien mueva el prefijo "para que quede más corto", esto se pone
+    en rojo antes de que la pantalla desaparezca.
+
+    ⚠️ Se miran los caminos del **esquema OpenAPI** y no `app.routes`: en esta
+    versión de FastAPI un router incluido no se aplana en la lista de rutas
+    —queda como un `_IncludedRouter` sin `.path`—, así que recorrer `app.routes`
+    da una lista corta de la que `/api/facturas` está ausente. Un test escrito
+    así pasaría por el motivo equivocado: no porque la ruta esté bien montada,
+    sino porque no encuentra ninguna.
+    """
+    caminos = set(api.app.openapi()["paths"])
+    # Control positivo: sin él, "no hay ninguna ruta /facturas" se cumpliría
+    # también si el router no estuviera montado en ningún lado.
+    assert "/api/facturas" in caminos, "la API tiene que estar montada"
+    assert not [
+        c for c in caminos if c == "/facturas" or c.startswith("/facturas/")
+    ], "la URL de la pantalla no puede ser también una ruta de la API"
+
+
+# ── Los comprobantes del motor: alta manual, notas de crédito y de débito ──
+#
+# Los doce endpoints los arma `libracore.facturas_router`, el mismo módulo que
+# consumen Contalibra y Restolibra. Lo que se prueba acá es **el cableado de
+# este producto**, no el circuito fiscal —que tiene sus 38 tests en el motor—:
+# que emitir a mano funcione con los usuarios en la otra base, que el PDF
+# siga saliendo, y que todo quede detrás del rol de admin.
+
+HOY = date.today().isoformat()
+
+
+def _factura_manual(**extra) -> dict:
+    cuerpo = {
+        "tipo": 11, "punto_venta": 1, "fecha": HOY,
+        "condicion_venta": "Contado", "client_name": "Marcela Gutierrez",
+        "items": [{"description": "Clase particular", "qty": 1, "unit_price": 9000.0}],
+    }
+    cuerpo.update(extra)
+    return cuerpo
+
+
+def test_emitir_a_mano_funciona_con_los_usuarios_en_LA_OTRA_base(api):
+    """🔴 El caso que casi rompe el cableado.
+
+    `facturas.usuario_id` es una FK contra la tabla `usuarios` **de LibraCore**,
+    y en este producto los usuarios viven en la base del dominio, con la forma de
+    `libraauth`. Pasarle el id del usuario del dominio reventaría el INSERT con
+    un `FOREIGN KEY constraint failed` — o, si esa tabla llegara a tener filas,
+    le acreditaría la factura a otra persona, que es peor porque no falla.
+
+    Por eso `_usuario_para_el_motor` lo manda en `None`. Este test es lo que lo
+    sostiene: sin esa decisión, no emite.
+    """
+    r = api.post("/api/facturas", json=_factura_manual())
+    assert r.status_code == 200, r.text
+
+    factura = r.json()
+    assert factura["id"], "la respuesta trae el comprobante pelado, con su id"
+    assert factura["total"] == 9000.0
+    assert factura["cliente_razon"] == "Marcela Gutierrez"
+
+    # Se relee por el listado: lo que importa es que quedó guardada.
+    listado = api.get("/api/facturas").json()
+    assert listado["total"] == 1
+    assert listado["items"][0]["id"] == factura["id"]
+
+
+def test_la_nota_de_credito_anula_una_factura_del_complejo(api, cancha, cliente, tarifa_base):
+    """Anular el comprobante de un turno, que es el caso real: se facturó una
+    reserva y hubo que darla de baja."""
+    reserva = _reserva_facturable(api, cancha, cliente, tarifa_base)
+    emitida = api.post(f"/api/reservas/{reserva['id']}/facturar").json()
+
+    r = api.post(f"/api/facturas/{emitida['id']}/nota-credito")
+    assert r.status_code == 200, r.text
+    nota = r.json()
+
+    assert nota["tipo"] == 13, "una C da una Nota de Crédito C"
+    assert nota["total"] == emitida["total"], "anula el importe exacto"
+    assert nota["cbte_asoc_nro"] == emitida["numero"]
+
+    # Y el detalle de la original la muestra colgando.
+    detalle = api.get(f"/api/facturas/{emitida['id']}").json()
+    assert len(detalle["notas_credito"]) == 1
+
+
+def test_la_nota_de_debito_tambien_existe(api):
+    factura = api.post("/api/facturas", json=_factura_manual()).json()
+    nota = api.post(f"/api/facturas/{factura['id']}/nota-debito").json()
+    assert nota["tipo"] == 12
+
+
+def test_el_PDF_sigue_saliendo_por_el_endpoint_de_este_producto(api):
+    """El factory no trae PDF: lo sirve este producto, y tiene que convivir con
+    las rutas del motor sin pisarse."""
+    factura = api.post("/api/facturas", json=_factura_manual()).json()
+
+    r = api.get(f"/api/facturas/{factura['id']}/pdf")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content.startswith(b"%PDF")
+
+    # Control de que no se pisan: el detalle, que es `/{id}` a secas, sigue
+    # devolviendo JSON.
+    detalle = api.get(f"/api/facturas/{factura['id']}")
+    assert detalle.headers["content-type"].startswith("application/json")
+
+
+def test_todo_el_circuito_es_de_admin(api, engine):
+    """El mostrador ve la factura de SU turno; emitir a mano y anular es del dueño."""
+    api.post("/api/usuarios", json={
+        "username": "mostrador2", "name": "Mostrador", "password": "clave-mostrador",
+        "role": "staff",
+    })
+    staff = TestClient(crear_app(_config(_url_core())), base_url="https://testserver")
+    assert staff.post(
+        "/auth/login", json={"username": "mostrador2", "password": "clave-mostrador"}
+    ).status_code == 200
+
+    assert staff.post("/api/facturas", json=_factura_manual()).status_code == 403
+    assert staff.get("/api/facturas").status_code == 403
+    assert staff.post("/api/facturas/1/nota-credito").status_code == 403
+    # Control: el admin sí, por las mismas rutas.
+    assert api.get("/api/facturas").status_code == 200
+
+
+#: Los campos que la pantalla `Facturas.tsx` lee de cada fila del listado.
+#:
+#: 🔑 Están escritos acá y no deducidos del código: hasta el 2026-08-27 este
+#: listado lo armaba un `response_model` de este producto, y al pasarlo al motor
+#: la respuesta cambió de forma —ahora son las filas crudas de `facturas`, con
+#: más campos—. La pantalla siguió andando porque los que usa están todos, pero
+#: eso hay que **verificarlo**, no suponerlo: el mismo cambio de forma en
+#: `POST /api/facturas` rompió la navegación de Contalibra sin que ninguna de
+#: sus 369 pruebas lo viera.
+CAMPOS_QUE_USA_LA_PANTALLA = (
+    "id", "tipo", "punto_venta", "numero", "fecha", "cliente_razon", "total", "cae",
+)
+
+
+def test_el_listado_trae_lo_que_la_PANTALLA_lee(api, cancha, cliente, tarifa_base):
+    reserva = _reserva_facturable(api, cancha, cliente, tarifa_base)
+    api.post(f"/api/reservas/{reserva['id']}/facturar")
+
+    pagina = api.get("/api/facturas").json()
+    assert set(pagina) >= {"items", "total", "total_pages", "page"}, sorted(pagina)
+
+    fila = pagina["items"][0]
+    faltan = [c for c in CAMPOS_QUE_USA_LA_PANTALLA if c not in fila]
+    assert not faltan, f"la pantalla se rompe sin: {faltan}"
+
+    # Y con los valores que la pantalla espera, no sólo las claves.
+    assert fila["cliente_razon"] == cliente.nombre
+    assert fila["punto_venta"] >= 1
+    assert isinstance(fila["total"], (int, float))
+    # `fecha` se dibuja con `fecha()` del frontend, que espera `aaaa-mm-dd`.
+    assert len(str(fila["fecha"])) == 10, fila["fecha"]

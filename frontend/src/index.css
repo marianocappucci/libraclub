@@ -94,6 +94,22 @@
 
 :root {
   --radius: 0.625rem;
+
+  /* El verde de LibraClub, como token de CSS.
+   *
+   * 🔑 **Es el mismo valor que `branding.ts`**, que lo usa desde JS para el
+   * nombre del producto al lado del logo. No se inventó acá ni allá: sale del
+   * `--brand` de la landing (`libraclub_web`), que genera `libra-web-kit` desde
+   * `site_css_tokens.py`. La aplicación usa exactamente el verde de la web
+   * pública en vez de uno parecido.
+   *
+   * ⚠️ Está escrito en dos lugares porque uno lo lee el CSS y el otro JavaScript,
+   * y no hay forma de compartir un literal entre los dos sin generar uno desde
+   * el otro. Un test los compara para que no diverjan
+   * (`marca-unica.test.ts`): sin eso, el nombre del producto y el borde del
+   * menú terminarían con dos verdes distintos y nadie lo vería, porque nunca se
+   * miran juntos. */
+  --marca: #017b4b;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -408,3 +424,88 @@
 
    Si alguna vez la grilla se pinta con tokens, van aca y se verifica en el CSS
    generado que la utilidad exista — Tailwind v4 solo emite lo que se usa. */
+
+/* ── El verde de la marca, donde se ve ──────────────────────────────────────
+ *
+ * Pedido del humano el 2026-08-28: que el encabezado de cada cancha en la
+ * agenda tenga fondo, y que ese mismo color sea el del borde del ítem elegido
+ * en el menú — como hace LibraDesk.
+ *
+ * 1. El ítem activo del menú.
+ *
+ *    Es el mismo tratamiento que LibraDesk, con el mismo motivo: lo que el menú
+ *    tiene que contestar de un vistazo es "dónde estoy parado". Va acá y no en
+ *    el JSX porque `data-active` lo pone `SidebarMenuButton` comparando la ruta,
+ *    y el `Layout.tsx` de este producto no lo conoce; y porque la fila la dibuja
+ *    `libra-ui`, que es de seis productos, mientras que este tratamiento lo
+ *    eligió uno.
+ *
+ *    🔑 **El borde transparente va en TODOS los ítems y no sólo en el activo**:
+ *    si apareciera recién al activarse, el ítem se correría un píxel al pasar de
+ *    uno a otro.
+ *
+ *    Estas reglas NO están en `@layer`, así que le ganan a las utilidades de
+ *    Tailwind —que sí lo están— sin pelear por especificidad.
+ */
+[data-sidebar='menu-button'] {
+  border: 1px solid transparent;
+}
+
+[data-sidebar='menu-button'][data-active='true'] {
+  background-color: var(--muted);
+  border-color: var(--marca);
+  color: var(--foreground);
+}
+
+/* 2. El encabezado de cada cancha en la grilla de la agenda.
+ *
+ *    Un 8% del verde sobre el fondo, no el verde pleno: es una banda que separa
+ *    columnas, no un aviso. El humano lo pidió así — *"que no sea muy fuerte"*.
+ *    Se compone con `color-mix` sobre `--background` en vez de escribir un verde
+ *    claro fijo, para que salga del MISMO token que el borde del menú: dos
+ *    valores distintos es como se llega a dos verdes que casi coinciden.
+ *
+ *    El borde de abajo también se tiñe, más marcado que el fondo, porque un
+ *    fondo suave contra un `--border` gris deja la banda flotando.
+ */
+.encabezado-de-cancha {
+  /* 🔴 **El fallback lo controla este `@supports`, escrito a mano.**
+   *
+   * Lightning CSS parte cada `color-mix` en dos —el valor plano arriba y la
+   * mezcla adentro de un `@supports`— y, como los operandos son `var()`, no
+   * puede calcular la mezcla: deja **`var(--marca)`** como fallback. O sea el
+   * **verde pleno**, con el texto oscuro encima, que es lo contrario de lo que
+   * este fondo tiene que ser.
+   *
+   * Poner un literal antes tampoco alcanza: Lightning igual agrega el suyo
+   * DESPUÉS y lo pisa. Medido sobre el CSS construido, no supuesto.
+   *
+   * Los dos literales no se eligieron a ojo: son la mezcla **medida** en un
+   * navegador —pintada en un canvas y leído el píxel, con sus controles: el
+   * blanco da `#ffffff` y la marca da `#017b4b`—. Si cambia `--marca`, hay que
+   * volver a medirlos.
+   *
+   * ⚠️ Son del tema claro, que es el único que este producto usa hoy. La mezcla
+   * sí se adapta sola, porque compone contra `--background`. */
+  background-color: #edf4f0;
+  border-bottom-color: #abc5b5;
+
+  /* 🔑 **Las esquinas de arriba, redondeadas.** El encabezado es el primer hijo
+   * de una `<section>` con `rounded-lg`, así que su fondo pintaba cuadrado
+   * dentro de una caja redondeada: se veían dos picos verdes asomando en las
+   * esquinas superiores. Reportado el 2026-08-28.
+   *
+   * `calc(var(--radius) - 1px)` y no `var(--radius)` a secas: el encabezado va
+   * **adentro** del borde de 1px de la sección, así que su curva tiene que ser
+   * un píxel más chica para quedar concéntrica. Con el mismo radio queda un
+   * hilo de fondo asomando por fuera de la curva. */
+  border-top-left-radius: calc(var(--radius) - 1px);
+  border-top-right-radius: calc(var(--radius) - 1px);
+}
+
+@supports (color: color-mix(in oklab, red, red)) {
+  .encabezado-de-cancha {
+    background-color: color-mix(in oklab, var(--marca) 8%, var(--background));
+    border-bottom-color: color-mix(in oklab, var(--marca) 30%, var(--border));
+  }
+}

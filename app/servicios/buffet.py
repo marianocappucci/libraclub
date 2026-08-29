@@ -26,6 +26,7 @@ negativo se ve en la pantalla de stock, que es donde hay que arreglarlo.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 from decimal import Decimal
 
@@ -315,6 +316,33 @@ def consumos_de_reserva(reserva_id: int) -> list[Sale]:
 
 def total_consumido(reserva_id: int) -> Decimal:
     return sum((v.total for v in consumos_de_reserva(reserva_id)), Decimal("0"))
+
+
+def consumido_de_reservas(reserva_ids: Sequence[int]) -> dict[int, Decimal]:
+    """Lo mismo que `total_consumido`, pero de muchas reservas y en una consulta.
+
+    🔑 **Existe por el costo, no por prolijidad.** `total_consumido` pasa por
+    `consumos_de_reserva`, que abre una conexión y despues llama a
+    `repo.get_sale()` **por cada venta** para armar sus líneas. En el detalle de
+    una reserva eso es una vez; en el listado del mostrador serían decenas de
+    conexiones por refresco, y las líneas ni se usan: sólo hace falta el total.
+    """
+    ids = [int(x) for x in reserva_ids]
+    if not ids:
+        return {}
+    marcas = ",".join("?" * len(ids))
+    conexion = _conexion()
+    try:
+        filas = conexion.execute(
+            "SELECT source_id, SUM(total) FROM sales"
+            " WHERE source_type = 'reserva' AND status <> 'cancelled'"
+            f" AND source_id IN ({marcas})"
+            " GROUP BY source_id",
+            tuple(ids),
+        ).fetchall()
+    finally:
+        conexion.close()
+    return {int(f[0]): Decimal(str(f[1] or 0)) for f in filas}
 
 
 def lineas_para_factura(reserva_id: int) -> list[SaleItem]:

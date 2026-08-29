@@ -16,6 +16,7 @@ function vacio(): ClienteEntrada {
     documento: null,
     cuit: null,
     activo: true,
+    acepta_avisos: true,
     observaciones: null,
   }
 }
@@ -48,6 +49,7 @@ export function FormularioDeCliente({
             documento: cliente.documento,
             cuit: cliente.cuit,
             activo: cliente.activo,
+            acepta_avisos: cliente.acepta_avisos,
             observaciones: cliente.observaciones,
           }
         : vacio(),
@@ -169,6 +171,18 @@ export function FormularioDeCliente({
               onChange={(e) => set('activo', e.target.checked)}
             />
             Activo
+          </label>
+
+          {/* La baja de avisos tiene que poder hacerla el mostrador: el que
+              pide "no me escriban más" lo pide por teléfono, y sin esta casilla
+              la única forma de honrarlo sería un UPDATE a mano en la base. */}
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={datos.acepta_avisos}
+              onChange={(e) => set('acepta_avisos', e.target.checked)}
+            />
+            Recibe avisos de sus turnos por email
           </label>
 
           <AvisoDeError mensaje={error} />

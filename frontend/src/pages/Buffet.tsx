@@ -9,14 +9,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-import { AlertTriangle, CupSoda, Plus, ShoppingCart } from 'lucide-react'
+import { AlertTriangle, CupSoda, Plus } from 'lucide-react'
 
 import { buffet as api } from '@/lib/api'
 import type { ProductoDeBuffet } from '@/lib/api'
 import { pesos } from '@/lib/fechas'
 import { useSucursal } from '@/context/SucursalContext'
 import { useAuth } from '@/context/AuthContext'
-import { DialogoDeConsumo } from '@/components/DialogoDeConsumo'
 import { FormularioDeProducto } from '@/components/FormularioDeProducto'
 import { AvisoDeError, filaInactiva } from '@/components/listado'
 import { Button } from '@/components/ui/button'
@@ -30,7 +29,6 @@ export function Buffet() {
   const [cargando, setCargando] = useState(true)
   const [editando, setEditando] = useState<ProductoDeBuffet | null>(null)
   const [abierto, setAbierto] = useState(false)
-  const [vendiendo, setVendiendo] = useState(false)
 
   const puedeEscribir = user?.role === 'admin'
 
@@ -110,37 +108,42 @@ export function Buffet() {
           </span>
         ),
       },
+      // 🔑 **Una sola columna de acciones, con su título y los dos botones con
+      // borde.** Hasta el 2026-08-28 eran DOS columnas —`reponer` y `editar`—,
+      // las dos sin encabezado y con distinta variante: «Reponer» con borde y
+      // «Editar» sin, uno al lado del otro en la misma fila. Es el caso más
+      // visible de lo que el humano reportó el 2026-08-28.
+      //
+      // «Editar» sigue apareciendo sólo con permiso de escritura; lo que cambió
+      // es que ahora comparte columna con «Reponer» en vez de agregar una
+      // segunda sin nombre.
       {
-        id: 'reponer',
-        header: '',
+        id: 'acciones',
+        header: () => <div className="text-right">Acciones</div>,
+        enableSorting: false,
         cell: ({ row }) => (
-          <Button variant="outline" size="sm" onClick={() => reponer(row.original)}>
-            Reponer
-          </Button>
+          <div className="flex justify-end gap-1">
+            <Button variant="outline" size="sm" onClick={() => reponer(row.original)}>
+              Reponer
+            </Button>
+            {puedeEscribir && (
+              <Button
+                variant="outline"
+                size="sm"
+                aria-label={`Editar ${row.original.nombre}`}
+                onClick={() => {
+                  setEditando(row.original)
+                  setAbierto(true)
+                }}
+              >
+                Editar
+              </Button>
+            )}
+          </div>
         ),
       },
     ]
-    if (!puedeEscribir) return base
-    return [
-      ...base,
-      {
-        id: 'editar',
-        header: '',
-        cell: ({ row }) => (
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label={`Editar ${row.original.nombre}`}
-            onClick={() => {
-              setEditando(row.original)
-              setAbierto(true)
-            }}
-          >
-            Editar
-          </Button>
-        ),
-      },
-    ]
+    return base
   }, [puedeEscribir, reponer])
 
   if (actual === null) {
@@ -151,10 +154,13 @@ export function Buffet() {
   return (
     <div className="space-y-3">
       <EncabezadoDePantalla titulo={<TituloPantalla icono={CupSoda}>Buffet</TituloPantalla>}>
-        <Button variant="outline" onClick={() => setVendiendo(true)}>
-          <ShoppingCart className="size-4" />
-          Vender
-        </Button>
+        {/* 🔴 **Acá no se vende.** El botón «Vender» estuvo hasta el
+            2026-08-28 y se retiró por pedido del humano: *"para cobrar un turno
+            o buffet de la cancha lo cobrás por caja pero algo de buffet solo va
+            por buffet, no es práctico, todo tiene que ir por el mismo lado"*.
+            La venta suelta se hace desde la Caja, que es la única pantalla
+            donde entra plata; ésta quedó para lo que de verdad es —cargar
+            productos y stock—, que es también por lo que vive en Maestros. */}
         {puedeEscribir && (
           <Button
             onClick={() => {
@@ -206,16 +212,6 @@ export function Buffet() {
         onCerrar={() => setAbierto(false)}
         onGuardado={() => {
           setAbierto(false)
-          recargar()
-        }}
-      />
-      <DialogoDeConsumo
-        abierto={vendiendo}
-        sucursalId={actual}
-        reservaId={null}
-        onCerrar={() => setVendiendo(false)}
-        onCargado={() => {
-          setVendiendo(false)
           recargar()
         }}
       />

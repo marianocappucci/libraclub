@@ -11,6 +11,9 @@ import { useAuth } from '@/context/AuthContext'
 import { FormularioDeSucursal } from '@/components/FormularioDeSucursal'
 import { AvisoDeError, columnaDeAcciones, filaInactiva } from '@/components/listado'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 
 export function Sucursales() {
@@ -27,6 +30,7 @@ export function Sucursales() {
   const [error, setError] = useState<string | null>(null)
   const [editando, setEditando] = useState<Sucursal | null>(null)
   const [abierto, setAbierto] = useState(false)
+  const [avisando, setAvisando] = useState(false)
 
   const puedeEscribir = user?.role === 'admin'
 
@@ -103,18 +107,32 @@ export function Sucursales() {
     ]
   }, [puedeEscribir, borrar, actual])
 
+  // 🔑 **La pantalla se nombra por lo que hay.** Decidido con el humano el
+  // 2026-08-28: la instancia comercial de un cliente es **un complejo**, así que
+  // llamar «Sucursales» a una pantalla con una sola fila sugiere una estructura
+  // que ese cliente no tiene — y encima invita a crear la segunda sin saber qué
+  // implica. Con dos o más el plural es el correcto y vuelve solo.
+  const unaSola = filas.length <= 1
+  const titulo = unaSola ? 'Mi complejo' : 'Sucursales'
+
   return (
     <div className="space-y-3">
-      <EncabezadoDePantalla titulo={<TituloPantalla icono={MapPin}>Sucursales</TituloPantalla>}>
+      <EncabezadoDePantalla titulo={<TituloPantalla icono={MapPin}>{titulo}</TituloPantalla>}>
         {puedeEscribir && (
           <Button
             onClick={() => {
               setEditando(null)
-              setAbierto(true)
+              // 🔴 **La segunda pasa por el aviso; la primera no.** Sin una
+              // sucursal la agenda no tiene dónde vivir, así que ahí crear es
+              // obligatorio y frenarlo con un cartel sería estorbar. Es pasar de
+              // una a dos lo que cambia el modelo mental, y es exactamente
+              // donde alguien puede creer que está separando dos negocios.
+              if (filas.length === 1) setAvisando(true)
+              else setAbierto(true)
             }}
           >
             <Plus className="size-4" />
-            Nueva sucursal
+            {unaSola ? 'Agregar otra sucursal' : 'Nueva sucursal'}
           </Button>
         )}
       </EncabezadoDePantalla>
@@ -123,6 +141,59 @@ export function Sucursales() {
         Una sucursal no es un cliente aparte: comparten base, usuarios y
         reportes. Un complejo que factura con otro CUIT va en otra instancia.
       </p>
+
+      <Dialog open={avisando} onOpenChange={setAvisando}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Agregar una segunda sucursal</DialogTitle>
+          </DialogHeader>
+          {/* 🔴 **Dice las dos listas, no una.** Un aviso que sólo enumera
+              riesgos se lee como «no lo hagas» y el operador lo saltea sin
+              leerlo. Lo que hace falta es que entienda **qué separa y qué no**,
+              porque las dos mitades son decisiones de negocio: dos complejos del
+              mismo dueño y el mismo CUIT comparten personal y stock a propósito,
+              y eso acá funciona. */}
+          <div className="space-y-3 text-sm">
+            <p>
+              Las dos sucursales van a vivir en <strong>esta misma instancia</strong>.
+            </p>
+            <div>
+              <p className="font-medium">Cada una tiene lo suyo:</p>
+              <ul className="ml-4 list-disc text-muted-foreground">
+                <li>sus canchas, sus horarios y sus tarifas</li>
+                <li>su caja y su arqueo</li>
+                <li><strong>su punto de venta de ARCA</strong>, que no se puede repetir</li>
+              </ul>
+            </div>
+            <div>
+              <p className="font-medium">Y esto se comparte:</p>
+              <ul className="ml-4 list-disc text-muted-foreground">
+                <li>los clientes y su cuenta corriente</li>
+                <li>los usuarios del sistema y sus permisos</li>
+                <li>el stock del buffet</li>
+              </ul>
+            </div>
+            <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+              🔴 <strong>No hay aislamiento entre las dos.</strong> Si son de
+              dueños distintos, o facturan con otro CUIT, va cada una en su
+              propia instancia — no acá.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setAvisando(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                setAvisando(false)
+                setAbierto(true)
+              }}
+            >
+              Entendido, agregarla
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <AvisoDeError mensaje={error} />
 

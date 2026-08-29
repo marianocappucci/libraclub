@@ -5,14 +5,20 @@ Todo bajo `/api/caja`, la convención de este producto.
 
 from __future__ import annotations
 
+import csv
+import io
+from datetime import date
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from libracore import medios_pago
 from pydantic import BaseModel, Field
 
 from app.auth import get_current_user, require_admin, require_staff
+from app.routers.facturacion import exigir_base
 from app.servicios import caja as servicio
+from app.tiempo import hoy
 
 router = APIRouter(prefix="/api/caja", tags=["caja"])
 
@@ -21,6 +27,17 @@ class AperturaEntrada(BaseModel):
     #: Con cuánto efectivo arranca el cajón. Cero es un valor legítimo.
     monto_inicial: Decimal = Field(ge=0, default=Decimal("0"))
     notas: str = ""
+    #: Sobre qué mostrador. Obligatorio en este producto: acá siempre se está
+    #: parado en una sucursal, y el arqueo del cierre es el de ESE cajón.
+    caja_id: int
+
+
+class EgresoEntrada(BaseModel):
+    monto: Decimal = Field(gt=0)
+    #: De la lista de `servicios/caja.MOTIVOS_DE_EGRESO`. Cerrada a propósito.
+    motivo: str
+    detalle: str = ""
+    medio_pago: str
 
 
 class CierreEntrada(BaseModel):
@@ -40,6 +57,14 @@ class CobroEntrada(BaseModel):
 class TurnoSalida(BaseModel):
     id: int
     usuario_id: int
+    #: El mostrador sobre el que se abrió. `null` en los turnos anteriores al
+    #: 2026-08-28, que nacieron sin caja y quedaron en la de por defecto.
+    caja_id: int | None = None
+    caja_nombre: str = ""
+    #: Quién abrió el turno. Lo devuelven **todas** las consultas de turnos del
+    #: motor (`JOIN usuarios`) y hasta el 2026-08-29 esto lo descartaba: sin él,
+    #: el historial de un admin es una lista de cierres sin dueño.
+    usuario_nombre: str = ""
     apertura: str
     cierre: str | None = None
     monto_inicial: float
@@ -63,8 +88,11 @@ class CierreSalida(TurnoSalida):
 
 
 def _a_salida(turno: dict) -> TurnoSalida:
+    caja = servicio.caja_de(turno["caja_id"]) if turno.get("caja_id") else None
     return TurnoSalida(
         id=turno["id"], usuario_id=turno["usuario_id"], apertura=str(turno["apertura"]),
+        caja_id=turno.get("caja_id"), caja_nombre=(caja or {}).get("nombre", ""),
+        usuario_nombre=turno.get("usuario_nombre") or "",
         cierre=str(turno["cierre"]) if turno.get("cierre") else None,
         monto_inicial=float(turno["monto_inicial"]),
         monto_declarado_cierre=(
@@ -84,9 +112,21 @@ def abrir(
     datos: AperturaEntrada,
     usuario: dict = Depends(require_staff),
 ):
-    """Abre la caja de quien lo pide. **El mostrador abre su propia caja.**"""
+    """Abre la caja de quien lo pide, **sobre un mostrador**.
+
+    El mostrador abre su propia caja: el turno es de la persona. Lo que la caja
+    agrega es **dónde** — sin eso, dos personas en dos sedes distintas arquean
+    contra el mismo montón.
+    """
+    caja = servicio.caja_de(datos.caja_id)
+    if caja is None:
+        raise HTTPException(404, "no existe esa caja")
+    if not caja.get("activo", 1):
+        raise HTTPException(422, "esa caja está dada de baja")
     try:
-        return _a_salida(servicio.abrir_turno(usuario, datos.monto_inicial, datos.notas))
+        return _a_salida(servicio.abrir_turno(
+            usuario, datos.monto_inicial, datos.notas, caja_id=datos.caja_id,
+        ))
     except servicio.TurnoYaAbierto as e:
         raise HTTPException(409, str(e)) from e
 
@@ -138,6 +178,49 @@ def cobrar(datos: CobroEntrada, usuario: dict = Depends(require_staff)):
         raise HTTPException(422, str(e)) from e
 
 
+@router.get("/motivos-de-egreso")
+def motivos_de_egreso(_: object = Depends(require_staff)) -> list[str]:
+    """Por qué puede salir plata del cajón. Lista cerrada: un motivo libre
+    convierte el arqueo en algo que no se puede sumar por categoría."""
+    return list(servicio.MOTIVOS_DE_EGRESO)
+
+
+@router.post("/egresos")
+def registrar_egreso(datos: EgresoEntrada, usuario: dict = Depends(require_staff)):
+    """Plata que **sale** del cajón. Devuelve el resumen al momento.
+
+    🔴 **Sin esto el arqueo sólo podía subir.** El resumen del motor ya netea los
+    egresos y este producto no tenía forma de registrar uno: sacar plata dejaba
+    el cierre con un faltante sin explicación, indistinguible de un error de
+    conteo.
+    """
+    try:
+        return servicio.registrar_egreso(
+            usuario, datos.monto, datos.motivo, datos.detalle, datos.medio_pago,
+        )
+    except servicio.SinTurnoAbierto as e:
+        raise HTTPException(409, str(e)) from e
+    except servicio.MotivoInvalido as e:
+        raise HTTPException(422, str(e)) from e
+    except servicio.MedioDePagoInvalido as e:
+        raise HTTPException(422, str(e)) from e
+
+
+@router.delete("/movimientos/{movimiento_id}")
+def anular_movimiento(movimiento_id: int, usuario: dict = Depends(require_staff)):
+    """Anula un movimiento **del turno abierto de quien lo pide**.
+
+    Es el caso del monto tipeado mal hace treinta segundos. Un arqueo ya cerrado
+    no se toca: esa diferencia la firmó alguien.
+    """
+    try:
+        return servicio.anular_movimiento(usuario, movimiento_id)
+    except servicio.SinTurnoAbierto as e:
+        raise HTTPException(409, str(e)) from e
+    except servicio.MovimientoAjeno as e:
+        raise HTTPException(404, str(e)) from e
+
+
 @router.post("/turnos/{turno_id}/cerrar", response_model=CierreSalida)
 def cerrar(
     turno_id: int,
@@ -169,7 +252,136 @@ def cerrar(
     )
 
 
+#: Desde cuándo mira el reporte si no se le dice. El mes en curso: es el
+#: período que el dueño mira para cerrar, y traer todo desde 1900 sobre una
+#: instancia con años de movimientos es una consulta que nadie pidió.
+def _periodo(desde: date | None, hasta: date | None) -> tuple[str, str]:
+    # 🔑 `hoy()` de `app.tiempo`, que es el día en Argentina. Un `date.today()`
+    # acá sale del reloj del proceso: entre las 21 y las 24 el contenedor en UTC
+    # ya está en el día siguiente, y el reporte del mes arrancaría el día 1 del
+    # mes que viene la última noche del mes.
+    dia = hoy()
+    return (
+        (desde or dia.replace(day=1)).isoformat(),
+        (hasta or dia).isoformat(),
+    )
+
+
+@router.get("/reportes/por-medio")
+def reporte_por_medio(
+    desde: date | None = Query(default=None),
+    hasta: date | None = Query(default=None),
+    caja_id: int = Query(default=0, ge=0),
+    _: object = Depends(require_admin),
+):
+    """Qué entró y qué salió por cada medio de pago, en un período.
+
+    De **admin**: es el corte de plata del complejo, no una herramienta del
+    mostrador. El encargado ve su turno y su historial; esto es lo que el dueño
+    mira a fin de mes.
+
+    `caja_id=0` es «todos los mostradores». Se numera desde 1, así que el cero
+    no colisiona con ninguno.
+    """
+    exigir_base()
+    d, h = _periodo(desde, hasta)
+    return {"desde": d, "hasta": h, **servicio.reporte_por_medio(d, h, caja_id)}
+
+
+@router.get("/reportes/por-medio/export")
+def exportar_por_medio(
+    desde: date | None = Query(default=None),
+    hasta: date | None = Query(default=None),
+    caja_id: int = Query(default=0, ge=0),
+    _: object = Depends(require_admin),
+):
+    """El mismo reporte, en CSV.
+
+    🔑 **Sale de `servicio.reporte_por_medio`, la MISMA función que la
+    pantalla.** Un export que rearme los números por su cuenta es la forma
+    clásica de que el CSV y la pantalla no coincidan, y el que descarga no tiene
+    cómo enterarse de cuál está bien.
+
+    Una fila por mostrador y medio, más el total. `csv.writer` y no un `join`
+    a mano: un nombre de mostrador con una coma adentro parte la fila.
+    """
+    exigir_base()
+    d, h = _periodo(desde, hasta)
+    datos = servicio.reporte_por_medio(d, h, caja_id)
+
+    buffer = io.StringIO()
+    escritor = csv.writer(buffer)
+    escritor.writerow(
+        ["mostrador", "medio", "operaciones_ingreso", "ingresos",
+         "operaciones_egreso", "egresos", "saldo"]
+    )
+    for caja in datos["cajas"]:
+        for medio, vals in sorted(caja["medios"].items()):
+            escritor.writerow([
+                caja["nombre"], medio, vals["ingresos_ops"], vals["ingresos"],
+                vals["egresos_ops"], vals["egresos"],
+                round(vals["ingresos"] - vals["egresos"], 2),
+            ])
+    escritor.writerow([])
+    escritor.writerow([
+        "TOTAL", "", "", datos["total_ingresos"], "", datos["total_egresos"],
+        round(datos["total_ingresos"] - datos["total_egresos"], 2),
+    ])
+
+    nombre = f"caja-por-medio_{d}_{h}.csv"
+    return StreamingResponse(
+        iter([buffer.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+    )
+
+
 @router.get("/turnos", response_model=list[TurnoSalida])
-def listar(_: object = Depends(require_admin), limite: int = 50):
-    """El historial. De admin: es la pantalla donde se miran los cierres ajenos."""
-    return [_a_salida(t) for t in servicio.historial(limite)]
+def listar(
+    usuario: dict = Depends(require_staff),
+    limite: int = Query(default=50, ge=1, le=200),
+):
+    """El historial: **todos** los turnos para un admin, los propios para el resto.
+
+    🔑 **Dejó de ser sólo de admin el 2026-08-29**, copiando el criterio de
+    [[contalibra]]. Con `require_admin` la pantalla no existía para el encargado
+    del mostrador, que es justamente quien quiere saber cuánto cerró ayer. Lo
+    que un encargado no puede ver son los cierres **ajenos**, y eso lo garantiza
+    el filtro por `usuario_id` — no el gate de rol.
+
+    🔴 **El filtro se aplica en la consulta y no en Python.** Traer todo y
+    descartar después deja los turnos ajenos viajando por la red hasta el
+    borde, y un `limite` que se llena con turnos que después se descartan
+    devuelve menos filas de las pedidas sin avisar.
+
+    `limite` va acotado: sin cota, un `?limite=100000` es un pedido que el
+    motor atiende.
+    """
+    solo_los_suyos = None if usuario.get("role") == "admin" else int(usuario["id"])
+    return [_a_salida(t) for t in servicio.historial(limite, usuario_id=solo_los_suyos)]
+
+
+@router.get("/turnos/{turno_id}")
+def detalle(turno_id: int, usuario: dict = Depends(require_staff)):
+    """Un turno con su arqueo. Es a dónde lleva el historial.
+
+    Devuelve la misma forma que `/turnos/actual` —`{turno, resumen}`— a
+    propósito: la pantalla del detalle y la de la caja abierta muestran lo
+    mismo, y dos formas distintas para el mismo par serían dos formateos que
+    mantener.
+
+    🔴 **Sólo el dueño del turno o un admin**, mismo criterio que el cierre. Un
+    arqueo dice cuánta plata contó una persona y cuánto le faltó: no es un dato
+    que cualquier encargado tenga por qué ver del turno de otro.
+
+    ⚠️ **`turno_id` es `int`, y eso es lo que impide que esta ruta se coma
+    `/turnos/actual`.** Las dos tienen la misma forma; lo único que las separa
+    es que el convertidor de FastAPI no matchea `actual` contra un entero. Si
+    alguna vez este parámetro pasa a `str`, la caja abierta deja de responder.
+    """
+    turno = servicio.turno_por_id(turno_id)
+    if turno is None:
+        raise HTTPException(404, "no existe ese turno")
+    if int(turno["usuario_id"]) != int(usuario["id"]) and usuario.get("role") != "admin":
+        raise HTTPException(403, "sólo podés ver tu propia caja")
+    return {"turno": _a_salida(turno), "resumen": servicio.resumen(turno_id)}

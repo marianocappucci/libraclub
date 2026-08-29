@@ -13,7 +13,7 @@
 import { Outlet } from 'react-router-dom'
 import { createLayout } from 'libra-ui/Layout'
 import {
-  CalendarDays, Clock, CupSoda, LayoutGrid, MapPin, NotebookText, Repeat, ScrollText, Settings, Tags, Trophy, UserCog, Users, Wallet,
+  CalendarDays, Clock, CreditCard, CupSoda, LayoutGrid, MapPin, NotebookText, Receipt, Repeat, ScrollText, Settings, Tags, Trophy, UserCog, Users, Wallet,
 } from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
@@ -88,9 +88,6 @@ const Cascaron = createLayout<Usuario>({
         // cuando configura el complejo.
         { to: '/torneos', label: 'Torneos', icon: Trophy },
         { to: '/caja', label: 'Caja', icon: Wallet },
-        // Con la caja y la cuenta corriente: es lo que se toca durante el
-        // turno, no cuando se configura el complejo.
-        { to: '/buffet', label: 'Buffet', icon: CupSoda },
         // La cobranza va con la caja y no en Maestros: se mira el mismo día que
         // se cobra, y el pago a cuenta entra por el turno abierto.
         { to: '/cuenta-corriente', label: 'Cuenta corriente', icon: NotebookText },
@@ -102,6 +99,21 @@ const Cascaron = createLayout<Usuario>({
         { to: '/clientes', label: 'Clientes', icon: Users },
         { to: '/canchas', label: 'Canchas', icon: LayoutGrid },
         { to: '/tarifas', label: 'Tarifas', icon: Tags },
+        // 🔑 Los mostradores son configuración, como las canchas y las tarifas:
+        // se dan de alta al abrir el complejo y no se tocan más. Lo que se toca
+        // todos los días es el turno, que está en Caja.
+        { to: '/cajas', label: 'Cajas', icon: Wallet },
+        // 🔑 **El buffet es mantenimiento, no operación.** Estuvo con la Caja
+        // hasta el 2026-08-28 con el argumento de que "es lo que se toca durante
+        // el turno", y era falso: el consumo se carga **desde el turno**, en el
+        // detalle de la reserva. Lo que esta pantalla hace es el catálogo y el
+        // stock — cargar productos y reponer cantidades—, que es exactamente lo
+        // que hacen las otras de este grupo.
+        //
+        // ⚠️ Tiene además una **venta de mostrador** (el consumo sin reserva).
+        // Es la minoría del uso y sigue estando acá adentro; si esa venta pasa a
+        // ser frecuente, merece su propio acceso y no volver a mudar la pantalla.
+        { to: '/buffet', label: 'Buffet', icon: CupSoda },
         // Junto a Tarifas y no en Configuración: las dos definen qué se
         // vende y a cuánto, y se cargan en la misma sesión al abrir el
         // complejo. El horario decide qué turnos existen; la tarifa, su precio.
@@ -115,10 +127,38 @@ const Cascaron = createLayout<Usuario>({
         // encargado (`staff`) y lo que el backend gatea con `require_admin` es
         // el alta, la edición y la baja. La pantalla ya esconde esos botones
         // por su cuenta.
+        //
+        // ⬛ **El label es estático y el título de la pantalla no.** Ahí dice
+        // «Mi complejo» con una sola sucursal —la instancia comercial de un
+        // cliente ES un complejo— y esto sigue diciendo «Sucursales». La
+        // diferencia no es un olvido: `navSections` es un **array de módulo**
+        // que `createLayout` del kit consume una sola vez, así que un label que
+        // dependa del contexto necesita que `libra-ui` acepte una función —un
+        // cambio del kit que toca a los otros seis productos por un rótulo—.
+        // Se deja pendiente en vez de resolverlo con un `useMemo` sobre
+        // `createLayout`, que remontaría el árbol entero al pasar de una
+        // sucursal a dos.
         { to: '/sucursales', label: 'Sucursales', icon: MapPin },
         // Usuarios sí: el router entero exige admin, así que a un encargado el
         // link le daría 403. Un menú que ofrece lo que no se puede usar es peor
         // que no ofrecerlo.
+        // Acá y no al lado de Caja: la caja es la plata del turno, que el
+        // encargado abre y cierra todos los días; esto es el registro fiscal
+        // del complejo, que el dueño o el contador miran una vez por mes.
+        //
+        // `adminOnly` porque el router entero lleva `require_admin`: a un
+        // encargado el link le daría 403, y un menú que ofrece lo que no se
+        // puede usar es peor que no ofrecerlo. La factura de SU turno la
+        // sigue viendo desde la Agenda, que es de mostrador.
+        { to: '/facturas', label: 'Comprobantes', icon: Receipt, adminOnly: true },
+        // Debajo de Comprobantes y no al lado de Caja: la bandeja es plata
+        // que YA entró a la cuenta de MercadoPago y que hay que conciliar y
+        // facturar — el mismo trabajo mensual que el registro fiscal, no el
+        // arqueo diario del mostrador.
+        //
+        // `adminOnly` porque el router lleva `require_admin`: el mostrador
+        // cobra, pero conciliar lo que entró a la cuenta es del dueño.
+        { to: '/mp-bandeja', label: 'Pagos MercadoPago', icon: CreditCard, adminOnly: true },
         { to: '/usuarios', label: 'Usuarios', icon: UserCog, adminOnly: true },
         // Junto a Usuarios y no en Configuración: se mira para responder
         // "quién hizo esto", que es una pregunta sobre la gente y no sobre

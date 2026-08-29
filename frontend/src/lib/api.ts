@@ -49,7 +49,9 @@ export const api = {
     pedir<T>(ruta, { method: 'POST', body: JSON.stringify(cuerpo) }),
   put: <T>(ruta: string, cuerpo: unknown) =>
     pedir<T>(ruta, { method: 'PUT', body: JSON.stringify(cuerpo) }),
-  del: (ruta: string) => pedir<void>(ruta, { method: 'DELETE' }),
+  // `T = void` para que los DELETE de siempre no cambien: los que devuelven
+  // algo —anular un movimiento contesta el resumen del turno— lo declaran.
+  del: <T = void>(ruta: string) => pedir<T>(ruta, { method: 'DELETE' }),
 }
 
 export interface Sucursal {
@@ -121,6 +123,9 @@ export interface Turno {
   estado: string | null
   cliente: string | null
   motivo: string | null
+  /** Si el turno ya no debe nada —alquiler más buffet—. Lo calcula el backend
+   *  contra la caja; la grilla sólo lo dibuja. */
+  cobrado: boolean
 }
 
 export interface Semana {
@@ -138,6 +143,8 @@ export interface Cliente {
   documento: string | null
   cuit: string | null
   activo: boolean
+  /** Si recibe confirmaciones y recordatorios de sus turnos por email. */
+  acepta_avisos: boolean
   observaciones: string | null
 }
 
@@ -149,6 +156,7 @@ export interface ClienteEntrada {
   documento: string | null
   cuit: string | null
   activo: boolean
+  acepta_avisos: boolean
   observaciones: string | null
 }
 
@@ -295,6 +303,136 @@ export const TIPO_DE_FACTURA: Record<number, string> = {
   11: 'C',
 }
 
+export type CobroDeTurno = {
+  id: number
+  fecha: string
+  monto: number
+  medio_pago: string
+  concepto: string
+  /** A qué comprobante quedó atado. `null` mientras el turno no se facturó. */
+  factura_id: number | null
+}
+
+export type EstadoDeCobro = {
+  /** Alquiler + buffet consumido: el mismo número que factura el turno. */
+  total: number
+  cobrado: number
+  pendiente: number
+  cobros: CobroDeTurno[]
+}
+
+/** El cobro de un turno, atado a su comprobante.
+ *
+ * 🔑 **No es lo mismo que la pantalla de Caja.** Ahí el cobro se carga como
+ * monto más concepto libre, sin vínculo con nada — sirve para un ingreso suelto
+ * y deja el comprobante del turno viéndose «sin cobrar». Acá el movimiento nace
+ * sabiendo de qué reserva es y, si ya se facturó, contra qué comprobante va.
+ */
+export const cobroDelTurno = {
+  ver: (reservaId: number) =>
+    api.get<EstadoDeCobro>(`/api/reservas/${reservaId}/cobros`),
+  registrar: (reservaId: number, datos: {
+    monto: string
+    medio_pago: string
+    /** Qué parte de la cuenta se está pagando. El backend lo agrega al
+     *  concepto; sin esto, tres cobros fraccionados de un mismo turno quedan
+     *  con el mismo texto y montos que nadie puede reconstruir. */
+    detalle?: string
+  }) => api.post<EstadoDeCobro>(`/api/reservas/${reservaId}/cobros`, datos),
+}
+
+/** Un turno del día que todavía debe plata, como lo ve el mostrador. */
+export type TurnoPorCobrar = {
+  reserva_id: number
+  cancha_id: number
+  cancha: string
+  deporte: string
+  comienza_at: string
+  termina_at: string
+  cliente: string
+  /** `confirmada`, `jugada`… Lo mira el cobro con QR, que no se ofrece sobre
+   *  un turno cancelado. */
+  estado: string
+  total: number
+  cobrado: number
+  pendiente: number
+}
+
+/** El selector de la Caja: qué turnos hay que cobrar hoy.
+ *
+ * 🔑 **No es `/agenda/proximas`, aunque el nombre invite.** Esa ruta filtra
+ * `comienza_at >= ahora` y el turno que se cobra en el mostrador es justamente
+ * el que **está terminando**: a las 21:00, el de 20:00 a 21:30 ya no es
+ * "próximo" y es el que tiene al cliente enfrente.
+ *
+ * Y el pendiente viene calculado del backend —alquiler más buffet consumido,
+ * menos lo que entró—, no derivado acá: el mismo número que el detalle de la
+ * reserva y que el comprobante. Dos pantallas restando por su cuenta terminan
+ * cobrando distinto.
+ */
+export const turnosPorCobrar = {
+  listar: (sucursalId: number) =>
+    api.get<TurnoPorCobrar[]>(
+      `/api/reservas/agenda/por-cobrar?sucursal_id=${sucursalId}`,
+    ),
+}
+
+/** Cómo se escribe cada deporte en pantalla.
+ *
+ * 🔑 **El valor guardado es la clave del enum** (`padel`, `futbol`), sin
+ * acentos y en minúscula, porque es lo que viaja a la base. Las cuatro
+ * pantallas que lo mostraban lo escupían crudo: en la agenda se leía
+ * *"Cancha 1 · padel"*, con el deporte en minúscula y sin tilde al lado de un
+ * nombre propio. Reportado el 2026-08-28.
+ *
+ * El mapa vive acá, con los tipos de comprobante, y no en cada pantalla: cuatro
+ * copias de esta lista es cómo se llega a que una diga «Padel» y otra «Pádel».
+ *
+ * El `?? deporte` del uso cubre un valor nuevo del enum que todavía no esté
+ * acá: se ve crudo, que es feo pero no rompe. */
+export const NOMBRE_DE_DEPORTE: Record<string, string> = {
+  padel: 'Pádel',
+  futbol: 'Fútbol',
+  tenis: 'Tenis',
+  basquet: 'Básquet',
+  voley: 'Vóley',
+  hockey: 'Hockey',
+  otro: 'Otro',
+}
+
+/** Los mostradores de cada sucursal.
+ *
+ * 🔑 El listado lo lee el **mostrador** —es lo que elige al abrir el turno— y el
+ * alta, la edición y la baja son de **admin**: dar de alta un cajón es
+ * configurar el complejo, no operarlo.
+ */
+export const cajas = {
+  deLaSucursal: (sucursalId: number) =>
+    api.get<CajaDeMostrador[]>(`/api/cajas?sucursal_id=${sucursalId}`),
+  mediosDisponibles: () =>
+    api.get<{ valor: string; etiqueta: string }[]>('/api/cajas/medios-disponibles'),
+  crear: (datos: {
+    nombre: string
+    descripcion?: string
+    medios_pago?: string[]
+    sucursal_id: number
+  }) => api.post<CajaDeMostrador>('/api/cajas', datos),
+  editar: (id: number, datos: {
+    nombre: string
+    descripcion?: string
+    medios_pago?: string[]
+    activo: boolean
+  }) => api.put<CajaDeMostrador>(`/api/cajas/${id}`, datos),
+  /** Deja esta caja como la predeterminada **de su sede**.
+   *
+   *  Es la que la Caja ofrece elegida al abrir el turno, y la que el motor se
+   *  niega a borrar. El alcance por sucursal lo garantiza el backend: marcar
+   *  la de una sede no toca la de la otra. */
+  predeterminada: (id: number) =>
+    api.post<CajaDeMostrador>(`/api/cajas/${id}/predeterminada`, {}),
+  borrar: (id: number) => api.del<void>(`/api/cajas/${id}`),
+}
+
 export const facturacion = {
   /** `null` si todavía no se facturó. Lo puede ver el mostrador. */
   ver: (reservaId: number) => api.get<Factura | null>(`/api/reservas/${reservaId}/factura`),
@@ -302,6 +440,69 @@ export const facturacion = {
   // factura a quién es del dueño. Si el rol no alcanza, el backend contesta 403
   // — la pantalla esconde el botón para no ofrecer lo que va a fallar.
   emitir: (reservaId: number) => api.post<Factura>(`/api/reservas/${reservaId}/facturar`, {}),
+  /** El PDF del comprobante. Es una URL y no un `fetch`: la abre un `<a
+   *  target="_blank">`, y la cookie de sesión —`SameSite=Lax`— viaja en una
+   *  navegación GET de nivel superior. Con `fetch` habría que armar un blob
+   *  para nada. */
+  urlDelPdf: (facturaId: number) => `/api/facturas/${facturaId}/pdf`,
+}
+
+/** Una fila del listado de comprobantes. Trae al cliente, que la factura de una
+ *  reserva no necesita —ahí ya se sabe de quién es el turno—. */
+export interface FacturaDeListado extends Factura {
+  cliente_razon: string
+  cliente_cuit: string
+}
+
+export interface PaginaDeFacturas {
+  items: FacturaDeListado[]
+  total: number
+  total_pages: number
+  page: number
+}
+
+/** Lo que el formulario de alta manda. **Sin `client_id`**, y es a propósito:
+ *  el motor lo resolvería contra la tabla `clients` de LibraCore, que es otra
+ *  base que la de los clientes de este producto — ver `FacturaNueva.tsx`. */
+export interface FacturaNuevaEntrada {
+  tipo: number
+  punto_venta: number
+  fecha: string
+  condicion_venta: string
+  client_name: string
+  client_cuit: string
+  observations: string
+  items: { description: string; qty: number; unit_price: number }[]
+}
+
+/** Qué puede emitir este complejo, según SU condición frente al IVA. */
+export interface TiposDeComprobante {
+  tipos: { value: number; label: string }[]
+  conceptos: { value: number; label: string }[]
+  condiciones_venta: string[]
+  punto_venta: number
+  es_monotributista: boolean
+}
+
+/** El listado de comprobantes del complejo. **Todo de admin** — ver
+ *  `app/routers/facturas.py`. */
+export const facturas = {
+  listar: (filtros: { desde?: string; hasta?: string; q?: string; page?: number }) => {
+    const params = new URLSearchParams()
+    // Sólo lo que tiene valor: un `desde=` vacío es un filtro que el backend
+    // igual evalúa, y ensucia la URL que se ve en el navegador.
+    if (filtros.desde) params.set('desde', filtros.desde)
+    if (filtros.hasta) params.set('hasta', filtros.hasta)
+    if (filtros.q) params.set('q', filtros.q)
+    params.set('page', String(filtros.page ?? 1))
+    return api.get<PaginaDeFacturas>(`/api/facturas?${params}`)
+  },
+  tipos: () => api.get<TiposDeComprobante>('/api/facturas/tipos'),
+  /** Devuelve el comprobante **pelado**, con su `id` arriba: la pantalla navega
+   *  al detalle con eso. Envuelto en el detalle, `factura.id` quedaría
+   *  `undefined` — pasó de verdad al extraer el módulo al motor. */
+  crear: (cuerpo: FacturaNuevaEntrada) =>
+    api.post<FacturaDeListado>('/api/facturas', cuerpo),
 }
 
 /** Lo que el mostrador necesita saber del QR sin ver ninguna credencial. */
@@ -337,6 +538,30 @@ export const cobroQr = {
   bajar: (reservaId: number) => api.del(`/api/reservas/${reservaId}/mp-qr`),
   consultar: (reservaId: number) =>
     api.get<QrEstado>(`/api/reservas/${reservaId}/mp-status`),
+  /** Si esta instancia monta el simulador — o sea, si no es producción.
+   *
+   *  🔑 **Se pregunta al servidor y no se mira una variable de build.** El
+   *  bundle es el MISMO en dev y en producción: una bandera del frontend
+   *  mostraría el botón de simular en la instancia de un complejo.
+   *
+   *  La ruta vive adentro del router del simulador, así que su ausencia es la
+   *  respuesta: **404 significa que no se puede simular**. Quien la llame tiene
+   *  que mirar `ErrorDeApi.status`, no el texto del mensaje. */
+  simulacionDisponible: () =>
+    api.get<{ disponible: boolean }>('/api/reservas/mp-qr/simulacion'),
+  /** Hace de cuenta que alguien escaneó el QR y pagó. Sólo existe fuera de
+   *  producción. Deja lo mismo que el cobro real: el pago, el movimiento en la
+   *  caja del turno abierto y —si está prendida— la factura. */
+  simular: (reservaId: number) =>
+    api.post<QrSimulado>(`/api/reservas/${reservaId}/mp-qr/simular`, {}),
+}
+
+/** Lo que contesta el simulador: el resultado del cobro real más la marca. */
+export interface QrSimulado {
+  estado: string
+  simulado: boolean
+  monto: number
+  factura_id?: number | null
 }
 
 /** Las credenciales del QR. Sólo las lee la pantalla de Configuración, que es
@@ -360,6 +585,13 @@ export const configMercadoPago = {
 export interface TurnoDeCaja {
   id: number
   usuario_id: number
+  /** El mostrador sobre el que se abrió. `null` en los turnos anteriores al
+   *  2026-08-28, que nacieron sin caja. */
+  caja_id: number | null
+  caja_nombre: string
+  /** Quién abrió el turno. Es la columna que más importa del historial de un
+   *  admin: una lista de cierres sin dueño no dice nada. */
+  usuario_nombre: string
   apertura: string
   cierre: string | null
   monto_inicial: number
@@ -369,8 +601,32 @@ export interface TurnoDeCaja {
   notas: string
 }
 
+/** Un mostrador de una sucursal. Una sede puede tener más de uno. */
+export interface CajaDeMostrador {
+  id: number
+  nombre: string
+  descripcion: string
+  medios_pago: string[]
+  activo: boolean
+  es_default: boolean
+  sucursal_id: number | null
+}
+
 export interface ResumenDeCaja {
-  movimientos: { id: number; fecha: string; concepto: string; monto: number; medio_pago: string }[]
+  // 🔑 `tipo` viene desde siempre en la consulta del motor y este tipo no lo
+  // declaraba: sin él la pantalla no puede distinguir un ingreso de un
+  // egreso, que es lo que hace que la lista se pueda sumar de arriba abajo.
+  movimientos: {
+    id: number
+    fecha: string
+    tipo: 'ingreso' | 'egreso'
+    concepto: string
+    monto: number
+    medio_pago: string
+    /** 1 = anulado. La fila **queda** en la lista y sale de los totales del
+     *  arqueo: un movimiento de caja se anula, no se borra. */
+    anulado: number
+  }[]
   pagos_por_medio: Record<string, number>
   total_ventas: number
   efectivo_ventas: number
@@ -394,15 +650,68 @@ export type MedioDePago = { valor: string; etiqueta: string }
 export const caja = {
   /** `null` si este usuario no tiene caja abierta. */
   actual: () => api.get<{ turno: TurnoDeCaja; resumen: ResumenDeCaja } | null>('/api/caja/turnos/actual'),
-  abrir: (monto_inicial: string, notas = '') =>
-    api.post<TurnoDeCaja>('/api/caja/turnos', { monto_inicial, notas }),
+  /** Por qué puede salir plata del cajón. Lista cerrada del backend. */
+  motivosDeEgreso: () => api.get<string[]>('/api/caja/motivos-de-egreso'),
+  /** Plata que **sale**. Devuelve el resumen al momento, como el cobro. */
+  egreso: (datos: { monto: string; motivo: string; detalle?: string; medio_pago: string }) =>
+    api.post<ResumenDeCaja>('/api/caja/egresos', datos),
+  /** Anula un movimiento **del turno abierto**. Un arqueo cerrado no se toca. */
+  anular: (movimientoId: number) =>
+    api.del<ResumenDeCaja>(`/api/caja/movimientos/${movimientoId}`),
+  /** El turno se abre **sobre un mostrador**: el arqueo del cierre es el de ESE
+   *  cajón. `caja_id` es obligatorio del lado del backend. */
+  abrir: (monto_inicial: string, notas = '', caja_id?: number) =>
+    api.post<TurnoDeCaja>('/api/caja/turnos', { monto_inicial, notas, caja_id }),
   cobrar: (cuerpo: { monto: string; concepto: string; medio_pago: string }) =>
     api.post<ResumenDeCaja>('/api/caja/cobros', cuerpo),
   cerrar: (turnoId: number, monto_declarado: string, notas = '') =>
     api.post<TurnoDeCaja & { diferencia_de_caja: number }>(
       `/api/caja/turnos/${turnoId}/cerrar`, { monto_declarado, notas },
     ),
-  historial: () => api.get<TurnoDeCaja[]>('/api/caja/turnos'),
+  /** Los turnos: **todos** para un admin, los propios para un encargado. El
+   *  filtro lo aplica el backend en la consulta — acá no se filtra nada. */
+  historial: (limite = 50) => api.get<TurnoDeCaja[]>(`/api/caja/turnos?limite=${limite}`),
+  /** Un turno con su arqueo. Misma forma que `actual()` a propósito: la
+   *  pantalla del detalle y la de la caja abierta muestran lo mismo. */
+  detalle: (turnoId: number) =>
+    api.get<{ turno: TurnoDeCaja; resumen: ResumenDeCaja }>(`/api/caja/turnos/${turnoId}`),
+  /** Qué entró y salió por medio de pago, en un período. De admin.
+   *
+   *  Los números vienen **pivoteados del backend**: es plata, y dos lugares
+   *  sumando por su cuenta terminan mostrando totales que no coinciden. */
+  porMedio: ({ desde, hasta, cajaId = 0 }: {
+    desde: string
+    hasta: string
+    cajaId?: number
+  }) => api.get<ReportePorMedio>(
+    `/api/caja/reportes/por-medio?desde=${desde}&hasta=${hasta}&caja_id=${cajaId}`,
+  ),
+}
+
+/** Lo que entró y salió por un medio de pago. Los `_ops` son la cantidad de
+ *  movimientos, no de plata. */
+export interface TotalesDeMedio {
+  ingresos: number
+  ingresos_ops: number
+  egresos: number
+  egresos_ops: number
+}
+
+export interface ReportePorMedio {
+  desde: string
+  hasta: string
+  cajas: {
+    id: number
+    nombre: string
+    medios: Record<string, TotalesDeMedio>
+    total_ingresos: number
+    total_egresos: number
+    saldo: number
+  }[]
+  /** Los mismos medios, sumados entre todos los mostradores. */
+  totales: Record<string, TotalesDeMedio>
+  total_ingresos: number
+  total_egresos: number
 }
 
 export const sesion = {
