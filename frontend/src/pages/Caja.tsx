@@ -27,18 +27,23 @@ import {
 } from 'lucide-react'
 
 import {
-  buffet, caja, cajas as apiCajas, cobroDelTurno, cobroQr, turnosPorCobrar,
+  agenda, buffet, caja, cajas as apiCajas, canchas as apiCanchas, cobroDelTurno,
+  cobroQr, turnosPorCobrar,
 } from '@/lib/api'
 import { useMediosDePago } from '@/lib/medios-pago'
 import type {
-  CajaDeMostrador, LineaDeConsumo, QrDisponible, ResumenDeCaja, TurnoDeCaja,
-  TurnoPorCobrar,
+  CajaDeMostrador, Cancha, LineaDeConsumo, QrDisponible, ResumenDeCaja, Turno,
+  TurnoDeCaja, TurnoPorCobrar,
 } from '@/lib/api'
-import { diasDeDiferencia, fecha, hora, pesos } from '@/lib/fechas'
+import { diaISO, diasDeDiferencia, fecha, hora, pesos } from '@/lib/fechas'
 import { AvisoDeError } from '@/components/listado'
 import { DialogoDeConsumo } from '@/components/DialogoDeConsumo'
 import { SeccionDeCobroConQr } from '@/components/CobroConQr'
+import { MapaDeCanchas } from '@/components/MapaDeCanchas'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
@@ -266,6 +271,7 @@ function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
   const { medios, etiqueta: etiquetaDeMedio } = useMediosDePago()
   const [declarado, setDeclarado] = useState('')
   const [enviando, setEnviando] = useState(false)
+  const [cerrando, setCerrando] = useState(false)
 
   const esperado = turno.monto_inicial + (resumen?.efectivo_ventas ?? 0)
 
@@ -281,9 +287,13 @@ function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
   const diasAbierto = diasDeDiferencia(turno.apertura)
   const deOtroDia = diasAbierto > 0
 
+  // 🔑 **Dos tercios para cobrar y uno para el arqueo, no mitad y mitad.**
+  // Cobrar es lo que se hace todo el día; el arqueo se mira dos veces —al abrir
+  // y al cerrar—. Con las columnas iguales, el mapa de canchas se quedaba sin
+  // ancho y las tarjetas entraban de a dos por fila.
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      <div className="space-y-4 rounded-lg border bg-card p-4">
+    <div className="grid gap-4 lg:grid-cols-3">
+      <div className="space-y-4 rounded-lg border bg-card p-4 lg:col-span-2">
         <div className="flex items-center gap-2 font-medium">
           <Wallet className="size-4" /> Cobrar
         </div>
@@ -372,32 +382,67 @@ function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
           Ver los movimientos del turno →
         </Link>
 
-        <div className="grid gap-1.5 border-t pt-3">
-          <Label htmlFor="declarado">Efectivo contado</Label>
-          <Input
-            id="declarado"
-            inputMode="decimal"
-            value={declarado}
-            onChange={(e) => setDeclarado(e.target.value)}
-          />
-        </div>
+        {/* 🔑 **El cierre pasó a un diálogo el 2026-08-29.** El campo «Efectivo
+            contado» y el botón vivían siempre a la vista, en una columna que
+            ocupaba media pantalla, para una acción que se hace **una vez por
+            jornada**. Contar el efectivo tampoco es algo que convenga tener a un
+            click de distraerse: pedirlo en un diálogo, con el esperado al lado,
+            es más parecido a lo que se hace de verdad. */}
         <Button
           variant="outline"
-          disabled={enviando || !declarado.trim()}
-          onClick={async () => {
-            setEnviando(true)
-            try {
-              onCerrado(await caja.cerrar(turno.id, declarado))
-            } catch (e) {
-              onError((e as Error).message)
-            } finally {
-              setEnviando(false)
-            }
-          }}
+          className="w-full"
+          onClick={() => { setDeclarado(''); setCerrando(true) }}
         >
           Cerrar caja
         </Button>
       </div>
+
+      <Dialog open={cerrando} onOpenChange={(o) => { if (!o) setCerrando(false) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cerrar la caja</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            {/* El esperado, otra vez y acá: es contra este número que se compara
+                lo contado, y mandarlo a recordarlo de la pantalla de atrás es
+                cómo se tipea el número equivocado. */}
+            <div className="flex justify-between rounded-md bg-muted px-3 py-2 text-sm">
+              <span className="text-muted-foreground">Esperado en el cajón</span>
+              <span className="font-medium tabular-nums">{pesos(String(esperado))}</span>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="declarado">Efectivo contado</Label>
+              <Input
+                id="declarado"
+                inputMode="decimal"
+                value={declarado}
+                onChange={(e) => setDeclarado(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setCerrando(false)}>
+                Cancelar
+              </Button>
+              <Button
+                disabled={enviando || !declarado.trim()}
+                onClick={async () => {
+                  setEnviando(true)
+                  try {
+                    onCerrado(await caja.cerrar(turno.id, declarado))
+                    setCerrando(false)
+                  } catch (e) {
+                    onError((e as Error).message)
+                  } finally {
+                    setEnviando(false)
+                  }
+                }}
+              >
+                {enviando ? 'Cerrando…' : 'Cerrar caja'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -560,6 +605,15 @@ function jugadoresSugeridos(deporte: string): number {
  * que pasa en un complejo. Fijarlo al total obligaría a cobrar de más o a salir
  * de la Caja para tomar una seña.
  */
+/** El mapa del complejo, y debajo la cuenta que se está cerrando.
+ *
+ * 🔴 **Antes esto era una lista de las canchas que ya debían plata**, y por eso
+ * la pantalla se veía vacía: un complejo de seis canchas con dos cuentas
+ * abiertas mostraba dos renglones de 30 px. Las libres, las que estaban jugando
+ * y las ya cobradas no aparecían — o sea, la pantalla del mostrador no mostraba
+ * el mostrador. Reportado por el humano el 2026-08-29: *"queda muy vacía, no sé,
+ * es rara"*. Ver la nota de `MapaDeCanchas`.
+ */
 function CuentasDeCancha({ turnos, medios, sucursalId, onCobrado, onError }: {
   turnos: TurnoPorCobrar[]
   medios: { valor: string; etiqueta: string }[]
@@ -568,6 +622,40 @@ function CuentasDeCancha({ turnos, medios, sucursalId, onCobrado, onError }: {
   onError: (m: string) => void
 }) {
   const [elegido, setElegido] = useState<number | null>(null)
+  const [canchasDeLaSede, setCanchasDeLaSede] = useState<Cancha[]>([])
+  const [turnosPorCancha, setTurnosPorCancha] = useState<Record<string, Turno[]>>({})
+
+  // 🔑 **El mapa necesita las canchas y la grilla del día, que la lista no
+  // pedía.** `/agenda/por-cobrar` sólo devuelve lo que debe plata; para decir
+  // «libre» o «jugando» hace falta saber qué canchas hay y qué turnos tienen.
+  // Las dos rutas ya existían: no se agregó backend.
+  useEffect(() => {
+    if (sucursalId === null) return
+    apiCanchas
+      .listar()
+      .then((cs) => setCanchasDeLaSede(
+        (Array.isArray(cs) ? cs : []).filter((c) => c.sucursal_id === sucursalId && c.activa),
+      ))
+      .catch(() => setCanchasDeLaSede([]))
+  }, [sucursalId])
+
+  useEffect(() => {
+    if (sucursalId === null) return
+    const hoy = diaISO(new Date())
+    agenda
+      .semana(sucursalId, hoy)
+      // Del bloque de la semana se usa **sólo el día de hoy**: la Caja es de la
+      // jornada. Se filtra acá y no se pide otra ruta porque ésta ya existe y la
+      // Agenda la usa; un endpoint nuevo por un filtro sería backend de más.
+      .then((s) => {
+        const dia: Record<string, Turno[]> = {}
+        for (const [canchaId, porDia] of Object.entries(s?.canchas ?? {})) {
+          dia[canchaId] = porDia?.[hoy] ?? []
+        }
+        setTurnosPorCancha(dia)
+      })
+      .catch(() => setTurnosPorCancha({}))
+  }, [sucursalId, turnos])
 
   // 🔴 **La elección se suelta cuando el turno deja la lista.** Un turno cobrado
   // entero desaparece de `turnos`, y con el id viejo guardado el panel se
@@ -579,39 +667,60 @@ function CuentasDeCancha({ turnos, medios, sucursalId, onCobrado, onError }: {
     }
   }, [elegido, turnos])
 
-  if (turnos.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        No hay canchas con cuenta abierta hoy.
-      </p>
-    )
-  }
-
   const turno = turnos.find((t) => t.reserva_id === elegido) ?? null
+  const canchaElegida = turno?.cancha_id ?? null
+  // Las cuentas de la cancha abierta. Son varias cuando dos turnos del día
+  // quedaron sin cerrar: entonces hay que elegir cuál se cobra.
+  const deLaCancha = canchaElegida === null
+    ? []
+    : turnos.filter((t) => t.cancha_id === canchaElegida)
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-1">
-        {turnos.map((t) => (
-          <button
-            key={t.reserva_id}
-            type="button"
-            aria-pressed={t.reserva_id === elegido}
-            onClick={() => setElegido(t.reserva_id === elegido ? null : t.reserva_id)}
-            className={
-              'flex min-w-0 items-center gap-2 rounded-md border px-2 py-1.5 text-left text-sm '
-              + (t.reserva_id === elegido ? 'border-primary bg-accent' : 'hover:bg-accent/50')
-            }
-          >
-            <span className="min-w-0 flex-1 truncate">
-              <span className="font-medium">{t.cancha}</span>
-              <span className="text-muted-foreground"> · {hora(t.comienza_at)}</span>
-              {t.cliente ? <span className="text-muted-foreground"> · {t.cliente}</span> : null}
-            </span>
-            <span className="shrink-0 tabular-nums">{pesos(t.pendiente)}</span>
-          </button>
-        ))}
-      </div>
+      <MapaDeCanchas
+        canchas={canchasDeLaSede}
+        turnosPorCancha={turnosPorCancha}
+        cuentas={turnos}
+        ahora={new Date()}
+        elegida={canchaElegida}
+        onElegir={(canchaId) => {
+          if (canchaId === null) { setElegido(null); return }
+          // Se abre la primera cuenta de esa cancha; si hay más, el selector de
+          // abajo deja cambiar.
+          const primera = turnos.find((t) => t.cancha_id === canchaId)
+          setElegido(primera?.reserva_id ?? null)
+        }}
+      />
+
+      {/* 🔑 **El «no hay nada que cobrar» se dice igual, aunque el mapa ya no
+          esté vacío.** Con la lista, cero cuentas era una pantalla en blanco y
+          este cartel era lo único que había. Ahora se ven las canchas libres, y
+          sin esta línea el encargado tendría que deducir de cuatro tarjetas sin
+          ámbar que no le falta cobrar nada. Deducir no es lo mismo que leer. */}
+      {turnos.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          No hay canchas con cuenta abierta hoy.
+        </p>
+      )}
+
+      {deLaCancha.length > 1 && (
+        <div className="flex flex-wrap gap-1">
+          {deLaCancha.map((t) => (
+            <button
+              key={t.reserva_id}
+              type="button"
+              aria-pressed={t.reserva_id === elegido}
+              onClick={() => setElegido(t.reserva_id)}
+              className={
+                'rounded-md border px-2 py-1 text-sm '
+                + (t.reserva_id === elegido ? 'border-primary bg-accent' : 'hover:bg-accent/50')
+              }
+            >
+              {hora(t.comienza_at)} · {t.cliente} · {pesos(t.pendiente)}
+            </button>
+          ))}
+        </div>
+      )}
 
       {turno && (
         <CierreDeCuenta
