@@ -131,11 +131,15 @@ export function DetalleDeReserva({
             del componente base: se veía por scroll, de a pedazos, y las
             acciones del turno quedaban abajo de todo.
 
-            Las columnas son **explícitas y no auto-flow**: cada sección se
-            esconde sola cuando la instancia no tiene buffet, o facturación, o
-            credenciales de MercadoPago, así que un `grid` de hijos sueltos
-            reacomodaría todo en cuanto una devuelva `null`. Con dos envoltorios
-            fijos, lo que falta deja un hueco y lo demás no se mueve.
+            > ⚠️ **Acá decía que las columnas tenían que ser dos envoltorios
+            > fijos y no auto-flow**, con el argumento de que si una sección
+            > devuelve `null` el reparto se reacomoda. El argumento estaba dado
+            > vuelta, y se vio en `dev` el mismo día: **reacomodarse es lo que
+            > hay que hacer**. Con envoltorios fijos, la sección ausente deja un
+            > hueco del alto de la columna de al lado — en el caso corriente del
+            > mostrador, turno facturado y sin buffet, una columna medía **0 px**
+            > y la otra se llevaba todo. El reparto lo hace ahora `columns-2`;
+            > ver la nota de ese bloque.
 
             Abajo de `sm` se apila igual que siempre: en un celular dos columnas
             de 160 px no son una mejora.
@@ -163,38 +167,62 @@ export function DetalleDeReserva({
             </div>
           </div>
 
-          {/* Izquierda: lo que se le carga al turno y el comprobante que sale de
-              eso. El orden consumo → factura es el mismo de antes y el mismo en
-              que se hacen las cosas — ver la nota de `SeccionDeConsumo`. */}
-          <div className="space-y-3">
-            <SeccionDeConsumo
-              turno={turno}
-              cancha={cancha}
-              abierto={abierto}
-              onCambio={onCambiada}
-            />
-            <SeccionDeFactura reservaId={turno.reserva_id} abierto={abierto} />
-          </div>
+          {/* 🔴 **`columns-2` y no dos envoltorios fijos, y esa es la
+              diferencia que importa.** Con columnas fijas, la sección que no
+              aparece —el buffet de un turno sin consumos, la factura de uno sin
+              facturar— deja un hueco del alto de la otra columna, y en el caso
+              corriente del mostrador —turno facturado y sin buffet— la
+              izquierda queda literalmente en **0 px** mientras la derecha se
+              lleva todo el alto y el diálogo vuelve a scrollear.
 
-          {/* Derecha: las tres maneras de que el turno quede saldado —el QR del
-              mostrador, el cobro por medio de pago, y fiarlo a la cuenta
-              corriente—. Juntas porque son alternativas entre sí: el encargado
-              elige una, y verlas en la misma columna es lo que hace que se lea
-              como una elección. */}
-          <div className="space-y-3">
-            <SeccionDeCobroConQr
-              reservaId={turno.reserva_id}
-              estado={estado}
-              abierto={abierto}
-              onCobrado={onCambiada}
-            />
-            <SeccionDeCobro
-              reservaId={turno.reserva_id}
-              estado={estado}
-              abierto={abierto}
-              onCobrado={onCambiada}
-            />
-            <SeccionDeCuentaCorriente turno={turno} abierto={abierto} />
+              `columns` reparte por altura y lo hace el navegador, así que las
+              dos columnas quedan parejas **con las secciones que haya**, sin
+              que el padre tenga que saber cuáles renderizaron.
+
+              Las tres clases de cada envoltorio son las tres condiciones:
+              `break-inside-avoid` para que un recuadro no se parta al medio
+              entre columnas, `mb-3` porque `space-y-*` no separa a través de un
+              salto de columna, y **`empty:hidden` porque un envoltorio cuyo
+              componente devolvió `null` sigue existiendo en el DOM** y su
+              margen contaría igual.
+
+              El `-mb-3` del contenedor **no es cosmética**: el último bloque de
+              cada columna deja su `mb-3` colgando —cosa que `space-y-*` no
+              hacía, porque no le pone margen al último— y eso alcanzaba para
+              pasarse **2 px** del `max-h-[85vh]` en el caso corriente y traer
+              de vuelta el scroll por dos píxeles. Medido a 1366×625: 531 contra
+              un tope de 529. */}
+          <div className="-mb-3 sm:col-span-2 sm:columns-2 sm:gap-3">
+            <div className="mb-3 break-inside-avoid empty:hidden">
+              <SeccionDeConsumo
+                turno={turno}
+                cancha={cancha}
+                abierto={abierto}
+                onCambio={onCambiada}
+              />
+            </div>
+            <div className="mb-3 break-inside-avoid empty:hidden">
+              <SeccionDeCobroConQr
+                reservaId={turno.reserva_id}
+                estado={estado}
+                abierto={abierto}
+                onCobrado={onCambiada}
+              />
+            </div>
+            <div className="mb-3 break-inside-avoid empty:hidden">
+              <SeccionDeCobro
+                reservaId={turno.reserva_id}
+                estado={estado}
+                abierto={abierto}
+                onCobrado={onCambiada}
+              />
+            </div>
+            <div className="mb-3 break-inside-avoid empty:hidden">
+              <SeccionDeCuentaCorriente turno={turno} abierto={abierto} />
+            </div>
+            <div className="mb-3 break-inside-avoid empty:hidden">
+              <SeccionDeFactura reservaId={turno.reserva_id} abierto={abierto} />
+            </div>
           </div>
 
           {/* El pie también cruza las dos columnas: cambiar el estado es del
