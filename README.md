@@ -131,14 +131,32 @@ log —no suponiéndolas.
 | `scripts/enviar_avisos.py` | 5 min | **No sale ningún aviso** — ni confirmación, ni recordatorio, ni cancelación. Es el interruptor de la función (ADR-015) |
 
 ```bash
-*/5 * * * * docker exec libraclub-dev python /app/scripts/vencer_provisorias.py >> /var/log/libraclub-provisorias.log 2>&1
-*/5 * * * * docker exec libraclub-dev python /app/scripts/enviar_avisos.py >> /var/log/libraclub-avisos.log 2>&1
+*/5 * * * * docker exec libraclub-dev python /app/scripts/vencer_provisorias.py >> /var/log/libraclub_vencer.log 2>&1
+*/5 * * * * docker exec libraclub-dev python /app/scripts/enviar_avisos.py >> /var/log/libraclub_avisos.log 2>&1
 ```
 
+> Los nombres de log van con **guión bajo** y son los que están instalados de
+> verdad en el VPS. La primera versión de este bloque los escribió con guión
+> medio y no coincidía con ninguno de los dieciséis logs del servidor: un
+> comando de ejemplo que no es el comando real manda a buscar un archivo que no
+> existe.
+
+> ⚠️ **Un cron nuevo lleva su log a `/etc/logrotate.d/libra-crons`**, que tiene
+> una lista explícita y no un glob. Sin esa línea el archivo crece sin techo, y
+> uno de `*/5` escribe 288 veces por día.
+
 > 🔴 **Correr el script a mano no verifica un cron.** Prueba el script, no la
-> entrada: hay que ver la línea disparar en `syslog` y su log escrito. Un `%` en
-> un crontab se convierte en salto de línea, así que una línea que corre perfecto
-> a mano se puede partir al instalarla.
+> entrada. Las tres capas: a mano; con `env -i PATH=/usr/bin:/bin /bin/sh -c` y
+> la línea exacta —el shell y el PATH que usa cron, que no son los de la
+> sesión—; y viendo la línea disparar sola, con su `CMD` en `syslog` y su log
+> escrito. La tercera es la que no se puede deducir: un `%` en un crontab **se
+> convierte en salto de línea**, así que una línea que corre perfecto a mano se
+> parte al instalarla.
+
+> 🔑 **Y el control es el crontab entero, no la línea nueva.** Editarlo es
+> reemplazarlo: guardar un respaldo antes y después comparar con `comm` cuántas
+> líneas del respaldo **ya no están** — tiene que dar cero. Mirar sólo que la
+> línea nueva aparezca no distingue un crontab que creció de uno que se truncó.
 
 ## Tests
 
