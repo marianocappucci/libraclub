@@ -7,11 +7,11 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from libracore import medios_pago
 from pydantic import BaseModel, Field
 
-from app.auth import get_current_user, require_admin, require_staff
+from app.auth import get_current_user, require_staff
 from app.servicios import caja as servicio
 
 router = APIRouter(prefix="/api/caja", tags=["caja"])
@@ -55,6 +55,10 @@ class TurnoSalida(BaseModel):
     #: 2026-08-28, que nacieron sin caja y quedaron en la de por defecto.
     caja_id: int | None = None
     caja_nombre: str = ""
+    #: Quién abrió el turno. Lo devuelven **todas** las consultas de turnos del
+    #: motor (`JOIN usuarios`) y hasta el 2026-08-29 esto lo descartaba: sin él,
+    #: el historial de un admin es una lista de cierres sin dueño.
+    usuario_nombre: str = ""
     apertura: str
     cierre: str | None = None
     monto_inicial: float
@@ -82,6 +86,7 @@ def _a_salida(turno: dict) -> TurnoSalida:
     return TurnoSalida(
         id=turno["id"], usuario_id=turno["usuario_id"], apertura=str(turno["apertura"]),
         caja_id=turno.get("caja_id"), caja_nombre=(caja or {}).get("nombre", ""),
+        usuario_nombre=turno.get("usuario_nombre") or "",
         cierre=str(turno["cierre"]) if turno.get("cierre") else None,
         monto_inicial=float(turno["monto_inicial"]),
         monto_declarado_cierre=(
@@ -242,6 +247,51 @@ def cerrar(
 
 
 @router.get("/turnos", response_model=list[TurnoSalida])
-def listar(_: object = Depends(require_admin), limite: int = 50):
-    """El historial. De admin: es la pantalla donde se miran los cierres ajenos."""
-    return [_a_salida(t) for t in servicio.historial(limite)]
+def listar(
+    usuario: dict = Depends(require_staff),
+    limite: int = Query(default=50, ge=1, le=200),
+):
+    """El historial: **todos** los turnos para un admin, los propios para el resto.
+
+    🔑 **Dejó de ser sólo de admin el 2026-08-29**, copiando el criterio de
+    [[contalibra]]. Con `require_admin` la pantalla no existía para el encargado
+    del mostrador, que es justamente quien quiere saber cuánto cerró ayer. Lo
+    que un encargado no puede ver son los cierres **ajenos**, y eso lo garantiza
+    el filtro por `usuario_id` — no el gate de rol.
+
+    🔴 **El filtro se aplica en la consulta y no en Python.** Traer todo y
+    descartar después deja los turnos ajenos viajando por la red hasta el
+    borde, y un `limite` que se llena con turnos que después se descartan
+    devuelve menos filas de las pedidas sin avisar.
+
+    `limite` va acotado: sin cota, un `?limite=100000` es un pedido que el
+    motor atiende.
+    """
+    solo_los_suyos = None if usuario.get("role") == "admin" else int(usuario["id"])
+    return [_a_salida(t) for t in servicio.historial(limite, usuario_id=solo_los_suyos)]
+
+
+@router.get("/turnos/{turno_id}")
+def detalle(turno_id: int, usuario: dict = Depends(require_staff)):
+    """Un turno con su arqueo. Es a dónde lleva el historial.
+
+    Devuelve la misma forma que `/turnos/actual` —`{turno, resumen}`— a
+    propósito: la pantalla del detalle y la de la caja abierta muestran lo
+    mismo, y dos formas distintas para el mismo par serían dos formateos que
+    mantener.
+
+    🔴 **Sólo el dueño del turno o un admin**, mismo criterio que el cierre. Un
+    arqueo dice cuánta plata contó una persona y cuánto le faltó: no es un dato
+    que cualquier encargado tenga por qué ver del turno de otro.
+
+    ⚠️ **`turno_id` es `int`, y eso es lo que impide que esta ruta se coma
+    `/turnos/actual`.** Las dos tienen la misma forma; lo único que las separa
+    es que el convertidor de FastAPI no matchea `actual` contra un entero. Si
+    alguna vez este parámetro pasa a `str`, la caja abierta deja de responder.
+    """
+    turno = servicio.turno_por_id(turno_id)
+    if turno is None:
+        raise HTTPException(404, "no existe ese turno")
+    if int(turno["usuario_id"]) != int(usuario["id"]) and usuario.get("role") != "admin":
+        raise HTTPException(403, "sólo podés ver tu propia caja")
+    return {"turno": _a_salida(turno), "resumen": servicio.resumen(turno_id)}

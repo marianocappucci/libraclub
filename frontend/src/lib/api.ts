@@ -579,6 +579,9 @@ export interface TurnoDeCaja {
    *  2026-08-28, que nacieron sin caja. */
   caja_id: number | null
   caja_nombre: string
+  /** Quién abrió el turno. Es la columna que más importa del historial de un
+   *  admin: una lista de cierres sin dueño no dice nada. */
+  usuario_nombre: string
   apertura: string
   cierre: string | null
   monto_inicial: number
@@ -655,7 +658,13 @@ export const caja = {
     api.post<TurnoDeCaja & { diferencia_de_caja: number }>(
       `/api/caja/turnos/${turnoId}/cerrar`, { monto_declarado, notas },
     ),
-  historial: () => api.get<TurnoDeCaja[]>('/api/caja/turnos'),
+  /** Los turnos: **todos** para un admin, los propios para un encargado. El
+   *  filtro lo aplica el backend en la consulta — acá no se filtra nada. */
+  historial: (limite = 50) => api.get<TurnoDeCaja[]>(`/api/caja/turnos?limite=${limite}`),
+  /** Un turno con su arqueo. Misma forma que `actual()` a propósito: la
+   *  pantalla del detalle y la de la caja abierta muestran lo mismo. */
+  detalle: (turnoId: number) =>
+    api.get<{ turno: TurnoDeCaja; resumen: ResumenDeCaja }>(`/api/caja/turnos/${turnoId}`),
 }
 
 export const sesion = {

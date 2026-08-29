@@ -281,8 +281,17 @@ def turno_por_id(turno_id: int) -> dict | None:
     return db_turnos.get_turno(turno_id)
 
 
-def historial(limite: int = 50) -> list[dict]:
-    return db_turnos.get_all_turnos(limit=limite)
+def historial(limite: int = 50, usuario_id: int | None = None) -> list[dict]:
+    """Los últimos turnos, todos o los de un usuario.
+
+    ⚠️ **La consulta del motor hace `JOIN usuarios`, no `LEFT JOIN`.** Los
+    usuarios de este producto viven del lado del dominio y en LibraCore hay un
+    **espejo** (`espejar_usuario`); un turno cuyo dueño no esté espejado
+    **desaparece de esta lista sin error**. Hoy no puede pasar —abrir un turno
+    espeja primero— pero si alguna vez se borra una fila del espejo, el síntoma
+    va a ser un historial al que le faltan turnos, no una excepción.
+    """
+    return db_turnos.get_all_turnos(limit=limite, usuario_id=usuario_id)
 
 
 # ── El cobro de un turno ───────────────────────────────────────────────────
