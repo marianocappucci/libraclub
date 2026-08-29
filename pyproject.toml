@@ -37,7 +37,7 @@ dependencies = [
     # —dominio, casos de uso y repositorio SQLite/PostgreSQL— y no solo el
     # dominio como en LibraGenda: aca no hay una persistencia propia que valga
     # la pena escribir, y VentaLibra ya probo ese camino.
-    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.8.0",
+    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.9.1",
 ]
 
 [project.optional-dependencies]
