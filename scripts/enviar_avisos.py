@@ -12,7 +12,10 @@ las 20:00 recibe el mail a más tardar 20:05— y no importa para los
 recordatorios, que se miden en horas.
 
     */5 * * * * docker exec libraclub-dev python /app/scripts/enviar_avisos.py \
-        >> /var/log/libraclub-avisos.log 2>&1
+        >> /var/log/libraclub_avisos.log 2>&1
+
+Instalado en `dev` el 2026-08-29. El log va además a la lista explícita de
+`/etc/logrotate.d/libra-crons`: sin eso crece sin techo, a 288 corridas por día.
 
 ⚠️ **Si el cron estuvo caído más de dos horas, las confirmaciones de esa ventana
 no salen.** Es deliberado: la ventana es lo que impide que la primera corrida le
