@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from libraauth.repository import UsernameTaken, UserRepository
 from pydantic import BaseModel, Field
 
-from app.auth import get_current_user, require_admin_o_servicio
+from app.auth import require_admin_o_servicio_o_panel
 
 router = APIRouter(
     prefix="/api/usuarios",
@@ -30,7 +30,14 @@ router = APIRouter(
     # Sin `LIBRA_SERVICE_TOKEN` en el entorno se comporta exactamente igual que
     # `require_admin`, así que ponerlo en una instancia que no define la variable
     # no abre nada.
-    dependencies=[Depends(require_admin_o_servicio)],
+    # 🔑 **El único router de este producto que acepta la credencial del
+    # panel.** El resto de lo que gatea `require_admin_o_servicio` ---y son
+    # siete lugares--- sigue cerrado para el panel: el guard se aplica router
+    # por router justamente para no abrirlos todos de una.
+    #
+    # Lo que el panel hace acá es dar de alta y de baja empleados en ESTA
+    # instancia. Ver el comentario del import en `app/auth.py`.
+    dependencies=[Depends(require_admin_o_servicio_o_panel)],
 )
 
 Rol = Literal["admin", "staff"]
@@ -109,7 +116,7 @@ def editar(
     id_: str,
     datos: UsuarioEditado,
     usuarios: UserRepository = Depends(repositorio),
-    actual: dict = Depends(get_current_user),
+    actual: dict = Depends(require_admin_o_servicio_o_panel),
 ):
     """🔴 Un admin **no puede desactivarse ni bajarse de rol a sí mismo**.
 
@@ -118,10 +125,21 @@ def editar(
     la única salida es entrar a la base. La regla mira el usuario **de la
     sesión**, no el cuerpo del pedido.
 
-    > Cuando quien pide es el backoffice —token de servicio, sin sesión de
-    > usuario— `actual` viene vacío y la regla no aplica: el superadmin no es
-    > usuario de este producto, así que no se puede estar desactivando a sí
-    > mismo. Es lo que permite destrabar una instancia desde el panel.
+    > Cuando quien pide es un token —el backoffice, o el panel del cliente— la
+    > identidad no es un usuario de este producto (`id: None`), así que la regla
+    > no aplica: no se puede estar desactivando a sí mismo. Es lo que permite
+    > destrabar una instancia desde afuera.
+
+    ⚠️ **Ese párrafo describía algo que NO pasaba.** Hasta el 2026-08-29 esta
+    ruta pedía `Depends(get_current_user)`, que corta con **401 sin sesión**:
+    el token de servicio ni llegaba a evaluar la regla. Medido ese día, con el
+    token del backoffice, `PUT /api/usuarios/{id}` y `DELETE` daban 401 mientras
+    `POST`, `GET` y `PUT .../password` andaban. O sea que el backoffice podía
+    crear usuarios y cambiarles la clave, pero **no editarlos ni darlos de
+    baja** — y el comentario decía que sí.
+
+    La identidad ahora sale del mismo guard que gatea el router, así que un
+    token entra y una sesión sigue trayendo su usuario.
     """
     if actual and str(actual.get("id")) == str(id_):
         if not datos.active:
@@ -157,7 +175,7 @@ def cambiar_clave(
 def eliminar(
     id_: str,
     usuarios: UserRepository = Depends(repositorio),
-    actual: dict = Depends(get_current_user),
+    actual: dict = Depends(require_admin_o_servicio_o_panel),
 ):
     """Tampoco se puede borrar a sí mismo, por lo mismo que no puede desactivarse."""
     if actual and str(actual.get("id")) == str(id_):

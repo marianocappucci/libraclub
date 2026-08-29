@@ -32,6 +32,23 @@ from libraauth.session_auth import (
     json_api_require_admin_o_servicio as _require_admin_o_servicio,
 )
 from libraauth.session_auth import (
+    # 🔑 **El gate viejo MÁS la credencial del panel**, y sólo para el router de
+    # usuarios. Es lo que le permite al panel del dueño dar de alta y de baja
+    # empleados en las instancias de ese cliente desde un solo lugar: un
+    # empleado que trabaja en dos sedes hoy necesita dos usuarios creados a
+    # mano, uno en cada sistema.
+    #
+    # 🔴 **La credencial del panel es POR INSTANCIA**, a diferencia del
+    # `LIBRA_SERVICE_TOKEN`, que es uno por producto y lo comparten todas sus
+    # instancias. Ésa es toda la razón de que exista este guard en vez de
+    # darle al panel el token de servicio: con éste, una credencial filtrada
+    # compromete una instancia; con aquél, todas las del producto.
+    #
+    # Sigue siendo opt-in por ausencia: sin `LIBRA_PANEL_TOKEN` en el entorno
+    # se comporta exactamente como `require_admin_o_servicio`.
+    json_api_require_admin_o_servicio_o_panel as _require_admin_o_servicio_o_panel,
+)
+from libraauth.session_auth import (
     json_api_require_role as _require_role,
 )
 from libraauth.session_auth import (
@@ -64,6 +81,9 @@ get_current_user = _que_recuerde_al_usuario(_get_current_user)
 require_admin = _que_recuerde_al_usuario(_require_admin)
 require_staff = _que_recuerde_al_usuario(_require_staff)
 require_admin_o_servicio = _que_recuerde_al_usuario(_require_admin_o_servicio)
+require_admin_o_servicio_o_panel = _que_recuerde_al_usuario(
+    _require_admin_o_servicio_o_panel
+)
 
 
 def require_role(*roles: str):
@@ -74,7 +94,8 @@ def require_role(*roles: str):
 __all__ = [
     "SessionAuth", "UserRepository", "construir_session_auth",
     "get_current_user", "get_session_auth",
-    "require_admin", "require_admin_o_servicio", "require_role", "require_staff",
+    "require_admin", "require_admin_o_servicio",
+    "require_admin_o_servicio_o_panel", "require_role", "require_staff",
 ]
 
 #: Nombre de la cookie. Propio por producto: dos instancias de productos

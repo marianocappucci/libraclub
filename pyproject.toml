@@ -14,7 +14,7 @@ dependencies = [
     # anda en dev local sin identidad SSH propia. Cuando la familia pase a
     # repos privados, el build reescribe la URL a `git+ssh` con la deploy key
     # de solo lectura del motor.
-    "libraauth @ git+https://github.com/marianocappucci/libraauth.git@v0.34.0",
+    "libraauth @ git+https://github.com/marianocappucci/libraauth.git@v0.35.0",
     # Entra en F1 sólo por `respaldo`: una instancia sin backup no se puede
     # poner en produccion. Su alcance crece en F2 (`mp_api`, `pdf_generator`)
     # y F3 (ARCA) — ver ARCHITECTURE.md.

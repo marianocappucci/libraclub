@@ -196,3 +196,184 @@ def test_username_repetido_da_409(api):
         "/api/usuarios", json={"username": "dup", "name": "D2", "password": "x"}
     )
     assert segundo.status_code == 409
+
+
+# -- La credencial del panel del cliente ------------------------------------
+#
+# El panel de un dueño multisucursal da de alta y de baja empleados en SUS
+# instancias desde un solo lugar. Hasta libraauth v0.35.0 su credencial
+# autorizaba una sola ruta, `/api/resumen`, de solo lectura.
+#
+# 🔴 **La credencial del panel es POR INSTANCIA**, a diferencia del token de
+# servicio, que es uno por producto y lo comparten todas sus instancias. Esa es
+# toda la razon de que exista este camino en vez de darle al panel el otro.
+
+TOKEN_PANEL = "token-de-panel-de-prueba-no-es-real"
+CABECERA_PANEL = "X-Panel-Auth"
+
+
+@pytest.fixture
+def app_con_panel(engine, sesion, monkeypatch):
+    """La app con `LIBRA_PANEL_TOKEN` definido, como en una instancia que
+    participa de un panel."""
+    monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
+    monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
+    monkeypatch.setenv("LIBRA_PANEL_TOKEN", TOKEN_PANEL)
+    monkeypatch.delenv("LIBRA_SERVICE_TOKEN", raising=False)
+    AuthBase.metadata.drop_all(engine)
+    AuthBase.metadata.create_all(engine)
+    yield crear_app(_config())
+    AuthBase.metadata.drop_all(engine)
+
+
+def test_el_panel_da_de_alta_un_empleado(app_con_panel):
+    """Lo que el aprovisionamiento necesita: crear el usuario **sin sesion**.
+
+    El panel no tiene cookie de esta instancia y no la va a tener: llega con su
+    credencial y nada mas.
+    """
+    cliente = TestClient(app_con_panel, base_url="https://testserver")
+    r = cliente.post(
+        "/api/usuarios",
+        headers={CABECERA_PANEL: TOKEN_PANEL},
+        json={"username": "encargado", "name": "Encargado",
+              "password": "clave-del-encargado", "role": "staff"},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["username"] == "encargado"
+
+    # Y lo ve listado, que es lo que la pantalla del panel necesita para
+    # mostrar donde esta dado de alta cada empleado.
+    listado = cliente.get("/api/usuarios", headers={CABECERA_PANEL: TOKEN_PANEL})
+    assert listado.status_code == 200, listado.text
+    assert "encargado" in [u["username"] for u in listado.json()]
+
+
+def test_y_lo_da_de_baja(app_con_panel):
+    """El pedido era darlos de alta **y de baja** desde un solo lugar."""
+    cliente = TestClient(app_con_panel, base_url="https://testserver")
+    creado = cliente.post(
+        "/api/usuarios",
+        headers={CABECERA_PANEL: TOKEN_PANEL},
+        json={"username": "temporal", "name": "Temporal",
+              "password": "clave-temporal", "role": "staff"},
+    ).json()
+    r = cliente.delete(f"/api/usuarios/{creado['id']}",
+                       headers={CABECERA_PANEL: TOKEN_PANEL})
+    assert r.status_code == 204, r.text
+
+
+def test_EL_PANEL_NO_ABRE_EL_RESTO_DE_LAS_RUTAS_DE_ADMIN(app_con_panel):
+    """🔴 El test que justifica que el guard se aplique router por router.
+
+    De `require_admin_o_servicio` cuelgan siete lugares en este producto.
+    Ampliar aquel guard le habria dado al panel todos de una, sin que nadie lo
+    pidiera. `/api/admin/resumen` es uno de esos, y tiene que seguir cerrado.
+
+    ⚠️ Ojo con no confundirlo con `/api/resumen`, que **si** es del panel: ese
+    lo monta la factory de LibraCore con su propio guard y es de solo lectura.
+    Son dos rutas distintas con nombres parecidos.
+
+    ⚠️ Y la ruta es `/admin/resumen`, **sin** `/api`: el router de admin lleva
+    su propio prefijo. La primera version de este test pegaba en
+    `/api/admin/resumen` y recibia un 404, que se confunde con "cerrado" y
+    habria dejado pasar la ampliacion sin avisar.
+    """
+    cliente = TestClient(app_con_panel, base_url="https://testserver")
+    # El control positivo: la credencial es buena y abre lo que tiene que abrir.
+    assert cliente.get(
+        "/api/usuarios", headers={CABECERA_PANEL: TOKEN_PANEL}
+    ).status_code == 200
+    # Y no abre lo demas. 401 y no 404: la ruta EXISTE y esta cerrada.
+    r = cliente.get("/admin/resumen", headers={CABECERA_PANEL: TOKEN_PANEL})
+    assert r.status_code == 401, (
+        f"la credencial del panel abrio /admin/resumen: {r.status_code}"
+    )
+
+
+def test_sin_la_variable_la_credencial_del_panel_no_sirve(engine, sesion, monkeypatch):
+    """Opt-in por ausencia: una instancia que no participa de ningun panel se
+    comporta exactamente como antes, sin tocarle el compose."""
+    monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
+    monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
+    monkeypatch.delenv("LIBRA_PANEL_TOKEN", raising=False)
+    monkeypatch.delenv("LIBRA_SERVICE_TOKEN", raising=False)
+    AuthBase.metadata.drop_all(engine)
+    AuthBase.metadata.create_all(engine)
+    try:
+        cliente = TestClient(crear_app(_config()), base_url="https://testserver")
+        r = cliente.get("/api/usuarios", headers={CABECERA_PANEL: TOKEN_PANEL})
+        assert r.status_code == 401, r.text
+    finally:
+        AuthBase.metadata.drop_all(engine)
+
+
+def test_el_token_de_servicio_SIGUE_entrando(app_con_token):
+    """No se le saca nada al backoffice: el guard nuevo es el viejo mas el panel.
+
+    Sin este control, cambiar el gate del router podria haberle cerrado la
+    puerta a `admin.libraclub.com.ar` ---y el sintoma aparece del otro lado, en
+    una pestaña que contesta 403---.
+    """
+    cliente = TestClient(app_con_token, base_url="https://testserver")
+    assert cliente.get("/api/usuarios", headers={CABECERA: TOKEN}).status_code == 200
+
+
+def test_un_token_de_panel_equivocado_no_entra(app_con_panel):
+    cliente = TestClient(app_con_panel, base_url="https://testserver")
+    r = cliente.get("/api/usuarios", headers={CABECERA_PANEL: "otra-cosa"})
+    assert r.status_code == 401
+
+
+# -- El hallazgo: ningun token podia editar ni dar de baja -------------------
+#
+# 🔴 Medido el 2026-08-29: con el token de servicio, `PUT /api/usuarios/{id}` y
+# `DELETE` daban **401** mientras `POST`, `GET` y `PUT .../password` andaban. Las
+# dos rutas pedian `Depends(get_current_user)`, que corta sin sesion.
+#
+# O sea que el backoffice del proveedor podia crear usuarios y cambiarles la
+# clave, pero **no editarlos ni darlos de baja** ---y el docstring de `editar`
+# decia explicitamente que si---. No lo encontro una revision del codigo: lo
+# encontro necesitar el `DELETE` para el aprovisionamiento del panel.
+
+
+def test_EL_TOKEN_DE_SERVICIO_PUEDE_EDITAR_Y_DAR_DE_BAJA(app_con_token):
+    """Los seis verbos del router, con el token del backoffice."""
+    cliente = TestClient(app_con_token, base_url="https://testserver")
+    h = {CABECERA: TOKEN}
+    creado = cliente.post("/api/usuarios", headers=h, json={
+        "username": "empleado", "name": "Empleado",
+        "password": "clave-del-empleado", "role": "staff"}).json()
+
+    editar = cliente.put(f"/api/usuarios/{creado['id']}", headers=h, json={
+        "name": "Empleado editado", "role": "staff", "active": True})
+    assert editar.status_code == 200, editar.text
+    assert editar.json()["name"] == "Empleado editado"
+
+    assert cliente.delete(f"/api/usuarios/{creado['id']}", headers=h).status_code == 204
+
+
+def test_el_panel_tambien_edita_y_da_de_baja(app_con_panel):
+    """Es lo que "dar de alta y de baja desde un solo lugar" necesita."""
+    cliente = TestClient(app_con_panel, base_url="https://testserver")
+    h = {CABECERA_PANEL: TOKEN_PANEL}
+    creado = cliente.post("/api/usuarios", headers=h, json={
+        "username": "empleado2", "name": "Empleado 2",
+        "password": "clave-del-empleado2", "role": "staff"}).json()
+
+    assert cliente.put(f"/api/usuarios/{creado['id']}", headers=h, json={
+        "name": "Empleado 2", "role": "staff", "active": False}).status_code == 200
+    assert cliente.delete(f"/api/usuarios/{creado['id']}", headers=h).status_code == 204
+
+
+def test_Y_UN_ADMIN_SIGUE_SIN_PODER_BORRARSE_A_SI_MISMO(api):
+    """🔴 El control de que aflojar la identidad no aflojo la regla.
+
+    La regla mira el usuario **de la sesion**; con un token la identidad no es
+    un usuario de este producto (`id: None`) y por eso no aplica. Cambiar de
+    donde sale `actual` podria haberla desactivado tambien para las sesiones, y
+    con un solo administrador eso deja la instancia sin nadie que administre.
+    """
+    yo = api.get("/auth/me").json()
+    r = api.delete(f"/api/usuarios/{yo['id']}")
+    assert r.status_code == 409, r.text
