@@ -20,6 +20,7 @@ import { Clientes } from '@/pages/Clientes'
 import { Login } from '@/pages/Login'
 import { ForgotPassword, ResetPassword } from '@/pages/PasswordReset'
 import { Logs } from '@/pages/Logs'
+import { Devoluciones } from '@/pages/Devoluciones'
 import { MpBandeja } from '@/pages/MpBandeja'
 import { Sucursales } from '@/pages/Sucursales'
 import { Tarifas } from '@/pages/Tarifas'
@@ -142,6 +143,10 @@ function Backoffice() {
               de API, y una tercera URL para lo mismo sólo obligaría a
               acordarse de cuál usa cada producto. */}
           <Route path="/mp-bandeja" element={<MpBandeja />} />
+          {/* Las devoluciones que quedaron debiendo. Al lado de la bandeja
+              porque son la misma clase de trabajo: plata de MercadoPago que
+              hay que terminar de resolver, no el arqueo del mostrador. */}
+          <Route path="/devoluciones" element={<Devoluciones />} />
           <Route path="/configuracion" element={<Configuracion />} />
           <Route path="/logs" element={<Logs />} />
           {/* Las rutas no llevan guarda de rol: el permiso lo decide el

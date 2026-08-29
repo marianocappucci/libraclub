@@ -461,3 +461,62 @@ interruptor; no se suma.
 y `resolver_smtp_config`: el mismo servidor que ya configura «Configuración →
 Correo» y que manda el mail de recuperación de contraseña. Un segundo lugar donde
 cargar un SMTP es un lugar más donde cargarlo mal.
+
+## ADR-016 — Cancelar siempre se puede; la ventana decide la plata
+
+**Fecha:** 2026-08-29 · **Estado:** aceptada
+
+Hasta acá cancelar era gratis y sin consecuencias: el turno se liberaba y la seña
+se quedaba donde estaba, **ni devuelta ni anotada como no devuelta**. Es lo que
+Alquila Tu Cancha vende como funcionalidad propia —*devolución automática si
+cancela con más de 24 horas*— y la segunda brecha de la Fase A.
+
+### Las cuatro decisiones
+
+**1. Cancelar siempre se puede.** `sucursales.horas_de_cancelacion` decide si se
+devuelve la plata, **no** si el jugador puede soltar el turno. Impedirle cancelar
+fuera de plazo no le devuelve la cancha al complejo: la deja ocupada por alguien
+que ya sabe que no viene, y encima sin poder revenderla.
+
+**2. La cancelación nunca se cae porque falle la devolución.** Soltar el turno es
+una acción del cliente; devolver la plata es una deuda del complejo. Primero se
+cambia el estado y después se mira la plata — al revés, un error de MercadoPago
+dejaría el turno sin cancelar. Por eso `DEVOLUCION_PENDIENTE` es un **estado del
+pago** y no un booleano: sin él, una devolución que falló se ve igual que una que
+nunca correspondió, y la deuda se descubre cuando llama el jugador.
+
+**3. La política vive en la sucursal, y arranca en `NULL`.** Es del complejo:
+«devolvemos si avisás con un día» no cambia según en qué cancha ibas a jugar.
+🔴 Y `NULL` —«no devuelve nada automáticamente»— es el default **a propósito**:
+una migración que dejara 24 le prendería la devolución de plata a todas las
+instancias que ya existen sin que nadie lo decida. Una migración no es el lugar
+donde se toman decisiones de negocio.
+
+**4. Sólo se devuelve el pago del portal.** Un cobro de mostrador ya entró a la
+caja del turno (`PagoDeReserva.caja_movimiento_id`): devolverlo por API dejaría
+el arqueo descuadrado, con la plata saliendo por un lado que la caja no ve. Esa
+devolución se hace desde la caja, y el resultado **lo dice** en vez de quedarse
+callado como si no hubiera habido seña.
+
+### Lo que sostiene que no se devuelva dos veces
+
+La `X-Idempotency-Key` de MercadoPago, y es **del pago** (`devolucion-<referencia
+del pago>`), no del intento: todos los reintentos mandan la misma, así que
+apretar el botón dos veces devuelve una sola vez. Sin eso, el reintento del
+mostrador sería una devolución nueva y el complejo pagaría dos veces.
+
+### Por qué el reintento es un botón y no un cron
+
+Una devolución que falla suele fallar por algo que hay que **arreglar** —el token
+vencido, un pago que MercadoPago no deja devolver— y un reintento automático cada
+cinco minutos sólo agrega ruido al log. Ver la lista es de `staff` —el encargado
+tiene que poder contestarle al jugador que llama— y reintentar es de `admin`:
+mover plata hacia afuera es del dueño.
+
+### Dónde vive el cliente de la API
+
+En `app/servicios/devoluciones.py` y **no** en `libracore.mp_api`, aunque devolver
+un pago sea una operación genérica de MercadoPago: LibraClub es el primer producto
+de la familia que devuelve plata, y la regla del repo es que algo sube al motor
+cuando es la tercera copia y no la segunda. No toca nada del dominio —recibe un
+`payment_id`, devuelve un `refund_id`— justamente para que mudarlo sea copiarlo.

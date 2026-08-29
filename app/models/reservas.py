@@ -256,6 +256,16 @@ class EstadoPago(enum.Enum):
     RECHAZADO = "rechazado"
     #: El jugador nunca volvió de MercadoPago y la provisoria venció.
     VENCIDO = "vencido"
+    #: Le corresponde la devolución de la seña y **todavía no se hizo**: no había
+    #: credenciales, MercadoPago no contestó, o devolvió un error.
+    #:
+    #: 🔴 Es un estado y no un booleano `devuelto` porque **es plata que el
+    #: complejo debe**. Sin él, una devolución que falla se ve igual que una que
+    #: nunca correspondió: la reserva queda cancelada, el pago sigue
+    #: `APROBADO`, y nadie se entera de que hay que devolverle a alguien.
+    DEVOLUCION_PENDIENTE = "devolucion_pendiente"
+    #: MercadoPago aceptó la devolución. `refund_id` dice cuál.
+    DEVUELTO = "devuelto"
 
 
 class CanalDePago(enum.Enum):
@@ -335,6 +345,17 @@ class PagoDeReserva(Base, Auditable):
     #:
     #: ⚠️ Sin FK: `caja_movimientos` vive en la base de LibraCore, que es otra.
     caja_movimiento_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    #: El id de la devolución **en MercadoPago**, cuando la aceptó. Es lo que
+    #: permite reconocerla en el panel de ellos sin buscar por monto y fecha.
+    refund_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    devuelto_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    #: Por qué no se pudo devolver todavía. Es lo que el mostrador lee cuando
+    #: pregunta «¿por qué sigue pendiente?»: sin esto, la respuesta es mirar los
+    #: logs del contenedor.
+    detalle_devolucion: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     reserva: Mapped[Reserva] = relationship()
 
