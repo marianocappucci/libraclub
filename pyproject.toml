@@ -28,7 +28,7 @@ dependencies = [
     #
     # 🔑 Lo pidió **este mismo producto**: la revisión `0008` del cobro con QR
     # llegó a `main` sin nadie en el camino de deploy que la aplicara.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.58.0",
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.59.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
