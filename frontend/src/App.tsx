@@ -6,6 +6,7 @@ import { Caja } from '@/pages/Caja'
 import { MovimientosDeCaja } from '@/pages/MovimientosDeCaja'
 import { TurnosDeCaja } from '@/pages/TurnosDeCaja'
 import { TurnoDeCajaDetalle } from '@/pages/TurnoDeCajaDetalle'
+import { CajaPorMedio } from '@/pages/CajaPorMedio'
 import { CuentaCorriente } from '@/pages/CuentaCorriente'
 import { CuentaCorrienteDetalle } from '@/pages/CuentaCorrienteDetalle'
 import { Horarios } from '@/pages/Horarios'
@@ -117,6 +118,7 @@ function Backoffice() {
               El mismo criterio que `/facturas` y `/facturas/:id`. */}
           <Route path="/caja/turnos" element={<TurnosDeCaja />} />
           <Route path="/caja/turnos/:id" element={<TurnoDeCajaDetalle />} />
+          <Route path="/caja/por-medio" element={<CajaPorMedio />} />
           <Route path="/cajas" element={<Cajas />} />
           <Route path="/buffet" element={<Buffet />} />
           <Route path="/cuenta-corriente" element={<CuentaCorriente />} />

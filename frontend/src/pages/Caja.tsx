@@ -22,7 +22,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-import { CalendarCheck, CupSoda, History, Receipt, Users, Wallet } from 'lucide-react'
+import {
+  CalendarCheck, ChartColumn, CupSoda, History, Receipt, Users, Wallet,
+} from 'lucide-react'
 
 import {
   buffet, caja, cajas as apiCajas, cobroDelTurno, cobroQr, turnosPorCobrar,
@@ -40,11 +42,16 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
+import { useAuth } from '@/context/AuthContext'
 import { useSucursal } from '@/context/SucursalContext'
 
 type Cierre = TurnoDeCaja & { diferencia_de_caja: number }
 
 export function Caja() {
+  // 🔑 Sólo para decidir qué accesos se ofrecen. Lo que gatea de verdad es
+  // el backend; esto evita ofrecer un enlace que sólo puede dar 403.
+  const { user } = useAuth()
+  const esAdmin = user?.role === 'admin'
   const [turno, setTurno] = useState<TurnoDeCaja | null>(null)
   const [resumen, setResumen] = useState<ResumenDeCaja | null>(null)
   const [cargando, setCargando] = useState(true)
@@ -80,6 +87,17 @@ export function Caja() {
         >
           <History className="size-4" /> Turnos anteriores
         </Link>
+        {/* Sólo para el dueño: es el corte de plata del complejo, y el backend
+            lo gatea con `require_admin`. Ofrecerlo a un encargado sería un
+            enlace que sólo puede terminar en 403. */}
+        {esAdmin && (
+          <Link
+            to="/caja/por-medio"
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground underline-offset-4 hover:underline"
+          >
+            <ChartColumn className="size-4" /> Por medio de pago
+          </Link>
+        )}
       </EncabezadoDePantalla>
       <AvisoDeError mensaje={error} />
 

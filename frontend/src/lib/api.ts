@@ -675,6 +675,43 @@ export const caja = {
    *  pantalla del detalle y la de la caja abierta muestran lo mismo. */
   detalle: (turnoId: number) =>
     api.get<{ turno: TurnoDeCaja; resumen: ResumenDeCaja }>(`/api/caja/turnos/${turnoId}`),
+  /** Qué entró y salió por medio de pago, en un período. De admin.
+   *
+   *  Los números vienen **pivoteados del backend**: es plata, y dos lugares
+   *  sumando por su cuenta terminan mostrando totales que no coinciden. */
+  porMedio: ({ desde, hasta, cajaId = 0 }: {
+    desde: string
+    hasta: string
+    cajaId?: number
+  }) => api.get<ReportePorMedio>(
+    `/api/caja/reportes/por-medio?desde=${desde}&hasta=${hasta}&caja_id=${cajaId}`,
+  ),
+}
+
+/** Lo que entró y salió por un medio de pago. Los `_ops` son la cantidad de
+ *  movimientos, no de plata. */
+export interface TotalesDeMedio {
+  ingresos: number
+  ingresos_ops: number
+  egresos: number
+  egresos_ops: number
+}
+
+export interface ReportePorMedio {
+  desde: string
+  hasta: string
+  cajas: {
+    id: number
+    nombre: string
+    medios: Record<string, TotalesDeMedio>
+    total_ingresos: number
+    total_egresos: number
+    saldo: number
+  }[]
+  /** Los mismos medios, sumados entre todos los mostradores. */
+  totales: Record<string, TotalesDeMedio>
+  total_ingresos: number
+  total_egresos: number
 }
 
 export const sesion = {

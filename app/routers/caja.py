@@ -5,14 +5,20 @@ Todo bajo `/api/caja`, la convención de este producto.
 
 from __future__ import annotations
 
+import csv
+import io
+from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from libracore import medios_pago
 from pydantic import BaseModel, Field
 
-from app.auth import get_current_user, require_staff
+from app.auth import get_current_user, require_admin, require_staff
+from app.routers.facturacion import exigir_base
 from app.servicios import caja as servicio
+from app.tiempo import hoy
 
 router = APIRouter(prefix="/api/caja", tags=["caja"])
 
@@ -243,6 +249,90 @@ def cerrar(
         diferencia_de_caja=round(
             (salida.monto_declarado_cierre or 0) - (salida.monto_esperado_cierre or 0), 2
         ),
+    )
+
+
+#: Desde cuándo mira el reporte si no se le dice. El mes en curso: es el
+#: período que el dueño mira para cerrar, y traer todo desde 1900 sobre una
+#: instancia con años de movimientos es una consulta que nadie pidió.
+def _periodo(desde: date | None, hasta: date | None) -> tuple[str, str]:
+    # 🔑 `hoy()` de `app.tiempo`, que es el día en Argentina. Un `date.today()`
+    # acá sale del reloj del proceso: entre las 21 y las 24 el contenedor en UTC
+    # ya está en el día siguiente, y el reporte del mes arrancaría el día 1 del
+    # mes que viene la última noche del mes.
+    dia = hoy()
+    return (
+        (desde or dia.replace(day=1)).isoformat(),
+        (hasta or dia).isoformat(),
+    )
+
+
+@router.get("/reportes/por-medio")
+def reporte_por_medio(
+    desde: date | None = Query(default=None),
+    hasta: date | None = Query(default=None),
+    caja_id: int = Query(default=0, ge=0),
+    _: object = Depends(require_admin),
+):
+    """Qué entró y qué salió por cada medio de pago, en un período.
+
+    De **admin**: es el corte de plata del complejo, no una herramienta del
+    mostrador. El encargado ve su turno y su historial; esto es lo que el dueño
+    mira a fin de mes.
+
+    `caja_id=0` es «todos los mostradores». Se numera desde 1, así que el cero
+    no colisiona con ninguno.
+    """
+    exigir_base()
+    d, h = _periodo(desde, hasta)
+    return {"desde": d, "hasta": h, **servicio.reporte_por_medio(d, h, caja_id)}
+
+
+@router.get("/reportes/por-medio/export")
+def exportar_por_medio(
+    desde: date | None = Query(default=None),
+    hasta: date | None = Query(default=None),
+    caja_id: int = Query(default=0, ge=0),
+    _: object = Depends(require_admin),
+):
+    """El mismo reporte, en CSV.
+
+    🔑 **Sale de `servicio.reporte_por_medio`, la MISMA función que la
+    pantalla.** Un export que rearme los números por su cuenta es la forma
+    clásica de que el CSV y la pantalla no coincidan, y el que descarga no tiene
+    cómo enterarse de cuál está bien.
+
+    Una fila por mostrador y medio, más el total. `csv.writer` y no un `join`
+    a mano: un nombre de mostrador con una coma adentro parte la fila.
+    """
+    exigir_base()
+    d, h = _periodo(desde, hasta)
+    datos = servicio.reporte_por_medio(d, h, caja_id)
+
+    buffer = io.StringIO()
+    escritor = csv.writer(buffer)
+    escritor.writerow(
+        ["mostrador", "medio", "operaciones_ingreso", "ingresos",
+         "operaciones_egreso", "egresos", "saldo"]
+    )
+    for caja in datos["cajas"]:
+        for medio, vals in sorted(caja["medios"].items()):
+            escritor.writerow([
+                caja["nombre"], medio, vals["ingresos_ops"], vals["ingresos"],
+                vals["egresos_ops"], vals["egresos"],
+                round(vals["ingresos"] - vals["egresos"], 2),
+            ])
+    escritor.writerow([])
+    escritor.writerow([
+        "TOTAL", "", "", datos["total_ingresos"], "", datos["total_egresos"],
+        round(datos["total_ingresos"] - datos["total_egresos"], 2),
+    ])
+
+    nombre = f"caja-por-medio_{d}_{h}.csv"
+    return StreamingResponse(
+        iter([buffer.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
     )
 
 

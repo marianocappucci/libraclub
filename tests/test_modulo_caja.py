@@ -385,3 +385,241 @@ def test_marcar_la_predeterminada_es_de_admin(api, sucursal):
     assert staff.post(f"/api/cajas/{caja['id']}/predeterminada").status_code == 403
     # El control: el admin si puede.
     assert api.post(f"/api/cajas/{caja['id']}/predeterminada").status_code == 200
+
+
+# -- El reporte por medio de pago -------------------------------------------
+#
+# El corte de plata del complejo: lo que el dueno mira a fin de mes. De admin,
+# no del mostrador.
+
+
+def _cobrar(api, monto, medio="efectivo", concepto="Cancha 1"):
+    r = api.post("/api/caja/cobros",
+                 json={"monto": monto, "concepto": concepto, "medio_pago": medio})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_el_reporte_separa_por_medio_de_pago(api, sucursal, abrir_caja):
+    abrir_caja(api, sucursal)
+    _cobrar(api, "4000", "efectivo")
+    _cobrar(api, "1500", "efectivo")
+    _cobrar(api, "9000", "transferencia")
+
+    r = api.get("/api/caja/reportes/por-medio")
+    assert r.status_code == 200, r.text
+    datos = r.json()
+
+    assert datos["totales"]["efectivo"]["ingresos"] == 5500.0
+    assert datos["totales"]["efectivo"]["ingresos_ops"] == 2
+    assert datos["totales"]["transferencia"]["ingresos"] == 9000.0
+    assert datos["total_ingresos"] == 14500.0
+
+
+def test_UN_MOVIMIENTO_ANULADO_NO_CUENTA_EN_EL_REPORTE(api, sucursal, abrir_caja):
+    """🔴 El mismo criterio que el arqueo, y por el mismo motivo.
+
+    Si el reporte contara los anulados, el corte de fin de mes diria una cosa y
+    el arqueo del turno otra sobre la misma plata ---y el que mira no tiene
+    forma de saber cual esta bien---. Lo garantiza la consulta del motor
+    (`sql_no_anulado`), no un filtro de este producto.
+    """
+    abrir_caja(api, sucursal)
+    _cobrar(api, "4000", "efectivo")
+    resumen = _cobrar(api, "1000", "efectivo", concepto="Mal cargado")
+    mal = next(m for m in resumen["movimientos"] if m["concepto"] == "Mal cargado")
+
+    antes = api.get("/api/caja/reportes/por-medio").json()
+    assert antes["totales"]["efectivo"]["ingresos"] == 5000.0
+
+    assert api.delete(f"/api/caja/movimientos/{mal['id']}").status_code == 200
+
+    despues = api.get("/api/caja/reportes/por-medio").json()
+    assert despues["totales"]["efectivo"]["ingresos"] == 4000.0, (
+        "el movimiento anulado sigue contando en el reporte"
+    )
+    assert despues["totales"]["efectivo"]["ingresos_ops"] == 1
+
+
+def test_los_egresos_van_de_su_lado_y_bajan_el_saldo(api, sucursal, abrir_caja):
+    abrir_caja(api, sucursal)
+    _cobrar(api, "10000", "efectivo")
+    assert api.post("/api/caja/egresos", json={
+        "monto": "2500", "motivo": "Pago a proveedor", "detalle": "",
+        "medio_pago": "efectivo"}).status_code == 200
+
+    datos = api.get("/api/caja/reportes/por-medio").json()
+    assert datos["totales"]["efectivo"]["ingresos"] == 10000.0
+    assert datos["totales"]["efectivo"]["egresos"] == 2500.0
+    assert datos["total_ingresos"] == 10000.0
+    assert datos["total_egresos"] == 2500.0
+
+
+def test_el_periodo_por_defecto_es_el_mes_en_curso(api, sucursal, abrir_caja):
+    """Traer todo desde 1900 sobre una instancia con anos de movimientos es una
+    consulta que nadie pidio."""
+    from app.tiempo import hoy
+
+    abrir_caja(api, sucursal)
+    _cobrar(api, "1000")
+    datos = api.get("/api/caja/reportes/por-medio").json()
+    assert datos["desde"] == hoy().replace(day=1).isoformat()
+    assert datos["hasta"] == hoy().isoformat()
+
+
+def test_un_periodo_sin_movimientos_devuelve_vacio_y_no_falla(api, sucursal, abrir_caja):
+    """Un periodo vacio y una consulta rota se ven igual si la pantalla queda en
+    blanco. El backend tiene que distinguirlos: esto es un 200 con nada."""
+    abrir_caja(api, sucursal)
+    _cobrar(api, "1000")
+    r = api.get("/api/caja/reportes/por-medio?desde=2020-01-01&hasta=2020-01-31")
+    assert r.status_code == 200, r.text
+    assert r.json()["totales"] == {}
+    assert r.json()["total_ingresos"] == 0
+
+
+def test_EL_TOTAL_SUMA_TODOS_LOS_MOSTRADORES(api, sucursal, abrir_caja):
+    """🔴 El hueco que delato una mutacion: todos los demas tests tenian UN solo
+    mostrador, asi que sumar todos o quedarse con el primero daba lo mismo.
+
+    Un complejo con dos cajones ---que es el caso que el modulo de caja existe
+    para cubrir--- habria visto un total que no incluye la mitad de la plata, y
+    sin ningun error: un numero mas chico, nada mas.
+    """
+    abrir_caja(api, sucursal)
+    primer_turno = api.get("/api/caja/turnos/actual").json()["turno"]
+    _cobrar(api, "4000", "efectivo")
+    api.post(f"/api/caja/turnos/{primer_turno['id']}/cerrar",
+             json={"monto_declarado": "4000"})
+
+    otra = api.post("/api/cajas", json={
+        "nombre": "Quincho", "descripcion": "", "medios_pago": ["efectivo"],
+        "sucursal_id": sucursal.id})
+    assert otra.status_code == 201, otra.text
+    api.post("/api/caja/turnos", json={"monto_inicial": "0", "caja_id": otra.json()["id"]})
+    _cobrar(api, "6000", "efectivo")
+
+    datos = api.get("/api/caja/reportes/por-medio").json()
+    # Control de la premisa: hay DOS mostradores en el reporte, o este test
+    # estaria midiendo lo mismo que los otros.
+    assert len(datos["cajas"]) == 2, [c["nombre"] for c in datos["cajas"]]
+    assert datos["total_ingresos"] == 10000.0, (
+        f"el total no suma los dos mostradores: {datos['total_ingresos']}"
+    )
+    # Y el total por medio tambien los junta.
+    assert datos["totales"]["efectivo"]["ingresos"] == 10000.0
+    assert datos["totales"]["efectivo"]["ingresos_ops"] == 2
+
+
+def test_filtrar_por_un_mostrador_deja_afuera_al_otro(api, sucursal, abrir_caja):
+    """El selector de la pantalla manda `caja_id`; sin este test, un filtro que
+    no filtra pasaria porque el total sigue siendo un numero plausible."""
+    abrir_caja(api, sucursal)
+    primer_turno = api.get("/api/caja/turnos/actual").json()["turno"]
+    la_primera = api.get(f"/api/cajas?sucursal_id={sucursal.id}").json()[0]
+    _cobrar(api, "4000", "efectivo")
+    api.post(f"/api/caja/turnos/{primer_turno['id']}/cerrar",
+             json={"monto_declarado": "4000"})
+
+    otra = api.post("/api/cajas", json={
+        "nombre": "Quincho", "descripcion": "", "medios_pago": ["efectivo"],
+        "sucursal_id": sucursal.id}).json()
+    api.post("/api/caja/turnos", json={"monto_inicial": "0", "caja_id": otra["id"]})
+    _cobrar(api, "6000", "efectivo")
+
+    solo_la_otra = api.get(f"/api/caja/reportes/por-medio?caja_id={otra['id']}").json()
+    assert solo_la_otra["total_ingresos"] == 6000.0
+    assert [c["nombre"] for c in solo_la_otra["cajas"]] == ["Quincho"]
+
+    # El control: filtrando por la primera sale la otra mitad, o sea que el
+    # filtro filtra y no devuelve siempre lo mismo.
+    solo_la_primera = api.get(
+        f"/api/caja/reportes/por-medio?caja_id={la_primera['id']}"
+    ).json()
+    assert solo_la_primera["total_ingresos"] == 4000.0
+
+
+def test_el_reporte_es_de_admin(api, sucursal):
+    """Es el corte de plata del complejo, no una herramienta del mostrador."""
+    api.post("/api/usuarios", json={
+        "username": "encargado-rep", "name": "Encargado",
+        "password": "clave-rep", "role": "staff"})
+    staff = TestClient(
+        crear_app(Config(
+            database_url=os.environ["DATABASE_URL"], entorno="test", debug=False,
+            directorio_de_datos="/tmp/libraclub-test-datos",
+            libracore_database_url=_url_core(),
+        )),
+        base_url="https://testserver",
+    )
+    assert staff.post(
+        "/auth/login", json={"username": "encargado-rep", "password": "clave-rep"}
+    ).status_code == 200
+    assert staff.get("/api/caja/reportes/por-medio").status_code == 403
+    assert staff.get("/api/caja/reportes/por-medio/export").status_code == 403
+    # El control: el admin si puede.
+    assert api.get("/api/caja/reportes/por-medio").status_code == 200
+
+
+# -- El export --------------------------------------------------------------
+
+
+def test_el_csv_sale_de_LA_MISMA_funcion_que_la_pantalla(api, sucursal, abrir_caja):
+    """🔑 Un export que rearme los numeros por su cuenta es la forma clasica de
+    que el CSV y la pantalla no coincidan.
+
+    Se comparan los dos contra la misma plata: no se lee el codigo, se miden las
+    dos salidas.
+    """
+    abrir_caja(api, sucursal)
+    _cobrar(api, "4000", "efectivo")
+    _cobrar(api, "9000", "transferencia")
+
+    pantalla = api.get("/api/caja/reportes/por-medio").json()
+    r = api.get("/api/caja/reportes/por-medio/export")
+    assert r.status_code == 200, r.text
+    assert "text/csv" in r.headers["content-type"]
+    assert "caja-por-medio" in r.headers["content-disposition"]
+
+    import csv as _csv
+    import io as _io
+
+    filas = list(_csv.reader(_io.StringIO(r.text)))
+    encabezado = filas[0]
+    assert encabezado[0] == "mostrador" and "ingresos" in encabezado
+
+    total = next(f for f in filas if f and f[0] == "TOTAL")
+    columna = encabezado.index("ingresos")
+    assert float(total[columna]) == pantalla["total_ingresos"], (
+        f"el CSV dice {total[columna]} y la pantalla {pantalla['total_ingresos']}"
+    )
+    # Y trae una fila por medio, no solo el total.
+    medios_en_el_csv = {f[1] for f in filas[1:] if f and f[0] != "TOTAL" and len(f) > 1}
+    assert medios_en_el_csv == {"efectivo", "transferencia"}, medios_en_el_csv
+
+
+def test_el_csv_no_se_parte_con_una_coma_en_el_nombre(api, sucursal, abrir_caja):
+    """🔴 Un nombre de mostrador con una coma adentro parte la fila si el CSV se
+    arma con un `join`. Por eso se usa `csv.writer`."""
+    r = api.post("/api/cajas", json={
+        "nombre": "Barra, la de atras", "descripcion": "",
+        "medios_pago": ["efectivo"], "sucursal_id": sucursal.id})
+    assert r.status_code == 201, r.text
+    caja_id = r.json()["id"]
+    api.post("/api/caja/turnos", json={"monto_inicial": "0", "caja_id": caja_id})
+    _cobrar(api, "1000")
+
+    import csv as _csv
+    import io as _io
+
+    filas = list(_csv.reader(_io.StringIO(
+        api.get("/api/caja/reportes/por-medio/export").text
+    )))
+    encabezado = filas[0]
+    cuerpo = [f for f in filas[1:] if f and f[0] != "TOTAL"]
+    assert cuerpo, "el CSV no trajo ninguna fila de datos"
+    for fila in cuerpo:
+        assert len(fila) == len(encabezado), (
+            f"la fila quedo partida: {fila}"
+        )
+    assert any(f[0] == "Barra, la de atras" for f in cuerpo), cuerpo
