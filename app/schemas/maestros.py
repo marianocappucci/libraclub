@@ -54,6 +54,10 @@ class ClienteEntrada(BaseModel):
     documento: str | None = Field(default=None, max_length=20)
     cuit: str | None = Field(default=None, max_length=13)
     activo: bool = True
+    #: Si quiere recibir confirmaciones y recordatorios de sus turnos. Arranca en
+    #: `True` —quien deja su email al reservar espera que le llegue el turno— y
+    #: es lo que el mostrador apaga cuando alguien pide no recibir más.
+    acepta_avisos: bool = True
     observaciones: str | None = None
 
 

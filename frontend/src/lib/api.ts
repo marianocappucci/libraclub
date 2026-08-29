@@ -143,6 +143,8 @@ export interface Cliente {
   documento: string | null
   cuit: string | null
   activo: boolean
+  /** Si recibe confirmaciones y recordatorios de sus turnos por email. */
+  acepta_avisos: boolean
   observaciones: string | null
 }
 
@@ -154,6 +156,7 @@ export interface ClienteEntrada {
   documento: string | null
   cuit: string | null
   activo: boolean
+  acepta_avisos: boolean
   observaciones: string | null
 }
 
