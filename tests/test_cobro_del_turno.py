@@ -764,3 +764,213 @@ def test_anular_no_toca_los_cobros_de_OTRA_reserva(
     }
     assert filas[segunda["id"]]["cobrado"] == 1000.0
     assert filas[primera["id"]]["cobrado"] == 0.0
+
+
+# -- El turno ya cobrado, en la agenda -------------------------------------
+#
+# Pedido del humano el 2026-08-28 mirando la pantalla: "diferenciar con un color
+# diferente o con un punto el turno de la cancha que ya se cerro y se cobro".
+# El operador quiere ver de un vistazo que le queda por cobrar sin abrir turno
+# por turno.
+
+#: El lunes de la semana del 2026-09-01, que es cuando `_reserva` pone el turno.
+SEMANA_DE_LA_RESERVA = "2026-08-31"
+
+
+def _casilleros(api, cancha, sucursal, reserva_id):
+    """Los casilleros de la agenda semanal que corresponden a esa reserva."""
+    r = api.get(
+        f"/api/disponibilidad/semana?sucursal_id={sucursal.id}"
+        f"&desde={SEMANA_DE_LA_RESERVA}"
+    )
+    assert r.status_code == 200, r.text
+    dias = r.json()["canchas"][str(cancha.id)]
+    return [
+        turno
+        for turnos in dias.values()
+        for turno in turnos
+        if turno["reserva_id"] == reserva_id
+    ]
+
+
+def _cobrar_todo(api, reserva_id):
+    """Cobra exactamente lo que falta, sea cual sea el total."""
+    pendiente = api.get(f"/api/reservas/{reserva_id}/cobros").json()["pendiente"]
+    assert pendiente > 0, "no hay nada que cobrar: el test no mediria nada"
+    r = api.post(
+        f"/api/reservas/{reserva_id}/cobros",
+        json={"monto": str(pendiente), "medio_pago": "efectivo"},
+    )
+    assert r.status_code == 201, r.text
+
+
+def test_un_turno_pagado_entero_sale_marcado_en_la_agenda(
+    api, cancha, cliente, tarifa_base, abrir_caja, sucursal,
+):
+    abrir_caja(api, sucursal)
+    reserva = _reserva(api, cancha, cliente)
+    _cobrar_todo(api, reserva["id"])
+
+    casilleros = _casilleros(api, cancha, sucursal, reserva["id"])
+    assert casilleros, "la reserva no aparece en la grilla de esa semana"
+    assert all(c["cobrado"] for c in casilleros), casilleros
+
+
+def test_con_una_sena_NO_sale_marcado(
+    api, cancha, cliente, tarifa_base, abrir_caja, sucursal,
+):
+    """El control del de arriba.
+
+    Sin esto, un `cobrado=True` fijo pasaria el primero ---y la agenda diria que
+    esta todo cobrado---. Media plata no es cobrado: es justo el turno que hay
+    que ir a cerrar.
+    """
+    abrir_caja(api, sucursal)
+    reserva = _reserva(api, cancha, cliente)
+    total = api.get(f"/api/reservas/{reserva['id']}/cobros").json()["total"]
+    api.post(
+        f"/api/reservas/{reserva['id']}/cobros",
+        json={"monto": str(total / 2), "medio_pago": "efectivo"},
+    )
+
+    casilleros = _casilleros(api, cancha, sucursal, reserva["id"])
+    assert casilleros
+    assert not any(c["cobrado"] for c in casilleros), casilleros
+
+
+def test_sin_cobrar_nada_tampoco(api, cancha, cliente, tarifa_base, sucursal):
+    """El otro control: sin un peso adentro, ningun casillero sale marcado."""
+    reserva = _reserva(api, cancha, cliente)
+    casilleros = _casilleros(api, cancha, sucursal, reserva["id"])
+    assert casilleros
+    assert not any(c["cobrado"] for c in casilleros), casilleros
+
+
+def test_UN_BLOQUEO_NO_SE_DIBUJA_COMO_COBRADO(api, cancha, sucursal):
+    """🔴 El defecto que este campo invita, y el mas facil de escribir sin querer.
+
+    Con `pendiente <= 0` a secas ---o con `cobrado >= total` sin exigir que el
+    total sea positivo--- un casillero **sin precio** da verdadero: cero cobrado
+    alcanza y sobra para cubrir cero. Y sin precio no es un caso raro: es
+    **todos los bloqueos**. Mantenimiento, lluvia o un torneo ocupan la cancha y
+    no se le cobran a nadie, asi que la grilla se llenaria de casilleros
+    pintados de "cobrado" que no cobraron nada. No avisaria: se veria como un
+    dia muy bien cobrado.
+
+    ⚠️ **Se usa un bloqueo y no una reserva sin tarifa** porque la API rechaza
+    la segunda con un 422 antes de crearla: no es un estado alcanzable, y un
+    test sobre un estado que el producto no produce no defiende nada.
+    """
+    b = api.post("/api/reservas/bloqueos", json={
+        "cancha_id": cancha.id,
+        "comienza_at": "2026-09-01T20:00:00-03:00",
+        "termina_at": "2026-09-01T21:30:00-03:00",
+        "motivo": "Mantenimiento"})
+    assert b.status_code == 201, b.text
+    bloqueo = b.json()
+    # Control de la premisa: si el bloqueo saliera CON precio, este test estaria
+    # midiendo el caso de al lado y pasaria por el motivo equivocado.
+    assert not bloqueo.get("precio"), bloqueo
+
+    casilleros = _casilleros(api, cancha, sucursal, bloqueo["id"])
+    assert casilleros, "el bloqueo no aparece en la grilla"
+    assert not any(c["cobrado"] for c in casilleros), (
+        "un bloqueo se esta dibujando como cobrado"
+    )
+
+
+def test_el_buffet_sin_cobrar_deja_el_turno_SIN_marcar(
+    api, cancha, cliente, tarifa_base, abrir_caja, sucursal,
+):
+    """🔑 El total es alquiler + buffet, igual que en el mostrador.
+
+    Con `reserva.precio` a secas, un turno con dos gaseosas sin cobrar se
+    dibujaria como saldado y esa plata no la reclamaria nadie.
+    """
+    abrir_caja(api, sucursal)
+    producto = api.post(f"/api/buffet/productos?sucursal_id={sucursal.id}", json={
+        "nombre": "Gaseosa 500ml", "precio": "1200.00", "costo": "700.00",
+        "stock_minimo": "6"}).json()
+    assert api.post(f"/api/buffet/ajustes?sucursal_id={sucursal.id}", json={
+        "item_id": producto["item_id"], "cantidad": "24",
+        "motivo": "Entrega del proveedor"}).status_code == 200
+
+    reserva = _reserva(api, cancha, cliente)
+    solo_alquiler = api.get(f"/api/reservas/{reserva['id']}/cobros").json()["total"]
+    consumo = api.post(f"/api/buffet/consumos?sucursal_id={sucursal.id}", json={
+        "lineas": [{"item_id": producto["item_id"], "cantidad": "2"}],
+        "reserva_id": reserva["id"]})
+    assert consumo.status_code == 201, consumo.text
+
+    # Se cobra el alquiler y NADA MAS: quedan las dos gaseosas.
+    api.post(f"/api/reservas/{reserva['id']}/cobros",
+             json={"monto": str(solo_alquiler), "medio_pago": "efectivo"})
+
+    casilleros = _casilleros(api, cancha, sucursal, reserva["id"])
+    assert casilleros
+    assert not any(c["cobrado"] for c in casilleros), (
+        "el alquiler esta pago pero el buffet no: el turno no esta cobrado"
+    )
+
+    # El control positivo: cobrando tambien el buffet, ahi si se marca. Sin
+    # esto, un `cobrado` que nunca da verdadero pasaria el assert de arriba.
+    _cobrar_todo(api, reserva["id"])
+    assert all(c["cobrado"] for c in _casilleros(api, cancha, sucursal, reserva["id"]))
+
+
+def test_una_reserva_LARGA_marca_todos_sus_casilleros(
+    api, cancha, cliente, tarifa_base, abrir_caja, sucursal,
+):
+    """Un turno de tres horas ocupa varios casilleros de 90 minutos.
+
+    Marcar uno solo dejaria la mitad del turno pintada de un color y la otra
+    mitad de otro, sobre la misma reserva.
+    """
+    abrir_caja(api, sucursal)
+    r = api.post("/api/reservas", json={
+        "cancha_id": cancha.id, "cliente_id": cliente.id,
+        "comienza_at": "2026-09-01T20:00:00-03:00", "duracion_min": 180})
+    assert r.status_code == 201, r.text
+    reserva = r.json()
+    _cobrar_todo(api, reserva["id"])
+
+    casilleros = _casilleros(api, cancha, sucursal, reserva["id"])
+    assert len(casilleros) >= 2, f"se esperaban varios casilleros, salieron {len(casilleros)}"
+    assert all(c["cobrado"] for c in casilleros), casilleros
+
+
+def test_sin_base_de_LibraCore_la_agenda_anda_igual(
+    engine, sesion, monkeypatch, cancha, cliente, tarifa_base, sucursal,
+):
+    """⚠️ La caja vive del lado del motor, y la agenda no puede depender de eso.
+
+    Una instancia que todavia no configuro `LIBRACLUB_LIBRACORE_DATABASE_URL`
+    tiene que poder ver su agenda: aca la marca es un adorno sobre el casillero,
+    no la pantalla entera como en el mostrador. Sin esta guarda el endpoint
+    contestaria un error de conexion de psycopg sobre CADA refresco.
+
+    Se arma una app propia, sin `libracore_database_url`, porque el fixture `api`
+    de este archivo siempre trae la base del motor.
+    """
+    monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
+    monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
+    AuthBase.metadata.drop_all(engine)
+    AuthBase.metadata.create_all(engine)
+    sin_motor = TestClient(
+        crear_app(Config(
+            database_url=os.environ["DATABASE_URL"], entorno="test", debug=False,
+            directorio_de_datos="/tmp/libraclub-test-datos",
+            libracore_database_url=None,
+        )),
+        base_url="https://testserver",
+    )
+    try:
+        assert sin_motor.post(
+            "/auth/login", json={"username": USUARIO, "password": CLAVE}
+        ).status_code == 200
+        reserva = _reserva(sin_motor, cancha, cliente)
+        casilleros = _casilleros(sin_motor, cancha, sucursal, reserva["id"])
+        assert casilleros, "la agenda no contesto sin base de LibraCore"
+        assert not any(c["cobrado"] for c in casilleros)
+    finally:
+        AuthBase.metadata.drop_all(engine)

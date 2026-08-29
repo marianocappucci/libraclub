@@ -36,6 +36,20 @@ const COLOR: Record<string, string> = {
   bloqueo: 'bg-slate-300 text-slate-800 border-slate-400',
 }
 
+/** El turno que ya no debe nada. **Pisa al color del estado, no se suma a él.**
+ *
+ *  🔴 Se elige la cadena entera y no se le agrega una clase al color del estado:
+ *  el `className` de acá abajo es un template string sin `cn()`, así que dos
+ *  `bg-*` en la misma lista no se resuelven por orden de escritura sino por el
+ *  orden en que Tailwind los emitió en la hoja. Con una cadena por caso no hay
+ *  nada que competir.
+ *
+ *  El fondo es traslúcido a propósito —`/25` sobre el emerald fuerte— para que
+ *  el turno cobrado se lea como cerrado y no compita con `confirmada`, que es
+ *  emerald sólido y claro. Lo pidió así el humano: *"otro color, 'cobrado' y un
+ *  fondo traslúcido"*. */
+const COBRADO = 'bg-emerald-500/25 text-emerald-950 border-emerald-600'
+
 interface Seleccion {
   cancha: Cancha
   turno: Turno
@@ -281,16 +295,31 @@ function Casillero({ turno, onElegir }: { turno: Turno; onElegir: () => void }) 
       </button>
     )
   }
-  const color = COLOR[turno.estado ?? ''] ?? 'bg-muted border-border'
+  const color = turno.cobrado
+    ? COBRADO
+    : COLOR[turno.estado ?? ''] ?? 'bg-muted border-border'
   return (
     <button
       type="button"
       onClick={onElegir}
-      aria-label={etiqueta}
+      // 🔑 El estado va también en el nombre accesible. El color y el punto no
+      // los lee un lector de pantalla, y el que opera con uno necesita saber
+      // qué turno ya está cerrado tanto como el que mira la grilla.
+      aria-label={turno.cobrado ? `${etiqueta}, cobrado` : etiqueta}
       className={`w-full rounded-md border px-2 py-1 text-left text-xs hover:brightness-95 ${color}`}
     >
       <div className="font-medium">{hora(turno.comienza_at)}</div>
       <div className="truncate">{turno.cliente ?? turno.motivo ?? 'Ocupado'}</div>
+      {/* 🔴 **El punto Y la palabra, las dos cosas.** Es la misma decisión que
+          los movimientos anulados del 2026-08-28: sólo el color se pierde en
+          una impresión en blanco y negro y no lo lee un lector de pantalla;
+          sólo la palabra se pierde entre los casilleros de una semana. */}
+      {turno.cobrado && (
+        <div className="mt-0.5 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide">
+          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-emerald-700" />
+          cobrado
+        </div>
+      )}
     </button>
   )
 }

@@ -140,3 +140,7 @@ class TurnoSalida(BaseModel):
     estado: EstadoReserva | None = None
     cliente: str | None = None
     motivo: str | None = None
+    #: Si el turno ya no debe nada —alquiler más buffet—. Lo usa la agenda para
+    #: dibujarlo distinto: el operador quiere ver de un vistazo qué le queda por
+    #: cobrar sin abrir turno por turno.
+    cobrado: bool = False

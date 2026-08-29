@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
@@ -12,6 +13,9 @@ from sqlalchemy.orm import Session
 from app.models.enums import ESTADOS_QUE_OCUPAN, EstadoReserva
 from app.models.maestros import Cancha
 from app.models.reservas import Reserva
+from app.servicios import buffet as servicio_buffet
+from app.servicios import caja as servicio_caja
+from app.servicios import facturacion as servicio_facturacion
 from app.servicios import horarios, tarifario
 from app.tiempo import TZ, a_local
 
@@ -28,6 +32,10 @@ class Turno:
     estado: EstadoReserva | None = None
     cliente: str | None = None
     motivo: str | None = None
+    #: Si este turno ya no debe nada. Lo estampa `marcar_cobrados`, no la
+    #: grilla: el dato vive en la base de LibraCore y averiguarlo por casillero
+    #: sería una conexión por celda.
+    cobrado: bool = False
 
 
 def _fin_del_dia(dia: date) -> datetime:
@@ -174,6 +182,64 @@ def grilla_de_la_semana(
             por_dia[dia.isoformat()] = grilla_del_dia(sesion, cancha, dia)
         resultado[cancha.id] = por_dia
     return resultado
+
+
+def reservas_saldadas(sesion: Session, reserva_ids: Iterable[int]) -> set[int]:
+    """De esas reservas, las que ya no deben nada — alquiler más buffet.
+
+    🔑 **Se pregunta por todas juntas y por eso recibe una colección.** Los dos
+    totales salen de la base de LibraCore, que abre y cierra una conexión por
+    consulta: la semana de un complejo de seis canchas son cientos de
+    casilleros, y preguntar por cada uno sería el mismo error que ya tenían el
+    listado del mostrador y el buffet antes de sus versiones por lote.
+
+    🔴 **Un turno sin tarifa NO está saldado, está sin precio.** Con total cero,
+    `cobrado >= total` da verdadero sin que haya entrado un peso: la grilla
+    marcaría como cobrada toda franja a la que le falta cargar el precio, que es
+    justo la que hay que ir a mirar. Por eso se exige `total > 0`.
+
+    ⚠️ **Sin base de LibraCore devuelve vacío, y la agenda anda igual.** La caja
+    vive del lado del motor; una instancia que todavía no la configuró tiene que
+    poder ver su agenda. Acá no corresponde el 503 del mostrador: allá la caja
+    *es* la pantalla, y acá es una marca sobre el casillero.
+    """
+    ids = sorted({int(x) for x in reserva_ids})
+    if not ids or not servicio_facturacion.hay_base():
+        return set()
+
+    precios = dict(
+        sesion.execute(select(Reserva.id, Reserva.precio).where(Reserva.id.in_(ids))).all()
+    )
+    consumido = servicio_buffet.consumido_de_reservas(ids)
+    cobrado = servicio_caja.cobrado_de_reservas(ids)
+
+    saldadas: set[int] = set()
+    for reserva_id in ids:
+        # Mismo total que `/agenda/por-cobrar` y que el comprobante: alquiler más
+        # buffet. Con `reserva.precio` a secas, un turno con tres gaseosas sin
+        # cobrar se dibujaría como saldado.
+        total = Decimal(str(precios.get(reserva_id) or 0))
+        total += consumido.get(reserva_id, Decimal("0"))
+        if total <= 0:
+            continue
+        if cobrado.get(reserva_id, Decimal("0")) >= total:
+            saldadas.add(reserva_id)
+    return saldadas
+
+
+def marcar_cobrados(sesion: Session, turnos: Sequence[Turno]) -> list[Turno]:
+    """`reservas_saldadas` aplicado a una lista de casilleros, en un solo lote.
+
+    Una reserva larga ocupa varios casilleros y **todos** reciben la misma
+    marca: es lo que se quiere ver en la grilla.
+    """
+    saldadas = reservas_saldadas(
+        sesion, (t.reserva_id for t in turnos if t.reserva_id is not None)
+    )
+    return [
+        replace(turno, cobrado=True) if turno.reserva_id in saldadas else turno
+        for turno in turnos
+    ]
 
 
 def proximas(sesion: Session, sucursal_id: int, momento: datetime, limite: int = 20):
