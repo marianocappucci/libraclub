@@ -583,6 +583,9 @@ export interface ResumenDeCaja {
     concepto: string
     monto: number
     medio_pago: string
+    /** 1 = anulado. La fila **queda** en la lista y sale de los totales del
+     *  arqueo: un movimiento de caja se anula, no se borra. */
+    anulado: number
   }[]
   pagos_por_medio: Record<string, number>
   total_ventas: number

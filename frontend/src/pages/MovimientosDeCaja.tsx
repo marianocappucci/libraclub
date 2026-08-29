@@ -18,12 +18,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-import { ArrowLeft, Trash2, Wallet } from 'lucide-react'
+import { ArrowLeft, Ban, Wallet } from 'lucide-react'
 
 import { caja } from '@/lib/api'
 import type { ResumenDeCaja, TurnoDeCaja } from '@/lib/api'
 import { useMediosDePago } from '@/lib/medios-pago'
-import { pesos } from '@/lib/fechas'
+import { hora, pesos } from '@/lib/fechas'
 import { AvisoDeError } from '@/components/listado'
 import { Button } from '@/components/ui/button'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
@@ -100,70 +100,101 @@ function Movimientos({ movimientos, etiquetaDeMedio, onAnulado, onError }: {
 
   if (movimientos.length === 0) {
     return (
-      <p className="border-t pt-3 text-sm text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         Todavía no cargaste nada en este turno.
       </p>
     )
   }
 
   return (
-    // 🔴 `flex flex-col` y **no** `grid gap-1`, que es lo que había.
+    // 🔑 **Una tabla con columnas, no una fila de texto.** Pedido del humano el
+    // 2026-08-28: *"los movimientos se deberían tener que ver en una tabla con
+    // columnas"*. Con veinte filas, el formato viejo —concepto y medio en una
+    // línea corrida, el importe pegado a la derecha— no se puede leer ni sumar
+    // con la vista, y no mostraba la hora.
     //
-    // Un grid implícito dimensiona su columna a `max-content`, así que la fila
-    // crecía con el concepto más largo y se llevaba el importe y el botón fuera
-    // de la tarjeta — con el `min-w-0` puesto en la fila **y** en el texto, que
-    // no alcanzan. Medido en un navegador: la fila daba 554 dentro de un padre
-    // de 424; con `flex flex-col` da 424, y con `grid-cols-[minmax(0,1fr)]`
-    // también. Se elige el flex por ser el idioma del resto de la pantalla.
-    <div className="flex flex-col gap-1 border-t pt-3">
-      <div className="text-sm font-medium">Movimientos</div>
-      {movimientos.map((m) => (
-        <div key={m.id} className="flex min-w-0 items-center gap-2 text-sm">
-          {/* 🔴 `min-w-0` en la fila **y** en el texto. Sin el de la fila, el
-              `flex-1 truncate` del hijo no tiene contra qué achicarse: el
-              contenido empuja y el importe y el botón se salen de la tarjeta.
-              Medido en un navegador, no supuesto. */}
-          <span className="min-w-0 flex-1 truncate" title={m.concepto}>
-            {m.concepto}
-            <span className="ml-1 text-muted-foreground">
-              · {etiquetaDeMedio(m.medio_pago)}
-            </span>
-          </span>
-          {/* El egreso se muestra en negativo: es lo que hace que la lista se
-              pueda sumar de arriba abajo y dé el esperado.
-
-              `shrink-0` y `tabular-nums`: el importe no se parte, y los dígitos
-              quedan en columna para poder sumarlos con la vista. */}
-          <span className={`shrink-0 tabular-nums${m.tipo === 'egreso' ? ' text-amber-700 dark:text-amber-500' : ''}`}>
-            {m.tipo === 'egreso' ? '−' : ''}{pesos(String(m.monto))}
-          </span>
-          <Button
-            variant="outline"
-            size="icon"
-            className="size-7 shrink-0"
-            aria-label={`Anular ${m.concepto}`}
-            disabled={anulando === m.id}
-            onClick={async () => {
-              setAnulando(m.id)
-              try {
-                await caja.anular(m.id)
-                onAnulado()
-              } catch (e) {
-                onError((e as Error).message)
-              } finally {
-                setAnulando(null)
-              }
-            }}
-          >
-            {/* Icono y no la palabra: con el texto, la acción se comía el
-                ancho de una fila que ya lleva concepto, medio e importe.
-                El nombre accesible lo da el `aria-label`, que además nombra
-                **cuál** movimiento — con veinte filas, veinte «Anular»
-                idénticos no le sirven a nadie que use lector de pantalla. */}
-            <Trash2 className="size-3.5" />
-          </Button>
-        </div>
-      ))}
+    // `overflow-x-auto` en el contenedor y no en la página: una tabla ancha
+    // scrollea sola en el celular sin arrastrar el resto de la pantalla.
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b text-left text-muted-foreground">
+            <th className="py-2 pr-3 font-medium">Hora</th>
+            <th className="py-2 pr-3 font-medium">Concepto</th>
+            <th className="py-2 pr-3 font-medium">Medio</th>
+            {/* Los importes con el encabezado a la derecha, sobre la columna
+                que alinean: un título a la izquierda de números alineados a la
+                derecha obliga a buscar cuál es cuál. */}
+            <th className="py-2 pr-3 text-right font-medium">Importe</th>
+            <th className="py-2 w-9" aria-label="Acciones" />
+          </tr>
+        </thead>
+        <tbody>
+          {movimientos.map((m) => {
+            const anulado = m.anulado === 1
+            return (
+              <tr
+                key={m.id}
+                className={`border-b last:border-0${anulado ? ' text-muted-foreground' : ''}`}
+              >
+                <td className="py-1.5 pr-3 tabular-nums whitespace-nowrap">
+                  {hora(m.fecha)}
+                </td>
+                <td className="py-1.5 pr-3">
+                  {/* 🔴 Tachado **y** con la palabra. Sólo el tachado se pierde
+                      en una impresión en blanco y negro y no lo lee un lector de
+                      pantalla; sólo la palabra se pierde entre veinte filas. */}
+                  <span className={anulado ? 'line-through' : undefined}>{m.concepto}</span>
+                  {anulado && (
+                    <span className="ml-2 rounded border px-1 text-xs">anulado</span>
+                  )}
+                </td>
+                <td className="py-1.5 pr-3 whitespace-nowrap">
+                  {etiquetaDeMedio(m.medio_pago)}
+                </td>
+                <td
+                  className={
+                    'py-1.5 pr-3 text-right tabular-nums whitespace-nowrap'
+                    + (m.tipo === 'egreso' && !anulado
+                      ? ' text-amber-700 dark:text-amber-500' : '')
+                    + (anulado ? ' line-through' : '')
+                  }
+                >
+                  {/* El egreso en negativo: es lo que hace que la columna se
+                      pueda sumar de arriba abajo y dé el esperado. */}
+                  {m.tipo === 'egreso' ? '−' : ''}{pesos(String(m.monto))}
+                </td>
+                <td className="py-1.5">
+                  {/* Un anulado no se vuelve a anular: el botón desaparece en vez
+                      de quedar deshabilitado, que invita a apretarlo. */}
+                  {!anulado && (
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="size-7"
+                      aria-label={`Anular ${m.concepto}`}
+                      disabled={anulando === m.id}
+                      onClick={async () => {
+                        setAnulando(m.id)
+                        try {
+                          await caja.anular(m.id)
+                          onAnulado()
+                        } catch (e) {
+                          onError((e as Error).message)
+                        } finally {
+                          setAnulando(null)
+                        }
+                      }}
+                    >
+                      <Ban className="size-3.5" />
+                    </Button>
+                  )}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
     </div>
   )
 }

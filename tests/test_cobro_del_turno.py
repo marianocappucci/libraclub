@@ -688,3 +688,79 @@ def test_el_motor_rellena_la_caja_de_un_turno_viejo(
         "el motor instalado no rellena `caja_id`: el pin de libracore quedo "
         "atras de v1.57.1, y la Caja va a mostrar «sin caja asignada»"
     )
+
+
+# -- Anular un cobro no lo borra -------------------------------------------
+
+
+def test_anular_el_cobro_de_un_turno_DEVUELVE_el_pendiente(
+    api, cancha, cliente, tarifa_base, abrir_caja, sucursal,
+):
+    """El caso que borrar rompia en silencio.
+
+    El pendiente de una reserva se calcula sumando los movimientos de caja por
+    referencia. Con el movimiento **borrado** la reserva volvia a figurar impaga
+    y **no quedaba rastro** de que alguien habia cobrado. Anulado, el pendiente
+    vuelve igual ---que es lo correcto: esa plata no esta--- pero el movimiento
+    se puede ver en la caja.
+    """
+    reserva = _reserva(api, cancha, cliente)
+    abrir_caja(api, sucursal)
+    total = api.get(f"/api/reservas/{reserva['id']}/cobros").json()["total"]
+    assert total > 0, "el control: la tarifa tiene que dar algo"
+
+    api.post(f"/api/reservas/{reserva['id']}/cobros",
+             json={"monto": str(total), "medio_pago": "efectivo"})
+    cobrado = api.get(f"/api/reservas/{reserva['id']}/cobros").json()
+    assert cobrado["pendiente"] == 0.0, "el control: quedo cobrada"
+    mov_id = cobrado["cobros"][0]["id"]
+
+    assert api.request(
+        "DELETE", f"/api/caja/movimientos/{mov_id}"
+    ).status_code == 200
+
+    despues = api.get(f"/api/reservas/{reserva['id']}/cobros").json()
+    assert despues["pendiente"] == total, (
+        "anulado el cobro, el turno vuelve a deber: esa plata no esta"
+    )
+    assert despues["cobrado"] == 0.0
+    # 🔑 Y el anulado **no aparece** entre los cobros del turno: si apareciera,
+    # la pantalla mostraria un cobro que no cuenta para nada.
+    assert despues["cobros"] == []
+
+
+def test_anular_no_toca_los_cobros_de_OTRA_reserva(
+    api, cancha, cliente, tarifa_base, abrir_caja, sucursal,
+):
+    """El control del filtro nuevo, por los DOS caminos.
+
+    `anulado=0` se agrego a dos consultas ---la del detalle de la reserva y la
+    del listado del mostrador---. Si una filtrara y la otra no, las dos pantallas
+    dirian numeros distintos sobre el mismo turno, que es peor que no filtrar en
+    ninguna: ahi al menos coinciden.
+    """
+    abrir_caja(api, sucursal)
+    primera = _reserva(api, cancha, cliente, hora=_hora(0), dia=_hoy())
+    segunda = _reserva(api, cancha, cliente, hora=_hora(1), dia=_hoy())
+
+    for r in (primera, segunda):
+        assert api.post(f"/api/reservas/{r['id']}/cobros",
+                        json={"monto": "1000", "medio_pago": "efectivo"}).status_code == 201
+
+    mov = api.get(f"/api/reservas/{primera['id']}/cobros").json()["cobros"][0]["id"]
+    assert api.request("DELETE", f"/api/caja/movimientos/{mov}").status_code == 200
+
+    # El detalle de la segunda: intacto.
+    assert api.get(
+        f"/api/reservas/{segunda['id']}/cobros"
+    ).json()["cobrado"] == 1000.0
+
+    # Y el listado del mostrador tiene que decir **lo mismo**.
+    filas = {
+        f["reserva_id"]: f
+        for f in api.get(
+            f"/api/reservas/agenda/por-cobrar?sucursal_id={sucursal.id}"
+        ).json()
+    }
+    assert filas[segunda["id"]]["cobrado"] == 1000.0
+    assert filas[primera["id"]]["cobrado"] == 0.0
