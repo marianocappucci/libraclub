@@ -375,6 +375,12 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     if simulador is not None:
         app.include_router(simulador)
 
+    # Y el del cobro por QR del mostrador, por lo mismo: acredita un cobro sin
+    # que haya entrado un peso. El `if` va acá y no adentro del handler.
+    simulador_qr = reservas.construir_router_de_simulacion_qr(config.entorno)
+    if simulador_qr is not None:
+        app.include_router(simulador_qr)
+
     resumen = resumen_router.construir_router()
     if resumen is not None:
         app.include_router(resumen)

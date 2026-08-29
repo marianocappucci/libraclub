@@ -596,3 +596,99 @@ def test_el_toggle_de_la_automatica_sobrevive_a_recargar_la_config(api):
     assert api.get("/config/mercadopago").json()["auto_facturar"] is True
     assert cobro_qr.auto_facturar_prendida() is True
     assert config_manager.load().get("mp_auto_facturar_reservas") is True
+
+
+# -- El simulador, solo fuera de produccion --------------------------------
+#
+# Existe porque sin credenciales de MercadoPago NO SE PUEDE probar el circuito:
+# `poner_en_el_qr` falla al llamar a `crear_orden_qr`, asi que no llega a existir
+# el pago que despues habria que sellar. El portal ya tenia el suyo desde antes
+# ---`POST /api/portal/pagos/{id}/simular`--- y este copia su criterio.
+
+
+def test_en_produccion_el_simulador_NO_SE_CONSTRUYE():
+    """🔴 El test que más importa de este archivo.
+
+    El simulador acredita un cobro sin que haya entrado un peso: montado en la
+    instancia de un complejo, cualquiera con la URL cierra turnos gratis. Lo que
+    lo impide es que la **fábrica devuelve `None`** y el router no se monta — no
+    un `if` adentro del handler, que mal escrito deja el endpoint existiendo.
+
+    ⚠️ **Se mide la fábrica y no las rutas de la app.** La primera versión
+    construía una app con `entorno="prod"` y miraba `app.routes`: el assert
+    principal pasaba, pero **el control —que la ruta real siguiera estando—
+    fallaba**, con un set de cinco rutas que eran las de FastAPI por defecto. O
+    sea que la app que estaba mirando no era la que creía, y un assert sobre un
+    objeto que no se entiende no mide nada. La fábrica es una función pura: se
+    mide directo.
+    """
+    from app.routers.reservas import construir_router_de_simulacion_qr
+
+    for entorno in ("prod", "produccion", "producción", "production", "PROD"):
+        assert construir_router_de_simulacion_qr(entorno) is None, (
+            f"con entorno={entorno!r} el simulador se construye: acredita "
+            f"cobros que nadie pagó"
+        )
+
+
+def test_fuera_de_produccion_si_se_construye():
+    """El otro lado del control.
+
+    Sin esto, una fábrica que devolviera `None` **siempre** pasaría el test de
+    arriba — y el simulador no existiría en ningún lado.
+    """
+    from app.routers.reservas import construir_router_de_simulacion_qr
+
+    for entorno in ("dev", "development", "demo", "test", ""):
+        router = construir_router_de_simulacion_qr(entorno)
+        assert router is not None, f"con entorno={entorno!r} no se construye"
+        rutas = [r.path for r in router.routes]
+        assert "/api/reservas/{reserva_id}/mp-qr/simular" in rutas, rutas
+
+
+def test_el_simulador_cobra_y_deja_el_movimiento_en_la_caja(
+    api, sucursal, cancha, cliente, tarifa_base, abrir_caja,
+):
+    """El circuito completo, sin credenciales.
+
+    Es lo que el humano no podia probar: sin MercadoPago cargado no hay forma de
+    poner la orden ni de acreditarla.
+    """
+    abrir_caja(api, sucursal)
+    reserva = _reserva(api, cancha, cliente, precio="10000.00")
+
+    r = api.post(f"/api/reservas/{reserva['id']}/mp-qr/simular")
+    assert r.status_code == 200, r.text
+    assert r.json()["estado"] == "aprobado"
+    assert r.json()["simulado"] is True
+    assert r.json()["monto"] == 10000.0
+
+    # Y la plata esta en la caja del turno abierto, con el medio del QR.
+    resumen = api.get("/api/caja/turnos/actual").json()["resumen"]
+    assert resumen["pagos_por_medio"].get("mercadopago") == 10000.0, (
+        f"la plata no entro a la caja: {resumen['pagos_por_medio']}"
+    )
+    # El turno queda sin pendiente: es lo que el operador va a ver.
+    assert api.get(f"/api/reservas/{reserva['id']}/cobros").json()["pendiente"] == 0.0
+
+
+def test_el_simulador_exige_caja_abierta(
+    api, sucursal, cancha, cliente, tarifa_base,
+):
+    """Sin turno abierto la plata quedaria fuera del arqueo --- y el simulador
+    no es excusa para saltear eso. Mismo 409 que el cobro real."""
+    reserva = _reserva(api, cancha, cliente, precio="10000.00")
+    r = api.post(f"/api/reservas/{reserva['id']}/mp-qr/simular")
+    assert r.status_code == 409, r.text
+
+
+def test_el_simulador_no_cobra_dos_veces(
+    api, sucursal, cancha, cliente, tarifa_base, abrir_caja,
+):
+    """El indice `uq_pagos_reserva_aprobado` lo frena en la base, pero eso seria
+    un 500. Sale 409, que es lo que le dice al operador que ya esta cobrado."""
+    abrir_caja(api, sucursal)
+    reserva = _reserva(api, cancha, cliente, precio="10000.00")
+    assert api.post(f"/api/reservas/{reserva['id']}/mp-qr/simular").status_code == 200
+    segunda = api.post(f"/api/reservas/{reserva['id']}/mp-qr/simular")
+    assert segunda.status_code == 409, segunda.text
