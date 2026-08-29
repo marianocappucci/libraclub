@@ -29,6 +29,13 @@ vi.mock('@/context/SucursalContext', () => ({
   useSucursal: () => ({ actual: 1, sucursales: [], elegir: vi.fn(), cargando: false }),
 }))
 
+// La Caja mira el rol para decidir qué accesos ofrece —el reporte por medio de
+// pago es del dueño—. El objeto es mutable para poder cambiarlo por test.
+const rol = { valor: 'admin' }
+vi.mock('@/context/AuthContext', () => ({
+  useAuth: () => ({ user: { username: 'ana', name: 'Ana', role: rol.valor }, loading: false }),
+}))
+
 const MOSTRADORES = [
   { id: 5, nombre: 'Mostrador', descripcion: '', medios_pago: [], activo: true, es_default: false, sucursal_id: 1 },
   { id: 6, nombre: 'Buffet', descripcion: '', medios_pago: [], activo: true, es_default: false, sucursal_id: 1 },
@@ -106,6 +113,7 @@ beforeEach(() => {
   llamadas.length = 0
   estado.hayTurno = true
   estado.mostradores = MOSTRADORES
+  rol.valor = 'admin'
   estado.movimientos = MOVIMIENTOS
   estado.cuentas = CUENTAS
   estado.consumos = []
@@ -821,5 +829,33 @@ describe('el egreso', () => {
     expect(within(motivos).getAllByRole('option').map((o) => o.textContent))
       .toEqual(['Pago a proveedor', 'Retiro a banco'])
     expect(llamadas.some((l) => l.ruta.endsWith('/api/caja/motivos-de-egreso'))).toBe(true)
+  })
+})
+
+describe('los accesos del encabezado', () => {
+  it('el historial se ofrece siempre: el encargado quiere ver cuánto cerró ayer', async () => {
+    rol.valor = 'staff'
+    montar()
+    expect(await screen.findByRole('link', { name: /Turnos anteriores/ }))
+      .toBeInTheDocument()
+  })
+
+  it('🔑 el reporte por medio de pago, sólo al dueño', async () => {
+    /* Es el corte de plata del complejo y el backend lo gatea con
+     * `require_admin`. Ofrecerlo a un encargado sería un enlace que sólo puede
+     * terminar en 403 — y el que lo aprieta no tiene forma de saber que el
+     * problema no es él. */
+    rol.valor = 'staff'
+    montar()
+    // El control: la pantalla SÍ renderizó y el otro enlace está.
+    expect(await screen.findByRole('link', { name: /Turnos anteriores/ }))
+      .toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /Por medio de pago/ })).toBeNull()
+  })
+
+  it('y al admin sí — el otro lado del control', async () => {
+    montar()
+    expect(await screen.findByRole('link', { name: /Por medio de pago/ }))
+      .toBeInTheDocument()
   })
 })

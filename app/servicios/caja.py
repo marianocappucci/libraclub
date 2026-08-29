@@ -26,6 +26,7 @@ from decimal import Decimal
 from libracore import medios_pago
 from libracore.db import caja as db_caja
 from libracore.db import core as libracore_core
+from libracore.db import reportes as db_reportes
 from libracore.db import turnos as db_turnos
 
 #: Los medios que ofrece este producto. Es un **subconjunto deliberado** de los
@@ -506,6 +507,82 @@ def actualizar_caja(caja_id: int, nombre: str, descripcion: str,
 
 def borrar_caja(caja_id: int) -> None:
     db_caja.delete_caja_config(caja_id)
+
+
+def reporte_por_medio(desde: str, hasta: str, caja_id: int = 0) -> dict:
+    """Lo que entró y salió por cada medio de pago, por mostrador y en total.
+
+    🔑 **La consulta es del motor y ya filtra los anulados.** No se rearma acá:
+    un movimiento anulado no cuenta en ningún reporte de plata, y ese criterio
+    tiene que ser el mismo que usa el arqueo o dos pantallas dirían números
+    distintos sobre la misma caja.
+
+    🔴 **El pivoteo va en el backend y no en la pantalla.** Es plata: dos lugares
+    sumando por su cuenta terminan mostrando totales que no coinciden, y el que
+    mira no tiene forma de saber cuál es el bueno. La pantalla dibuja lo que le
+    llega.
+
+    ⚠️ **Tercera copia de este pivoteo en la familia.** [[contalibra]] y
+    [[restolibra]] tienen el suyo (`_pivot_caja_medios` en
+    `web/routers/reportes.py`), byte por byte el mismo salvo los nombres. El
+    lugar donde corresponde que viva es [[libracore]], al lado de
+    `get_reporte_caja_medios` — mudarlo obliga a tocar los otros dos, que hoy
+    andan, así que queda **anotado como candidato** y no se hace de arrastre.
+    Mismo criterio que se tomó con la campanita del cobro por QR.
+
+    Devuelve `{cajas: [...], totales: {medio: {...}}}`. Los medios sin
+    especificar llegan del motor como `sin_especificar`, no como cadena vacía.
+    """
+    filas = db_reportes.get_reporte_caja_medios(desde, hasta, caja_id)
+
+    por_caja: dict[int, dict] = {}
+    for fila in filas:
+        cid = fila["caja_id"]
+        caja = por_caja.setdefault(
+            cid, {"id": cid, "nombre": fila["caja_nombre"], "medios": {}}
+        )
+        medio = caja["medios"].setdefault(
+            fila["medio"],
+            {"ingresos": 0.0, "ingresos_ops": 0, "egresos": 0.0, "egresos_ops": 0},
+        )
+        # `tipo` sale del motor y sólo puede ser 'ingreso' o 'egreso'; cualquier
+        # otra cosa se cuenta como egreso, que es el lado conservador: un
+        # movimiento desconocido baja el saldo en vez de inflarlo.
+        lado = "ingresos" if fila["tipo"] == "ingreso" else "egresos"
+        medio[lado] += float(fila["total"] or 0)
+        medio[f"{lado}_ops"] += int(fila["operaciones"] or 0)
+
+    cajas = []
+    for caja in por_caja.values():
+        ingresos = sum(m["ingresos"] for m in caja["medios"].values())
+        egresos = sum(m["egresos"] for m in caja["medios"].values())
+        cajas.append({
+            **caja,
+            "total_ingresos": round(ingresos, 2),
+            "total_egresos": round(egresos, 2),
+            "saldo": round(ingresos - egresos, 2),
+        })
+    cajas.sort(key=lambda c: c["nombre"])
+
+    totales: dict[str, dict] = {}
+    for caja in cajas:
+        for nombre, vals in caja["medios"].items():
+            acumulado = totales.setdefault(
+                nombre,
+                {"ingresos": 0.0, "ingresos_ops": 0, "egresos": 0.0, "egresos_ops": 0},
+            )
+            for clave, valor in vals.items():
+                acumulado[clave] += valor
+    for vals in totales.values():
+        vals["ingresos"] = round(vals["ingresos"], 2)
+        vals["egresos"] = round(vals["egresos"], 2)
+
+    return {
+        "cajas": cajas,
+        "totales": totales,
+        "total_ingresos": round(sum(c["total_ingresos"] for c in cajas), 2),
+        "total_egresos": round(sum(c["total_egresos"] for c in cajas), 2),
+    }
 
 
 def marcar_predeterminada(caja_id: int) -> dict | None:
