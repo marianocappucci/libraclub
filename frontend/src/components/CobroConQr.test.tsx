@@ -30,11 +30,23 @@ const config = {
   autoFacturar: false,
   //: Lo que contesta `mp-status`. Los tests lo mueven a 'aprobado'.
   resultado: 'pendiente' as string,
+  //: Si esta instancia monta el simulador. `false` = producción, y la sonda
+  //  contesta 404 igual que allá.
+  puedeSimular: true,
+  //: Con qué falla el simulador, si falla. `null` = sale bien.
+  fallaAlSimular: null as { status: number; detail: string } | null,
 }
 
 function json(cuerpo: unknown) {
   return new Response(JSON.stringify(cuerpo), {
     status: 200, headers: { 'content-type': 'application/json' },
+  })
+}
+
+/** Un error con la forma que devuelve FastAPI, que es la que `lib/api.ts` lee. */
+function error(status: number, detail: string) {
+  return new Response(JSON.stringify({ detail }), {
+    status, headers: { 'content-type': 'application/json' },
   })
 }
 
@@ -54,6 +66,20 @@ function montarRed() {
         payment_id: config.resultado === 'aprobado' ? '112233' : null,
         factura_id: null,
       }))
+    }
+    // 🔴 Estas dos van ANTES del `/mp-qr` de abajo: ese `includes` matchea las
+    // tres rutas, y si quedaran después el simulador contestaría un QrPuesto.
+    if (u.includes('/mp-qr/simulacion')) {
+      // El 404 no es un error del servidor: es cómo se dice "acá no hay
+      // simulador". La ruta vive adentro del router que no se monta.
+      return config.puedeSimular
+        ? Promise.resolve(json({ disponible: true }))
+        : Promise.resolve(error(404, 'Not Found'))
+    }
+    if (u.includes('/mp-qr/simular')) {
+      return config.fallaAlSimular
+        ? Promise.resolve(error(config.fallaAlSimular.status, config.fallaAlSimular.detail))
+        : Promise.resolve(json({ estado: 'aprobado', simulado: true, monto: 14000 }))
     }
     if (u.includes('/mp-qr')) {
       return Promise.resolve(json({ referencia: 'lc-5-abc123', monto: 14000 }))
@@ -97,6 +123,8 @@ beforeEach(() => {
   config.disponible = true
   config.autoFacturar = false
   config.resultado = 'pendiente'
+  config.puedeSimular = true
+  config.fallaAlSimular = null
   montarRed()
 })
 
@@ -290,5 +318,92 @@ describe('la campanita del cobro acreditado', () => {
     config.resultado = 'aprobado'
     expect(await screen.findByText(/Cobrado por QR/i, {}, { timeout: 5000 }))
       .toBeInTheDocument()
+  })
+})
+
+describe('el simulador, sin credenciales de MercadoPago', () => {
+  // Existe porque sin credenciales NO SE PUEDE probar el circuito: poner la
+  // orden falla al llamar a MercadoPago, así que no llega a existir el pago que
+  // después habría que sellar. El humano no tiene credenciales todavía —el
+  // producto no se vendió— y usar las suyas de Contalibra mandaría pagos de
+  // prueba a su cuenta real.
+
+  it('en una instancia de prueba se ofrece simular, y se dice que lo es', async () => {
+    config.disponible = false
+    montar('confirmada')
+
+    expect(await screen.findByRole('button', { name: /Simular pago aprobado/ }))
+      .toBeInTheDocument()
+    // La misma redacción que el botón del portal, que es el que el humano usó.
+    expect(screen.getByText(/Instancia de prueba/i)).toBeInTheDocument()
+    // Y el motivo sigue estando: el botón no reemplaza al cartel, lo acompaña.
+    expect(screen.getByText(/faltan las credenciales de\s+MercadoPago/i))
+      .toBeInTheDocument()
+  })
+
+  it('🔴 en producción NO se ofrece, y quien lo decide es el servidor', async () => {
+    // El test que más importa de este archivo. El bundle es el MISMO en dev y
+    // en producción: lo único que separa una instancia de un complejo de tener
+    // un botón que cierra turnos gratis es que la sonda conteste 404.
+    config.disponible = false
+    config.puedeSimular = false
+    montar('confirmada')
+
+    // Control positivo: la sección SÍ renderizó y la sonda SÍ se preguntó. Sin
+    // esto, un "no encontré el botón" porque el componente no llegó a montarse
+    // pasaría igual —y el test estaría midiendo la nada—.
+    expect(await screen.findByText(/faltan las credenciales de\s+MercadoPago/i))
+      .toBeInTheDocument()
+    await waitFor(() =>
+      expect(llamadas.some((l) => l.ruta.includes('/mp-qr/simulacion'))).toBe(true),
+    )
+    expect(screen.queryByRole('button', { name: /Simular pago aprobado/ })).toBeNull()
+    expect(screen.queryByText(/Instancia de prueba/i)).toBeNull()
+  })
+
+  it('🔑 con las credenciales cargadas ni siquiera se pregunta', async () => {
+    // Con MercadoPago configurado el botón no se ofrece nunca, así que sondear
+    // sería un 404 por cada turno que se abre en TODA instancia de producción.
+    // La sonda está encadenada al estado justamente para no hacerlo.
+    config.disponible = true
+    montar('confirmada')
+
+    expect(await screen.findByRole('button', { name: /Cobrar con QR/ }))
+      .toBeInTheDocument()
+    expect(llamadas.some((l) => l.ruta.includes('/mp-qr/simulacion'))).toBe(false)
+  })
+
+  it('al simular llama al MISMO endpoint del cobro y avisa que se cobró', async () => {
+    const user = userEvent.setup()
+    const onCambiada = vi.fn()
+    config.disponible = false
+    montar('confirmada', onCambiada)
+
+    await user.click(await screen.findByRole('button', { name: /Simular pago aprobado/ }))
+
+    await waitFor(() => {
+      expect(llamadas.some((l) =>
+        l.metodo === 'POST' && l.ruta === '/api/reservas/5/mp-qr/simular')).toBe(true)
+    })
+    // 🔴 Que el POST salga no alcanza: hasta que el aviso de cobrado se movió
+    // arriba del cartel de las credenciales, apretar el botón dejaba la
+    // pantalla IDÉNTICA. Es el mismo reporte que ya hizo el humano con el QR.
+    expect(await screen.findByText(/Cobrado por QR/)).toBeInTheDocument()
+    // Y la agenda se refresca, como cuando acredita de verdad.
+    expect(onCambiada).toHaveBeenCalled()
+  })
+
+  it('si el cobro simulado falla, lo dice y no miente que cobró', async () => {
+    // El 409 de "no hay caja abierta" es el mismo que devuelve el cobro real, y
+    // es justamente uno de los casos que se quiere poder recorrer.
+    const user = userEvent.setup()
+    config.disponible = false
+    config.fallaAlSimular = { status: 409, detail: 'no hay un turno de caja abierto' }
+    montar('confirmada')
+
+    await user.click(await screen.findByRole('button', { name: /Simular pago aprobado/ }))
+
+    expect(await screen.findByText(/no hay un turno de caja abierto/)).toBeInTheDocument()
+    expect(screen.queryByText(/Cobrado por QR/)).toBeNull()
   })
 })
