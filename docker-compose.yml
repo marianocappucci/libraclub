@@ -119,6 +119,28 @@ services:
       # instancia, y si se filtra expone la lectura de agregados de UNA
       # sucursal. Ver wiki/analyses/panel-del-dueno-multisucursal.md, punto 7.
       - LIBRA_PANEL_TOKEN=${LIBRA_PANEL_TOKEN:-}
+      # Recuperación de contraseña y comprobantes por mail. **Sin estas seis,
+      # la instancia no tiene por dónde mandar**: `resolver_smtp_config` cae al
+      # entorno cuando no hay nada guardado en la base, y si el entorno tampoco
+      # las trae devuelve una config vacía.
+      #
+      # 🔴 Faltaban acá hasta el 2026-08-30, y el síntoma era mudo: la app
+      # levanta igual, `/auth/forgot-password` contesta 200 y el mail no sale.
+      # Se descubrió al desplegar la unificación del SMTP y mirar qué resolvía
+      # `smtp_efectivo` adentro del contenedor — el resto de los productos ya
+      # declaraba estas seis.
+      #
+      # Los valores van en el `.env` del VPS, nunca acá. `LIBRAAUTH_SMTP_HOST`
+      # vacío es "no configurado", que es lo correcto para un checkout local.
+      - LIBRAAUTH_SMTP_HOST=${LIBRAAUTH_SMTP_HOST:-}
+      - LIBRAAUTH_SMTP_PORT=${LIBRAAUTH_SMTP_PORT:-587}
+      - LIBRAAUTH_SMTP_USER=${LIBRAAUTH_SMTP_USER:-}
+      - LIBRAAUTH_SMTP_PASSWORD=${LIBRAAUTH_SMTP_PASSWORD:-}
+      # ⚠️ Explícita y no por defecto al `USER`: el servidor de correo corre con
+      # `SPOOF_PROTECTION=1`, que ata el remitente a la cuenta autenticada, así
+      # que cualquier otra dirección es un envío rechazado.
+      - LIBRAAUTH_SMTP_FROM_EMAIL=${LIBRAAUTH_SMTP_FROM_EMAIL:-}
+      - LIBRAAUTH_SMTP_FROM_NAME=${LIBRAAUTH_SMTP_FROM_NAME:-LibraClub}
       # Dónde escribe los backups. Sin esto caen en `./data` relativo al
       # directorio de trabajo, o sea adentro del bind mount.
       - DATA_DIR=/app/data
