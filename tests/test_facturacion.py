@@ -627,3 +627,51 @@ def test_el_listado_trae_lo_que_la_PANTALLA_lee(api, cancha, cliente, tarifa_bas
     assert isinstance(fila["total"], (int, float))
     # `fecha` se dibuja con `fecha()` del frontend, que espera `aaaa-mm-dd`.
     assert len(str(fila["fecha"])) == 10, fila["fecha"]
+
+
+# ── De dónde sale el SMTP con el que se manda ─────────────────────────────
+
+
+def test_el_comprobante_sale_por_el_SMTP_de_la_pantalla_y_no_por_config_json(
+    api, cancha, cliente, tarifa_base, sesion, monkeypatch,
+):
+    """🔴 Hasta el 2026-08-30 este envío **no podía funcionar**.
+
+    `libracore.facturas_router` leía `email_smtp_*` de `config.json`, un store
+    que en LibraClub **no escribe nadie**: la pantalla de Configuración siempre
+    guardó en la base cifrada de libraauth. O sea que mandar una factura por
+    mail contestaba 400 —"configurá el servidor SMTP en Configuración → Email"—
+    señalando justo la pantalla donde el SMTP ya estaba cargado y andando para
+    los mails de contraseña.
+
+    🔑 **Los dos stores se cargan, y con datos distintos.** Con `config.json`
+    vacío —que es como está en la flota— un router que ignorara el resolver
+    daría 400 y el test lo vería; pero uno que leyera el store equivocado y
+    tuviera suerte pasaría. La única forma de ver cuál ganó es que digan cosas
+    diferentes.
+    """
+    from libraauth.smtp_settings import SmtpSettingsRepository
+    from libracore import config_manager
+    from libracore import facturas_router as fr
+
+    SmtpSettingsRepository(lambda: sesion).save(
+        host="smtp.la-de-la-pantalla", port=465, user="club@example.com",
+        password="la-buena", from_email="facturas@example.com", from_name="Club",
+    )
+    cfg = config_manager.load()
+    cfg["email_smtp_host"] = "smtp.el-viejo"
+    cfg["email_smtp_user"] = "viejo@example.com"
+    config_manager.save(cfg)
+
+    llamado = {}
+    monkeypatch.setattr(fr.email_sender, "enviar_comprobante", lambda **kw: llamado.update(kw))
+
+    factura = _facturar(api, cancha, cliente, "2026-09-03T20:00:00-03:00")
+    r = api.post(f"/api/facturas/{factura['id']}/enviar-email",
+                 json={"email": "socio@example.com"})
+    assert r.status_code == 200, r.text
+
+    assert llamado["smtp_host"] == "smtp.la-de-la-pantalla"
+    assert llamado["smtp_port"] == 465
+    assert llamado["smtp_user"] == "club@example.com"
+    assert llamado["from_email"] == "facturas@example.com"
