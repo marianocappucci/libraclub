@@ -5,6 +5,24 @@ versionado [SemVer](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+### Agregado
+
+- **La pantalla dice de qué ambiente es el token de MercadoPago** — `Ambiente
+  de prueba`, `Ambiente de producción` o `Ambiente sin verificar`, con la fecha
+  en que se determinó.
+  > 🔴 MercadoPago **no tiene homologación como ARCA**: no hay host de sandbox,
+  > es el mismo `api.mercadopago.com` y lo que define el ambiente es el token.
+  > Sin el cartel las dos fallas son mudas — un token de producción en una
+  > instancia `dev` **cobra plata de verdad** y uno de prueba en la instancia de
+  > un complejo **no cobra nada**, y las dos se ven igual: el QR del mostrador
+  > se genera y la orden se crea.
+  >
+  > Mirar el prefijo no alcanza: un *usuario de prueba* de MercadoPago entrega
+  > credenciales `APP_USR-` igual que las reales, y lo único que lo delata es el
+  > `nickname` de `/users/me`. Por eso quien clasifica es **Probar conexión**,
+  > que ahora recarga la sección. La clasificación lleva la huella del token, así
+  > que si la credencial cambia por cualquier vía se descarta sola.
+
 ### Corregido
 
 - 🔴 **Mandar una factura por mail no podía funcionar.** El motor leía
