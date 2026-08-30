@@ -220,3 +220,38 @@ def test_la_instancia_de_dev_corre_las_mismas_migraciones_que_el_deploy(script):
             "esquema viejo, que es lo que le pasó a LibraCargo el 2026-08-25."
         )
         cursor = pos + len(texto)
+
+
+def test_la_instancia_de_dev_declara_el_SMTP_que_el_motor_va_a_buscar():
+    """🔴 El otro camino otra vez, y esta vez el síntoma era **mudo**.
+
+    `resolver_smtp_config` cae al entorno cuando no hay nada guardado en la
+    base. Si el compose de dev no declara las variables, esa caída devuelve una
+    config vacía: la app levanta igual, `/auth/forgot-password` contesta 200, y
+    el mail no sale. No hay error en ningún lado.
+
+    Faltaban en este producto hasta el 2026-08-30 y **nadie lo notó por meses**.
+    Se descubrió recién al desplegar la unificación del SMTP y mirar qué
+    resolvía `smtp_efectivo` adentro del contenedor — o sea midiendo, no
+    leyendo el compose.
+
+    🔑 **Se aserta sobre los NOMBRES declarados, no sobre valores.** Los valores
+    viven en el `.env` del VPS y no están en el repo; lo que este test puede
+    sostener es que el compose los deje pasar. Un compose que no los nombra los
+    deja afuera aunque el `.env` los tenga, que es exactamente lo que pasó acá.
+    """
+    bloque = _bloque_del_servicio_de_dev()
+    faltan = [v for v in (
+        "LIBRAAUTH_SMTP_HOST", "LIBRAAUTH_SMTP_PORT", "LIBRAAUTH_SMTP_USER",
+        "LIBRAAUTH_SMTP_PASSWORD", "LIBRAAUTH_SMTP_FROM_EMAIL",
+        "LIBRAAUTH_SMTP_FROM_NAME",
+    ) if not re.search(rf"^\s+- {v}=", bloque, re.MULTILINE)]
+    assert not faltan, (
+        "el servicio de dev del compose no declara " + ", ".join(faltan) + ": "
+        "la instancia de dev va a levantar sana y sin poder mandar un solo "
+        "mail, sin dar error en ningún lado."
+    )
+    # El control: que el `- VAR=` de arriba sea capaz de NO matchear. Sin esto,
+    # un patrón mal escrito daría la lista vacía y el test pasaría siempre.
+    assert re.search(r"^\s+- LIBRAAUTH_SMTP_HOST=", bloque, re.MULTILINE)
+    assert not re.search(r"^\s+- LIBRAAUTH_SMTP_INVENTADA=", bloque, re.MULTILINE)
