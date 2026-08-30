@@ -30,8 +30,8 @@ from libracore.db import facturas as db_facturas
 from libracore.facturas_router import build_comprobantes_router
 
 from app.auth import get_current_user, require_admin
-from app.smtp import smtp_config
 from app.routers.facturacion import exigir_base
+from app.smtp import smtp_config
 
 #: El PDF va en su propio router porque el otro lo arma el motor. Mismo prefijo:
 #: las rutas no chocan —`/{id}/pdf` son dos segmentos y `/{id}` uno—, y para la

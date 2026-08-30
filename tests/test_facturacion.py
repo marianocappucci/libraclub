@@ -650,9 +650,9 @@ def test_el_comprobante_sale_por_el_SMTP_de_la_pantalla_y_no_por_config_json(
     tuviera suerte pasaría. La única forma de ver cuál ganó es que digan cosas
     diferentes.
     """
+    from libraauth.smtp_settings import SmtpSettingsRepository
     from libracore import config_manager
     from libracore import facturas_router as fr
-    from libraauth.smtp_settings import SmtpSettingsRepository
 
     SmtpSettingsRepository(lambda: sesion).save(
         host="smtp.la-de-la-pantalla", port=465, user="club@example.com",

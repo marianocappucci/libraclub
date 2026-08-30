@@ -29,8 +29,6 @@ from libraauth.session_auth import (
     demo_username,
 )
 from libraauth.smtp_settings import SmtpSettingsRepository
-
-from app.smtp import smtp_config
 from libraauth.terminos import TerminosRepository, build_terminos_router
 from libracore.arca_router import build_arca_router
 from libracore.config_router import (
@@ -64,6 +62,7 @@ from app.routers.facturacion import exigir_base
 from app.servicios import caja as servicio_caja
 from app.servicios import facturacion
 from app.servicios import facturacion as servicio_facturacion
+from app.smtp import smtp_config
 
 _log = logging.getLogger(__name__)
 
