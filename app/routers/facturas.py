@@ -30,6 +30,7 @@ from libracore.db import facturas as db_facturas
 from libracore.facturas_router import build_comprobantes_router
 
 from app.auth import get_current_user, require_admin
+from app.smtp import smtp_config
 from app.routers.facturacion import exigir_base
 
 #: El PDF va en su propio router porque el otro lo arma el motor. Mismo prefijo:
@@ -71,6 +72,12 @@ comprobantes = build_comprobantes_router(
     # escribe `reserva.factura_id` por su cuenta.
     al_emitir=None,
     donde_configurar_smtp="Configuración → Email",
+    # 🔴 Sin esto el motor lee `email_smtp_*` de `config.json`, que en este
+    # producto **no lo escribe nadie** — la pantalla de Configuración guarda en
+    # la base cifrada de libraauth, igual que en los otros siete. O sea que
+    # mandar un comprobante por mail fallaba con un 400 aunque la instancia
+    # tuviera un SMTP perfectamente cargado. Ver `app/smtp.py`.
+    smtp_config=smtp_config,
 )
 
 

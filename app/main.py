@@ -28,7 +28,9 @@ from libraauth.session_auth import (
     build_smtp_settings_router,
     demo_username,
 )
-from libraauth.smtp_settings import SmtpSettingsRepository, resolver_smtp_config
+from libraauth.smtp_settings import SmtpSettingsRepository
+
+from app.smtp import smtp_config
 from libraauth.terminos import TerminosRepository, build_terminos_router
 from libracore.arca_router import build_arca_router
 from libracore.config_router import (
@@ -456,7 +458,10 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
         # CALLABLE, no un valor: se resuelve en cada envío. Con un valor fijo,
         # guardar el SMTP desde la pantalla de Configuración no tendría efecto
         # hasta recrear el contenedor.
-        smtp_config=lambda: resolver_smtp_config(db.fabrica_de_sesiones()),
+        # El MISMO resolver que usa el envío de comprobantes — ver `app/smtp.py`.
+        # Que cada envío lo resolviera por su cuenta es exactamente como la
+        # familia terminó con dos configuraciones de SMTP distintas.
+        smtp_config=smtp_config,
     )
     app.include_router(build_smtp_settings_router())
     # `GET /terminos`, `POST /terminos/aceptar`, `GET /terminos/historial`.

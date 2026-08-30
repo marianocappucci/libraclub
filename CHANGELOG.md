@@ -5,6 +5,19 @@ versionado [SemVer](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+### Corregido
+
+- 🔴 **Mandar una factura por mail no podía funcionar.** El motor leía
+  `email_smtp_*` de `config.json`, un store que en LibraClub **no escribe
+  nadie**: la pantalla de Configuración siempre guardó en la base cifrada de
+  libraauth. El endpoint contestaba 400 —*"configurá el servidor SMTP en
+  Configuración → Email"*— señalando justo la pantalla donde el SMTP ya estaba
+  cargado y andando para los mails de contraseña. Con LibraCore v1.64.0 el
+  producto le inyecta su resolver al router (`app/smtp.py`), y es el **mismo**
+  que usa la recuperación de contraseña: que cada envío lo resolviera por su
+  cuenta es exactamente como la familia terminó con dos configuraciones de SMTP
+  distintas.
+
 ### Agregado
 
 - **Política de cancelación y devolución de la seña** (ADR-016, parte de F2):
