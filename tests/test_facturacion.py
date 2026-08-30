@@ -75,10 +75,13 @@ def api(engine, sesion, monkeypatch, base_de_libracore):
     AuthBase.metadata.drop_all(engine)
 
 
+#: 🔴 Sin `certificado_path` ni `clave_path`: desde el 2026-08-30 el router es
+#: `libracore.arca_router` y **el path lo pone el servidor** al recibir el
+#: archivo, no el cliente en un JSON. Mientras fue un campo de texto, dar de
+#: alta la facturacion exigia que alguien dejara el .crt y el .key dentro del
+#: volumen del contenedor a mano.
 ARCA = {
     "cuit": "30712345679", "punto_venta": 3,
-    "certificado_path": "/datos/arca_certs/cert.pem",
-    "clave_path": "/datos/arca_certs/clave.key",
     "ambiente": "homologacion",
 }
 
@@ -95,6 +98,38 @@ def test_la_config_de_arca_se_guarda_y_se_relee(api):
     assert leido["cuit"] == ARCA["cuit"]
     assert leido["punto_venta"] == ARCA["punto_venta"]
     assert leido["ambiente"] == "homologacion"
+
+
+def test_la_fila_se_crea_con_el_slug_que_lee_la_facturacion(api):
+    """🔴 `servicios/facturacion.py` lee la configuracion con
+    `EMPRESA = "complejo"`. Con `default` --el valor al que caia el router del
+    motor antes de que el producto pudiera declarar el suyo-- el PUT contesta
+    200 y la pantalla dice "Guardado", pero la facturacion no lee esa fila
+    NUNCA: se descubre al emitir el primer comprobante."""
+    r = api.put("/config/arca", json=ARCA)
+    assert r.status_code == 200, r.text
+    assert r.json()["empresa"] == "complejo"
+
+
+def test_el_certificado_se_sube_y_se_valida_antes_de_escribirlo(api):
+    """Subir el `.csr` --el pedido-- en vez del `.crt` que ARCA devuelve es el
+    error habitual, y antes se aceptaba: el router propio escribia el path que
+    le mandaran sin mirar nada, y fallaba recien al emitir."""
+    r = api.post(
+        "/config/arca/certificado",
+        files={"archivo": ("pedido.pem", b"-----BEGIN CERTIFICATE REQUEST-----", "text/plain")},
+    )
+    assert r.status_code == 422
+    assert "certificado" in r.json()["detail"].lower()
+
+
+def test_el_estado_dice_si_la_instancia_puede_facturar(api):
+    """🔑 Trae el vencimiento del certificado, que es el dato que evita la falla
+    silenciosa: duran dos anos y el dia que vencen la facturacion deja de andar
+    sin que nadie haya tocado nada."""
+    r = api.get("/config/arca/estado")
+    assert r.status_code == 200
+    assert r.json()["configurado"] is False
 
 
 def test_el_ambiente_por_default_es_homologacion(api):
