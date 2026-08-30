@@ -569,23 +569,11 @@ export interface QrSimulado {
   factura_id?: number | null
 }
 
-/** Las credenciales del QR. Sólo las lee la pantalla de Configuración, que es
- *  admin: quien escriba acá cambia a qué cuenta va la plata del complejo. */
-export interface ConfigMercadoPago {
-  access_token: string
-  user_id: string
-  pos_id: string
-  webhook_secret: string
-  auto_facturar: boolean
-  /** Lo calcula el backend con el mismo criterio que usa el mostrador. */
-  configurado?: boolean
-}
-
-export const configMercadoPago = {
-  ver: () => api.get<ConfigMercadoPago>('/config/mercadopago'),
-  guardar: (datos: Omit<ConfigMercadoPago, 'configurado'>) =>
-    api.put<ConfigMercadoPago>('/config/mercadopago', datos),
-}
+// Las credenciales del QR se fueron de acá el 2026-08-30: las lee y las escribe
+// `libra-ui/Configuracion`, contra `libracore.mp_config_router`, que es el mismo
+// router que montan los otros productos de la familia. El tipo y el cliente que
+// vivían acá eran la contraparte de `pages/ConfigMercadoPago.tsx`, que también
+// se fue.
 
 export interface TurnoDeCaja {
   id: number

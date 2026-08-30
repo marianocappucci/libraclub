@@ -121,13 +121,21 @@ def mp(monkeypatch):
     return _MpFalso().instalar(monkeypatch)
 
 
+#: Las credenciales las sirve `libracore.mp_config_router` desde el 2026-08-30.
+#: El endpoint propio que vivia aca devolvia el ACCESS TOKEN EN CLARO; el del
+#: motor lo devuelve enmascarado. El prefijo es el mismo, y el interruptor se
+#: sigue guardando en `mp_auto_facturar_reservas` --lo que se cobra con este QR
+#: es un turno de cancha, no una venta-- gracias a `campo_auto_facturar`.
+RUTA_MP = "/config/mercadopago"
+
+
 def _configurar_mp(api, auto_facturar=False):
-    r = api.put("/config/mercadopago", json={
-        "access_token": "APP_USR-token-de-prueba",
-        "user_id": "123456789",
-        "pos_id": "CAJA01",
-        "webhook_secret": SECRETO_WEBHOOK,
-        "auto_facturar": auto_facturar,
+    r = api.put(RUTA_MP, json={
+        "mp_access_token": "APP_USR-token-de-prueba",
+        "mp_user_id": "123456789",
+        "mp_pos_id": "CAJA01",
+        "mp_webhook_secret": SECRETO_WEBHOOK,
+        "mp_auto_facturar_ventas": auto_facturar,
     })
     assert r.status_code == 200, r.text
     return r.json()
@@ -193,20 +201,58 @@ def test_falta_uno_solo_de_los_tres_y_sigue_sin_estar_configurado(api):
     """El token solo no alcanza: el user id y el pos id van en la URL de la
     orden. Sin esta comprobación, una instancia a medio configurar pasa el
     chequeo y MercadoPago devuelve un 404 que no dice qué falta."""
-    for faltante in ("access_token", "user_id", "pos_id"):
+    #
+    # 🔴 Se afirma sobre `cobro_qr.esta_configurado()` y no sobre la respuesta
+    # del endpoint: el router del motor no devuelve un `configurado`. Ese
+    # calculo es del mostrador, y la pantalla lo repite del lado del cliente.
+    # Preguntarle al servicio es preguntarle a quien de verdad decide.
+    for faltante in ("mp_user_id", "mp_pos_id"):
         datos = {
-            "access_token": "APP_USR-x", "user_id": "1", "pos_id": "CAJA01",
-            "webhook_secret": "", "auto_facturar": False,
+            "mp_access_token": "APP_USR-x", "mp_user_id": "1", "mp_pos_id": "CAJA01",
+            "mp_auto_facturar_ventas": False,
         }
         datos[faltante] = ""
-        assert api.put("/config/mercadopago", json=datos).json()["configurado"] is False, faltante
+        api.put(RUTA_MP, json=datos)
+        assert cobro_qr.esta_configurado() is False, faltante
 
     # Control positivo: con los tres, sí. Sin esto, un `esta_configurado()` que
     # devolviera siempre False pasaría el test.
-    assert api.put("/config/mercadopago", json={
-        "access_token": "APP_USR-x", "user_id": "1", "pos_id": "CAJA01",
-        "webhook_secret": "", "auto_facturar": False,
-    }).json()["configurado"] is True
+    api.put(RUTA_MP, json={
+        "mp_access_token": "APP_USR-x", "mp_user_id": "1", "mp_pos_id": "CAJA01",
+        "mp_auto_facturar_ventas": False,
+    })
+    assert cobro_qr.esta_configurado() is True
+
+
+def test_el_token_vacio_NO_borra_el_que_estaba(api):
+    """🔴 La pantalla muestra el token ENMASCARADO, no el token. Si mandar el
+    campo vacio lo borrara, guardar el POS ID desconectaria la cuenta sin que
+    nadie lo pidiera."""
+    _configurar_mp(api)
+    api.put(RUTA_MP, json={
+        "mp_access_token": "", "mp_user_id": "123456789", "mp_pos_id": "CAJA02",
+    })
+    assert config_manager.load()["mp_access_token"] == "APP_USR-token-de-prueba"
+    assert config_manager.load()["mp_pos_id"] == "CAJA02"
+
+
+def test_el_secreto_del_webhook_vacio_tampoco(api):
+    """Sin la firma el webhook del portal NO procesa nada: borrarla sin querer
+    deja de confirmar todas las reservas pagadas, y nada lo avisa."""
+    _configurar_mp(api)
+    api.put(RUTA_MP, json={
+        "mp_access_token": "", "mp_webhook_secret": "",
+        "mp_user_id": "123456789", "mp_pos_id": "CAJA01",
+    })
+    assert config_manager.load()["mp_webhook_secret"] == SECRETO_WEBHOOK
+
+
+def test_el_token_no_vuelve_en_claro_por_la_API(api):
+    """El endpoint propio lo devolvia entero en el JSON de una pantalla."""
+    _configurar_mp(api)
+    visible = api.get(RUTA_MP).json()
+    assert visible["mp_access_token"] != "APP_USR-token-de-prueba"
+    assert visible["mp_access_token_cargado"] is True
 
 
 # ── Qué se pone a cobrar ─────────────────────────────────────────────────
@@ -593,7 +639,9 @@ def test_el_toggle_de_la_automatica_sobrevive_a_recargar_la_config(api):
     como `extra_defaults`. Se verifica contra el `config.json` en disco —con un
     `load()` pelado— y no sólo contra el default en memoria."""
     _configurar_mp(api, auto_facturar=True)
-    assert api.get("/config/mercadopago").json()["auto_facturar"] is True
+    # 🔑 El nombre en la API es el de la familia --`mp_auto_facturar_ventas`,
+    # porque la pantalla es una sola-- y el de la BASE es el de este producto.
+    assert api.get(RUTA_MP).json()["mp_auto_facturar_ventas"] is True
     assert cobro_qr.auto_facturar_prendida() is True
     assert config_manager.load().get("mp_auto_facturar_reservas") is True
 

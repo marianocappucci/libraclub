@@ -30,11 +30,13 @@ from libraauth.session_auth import (
 )
 from libraauth.smtp_settings import SmtpSettingsRepository, resolver_smtp_config
 from libraauth.terminos import TerminosRepository, build_terminos_router
+from libracore.arca_router import build_arca_router
 from libracore.config_router import (
     build_backup_router,
     build_empresa_admin_router,
     build_empresa_router,
 )
+from libracore.mp_config_router import build_mp_config_router
 from libracore.respaldo import Instancia
 
 from app import db
@@ -48,9 +50,7 @@ from app.routers import caja as caja_router
 from app.routers import cajas as cajas_router
 from app.routers import cuenta_corriente as cuenta_corriente_router
 from app.routers import devoluciones as devoluciones_router
-from app.routers import facturacion as facturacion_router
 from app.routers import facturas as facturas_router
-from app.routers import mercadopago as mercadopago_router
 from app.routers import mp_bandeja as mp_bandeja_router
 from app.routers import portal as portal_router
 from app.routers import resumen as resumen_router
@@ -287,9 +287,30 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # que haya que dejar abierto — el día que la factura o el ticket necesiten
     # el nombre de la empresa desde una pantalla de staff, se abre ahí y con ese
     # motivo, no antes.
-    # `GET`/`PUT /config/arca`, la pestaña de ARCA de la pantalla compartida.
-    # Sin `/api` a propósito: es el prefijo que consume el kit — ver el módulo.
-    app.include_router(facturacion_router.router, dependencies=[Depends(require_admin)])
+    # ARCA, del motor. Reemplaza al `routers/facturacion.py` propio, que sobre
+    # el MISMO prefijo `/config/arca` sólo tenía `GET` y `PUT`, y pedía el
+    # certificado como un PATH DEL FILESYSTEM del servidor en un campo de texto.
+    #
+    # 🔴 Con eso el alta no se podía hacer desde el navegador: alguien tenía que
+    # dejar el `.crt` y el `.key` dentro del volumen del contenedor a mano. Con
+    # el router del motor el par se sube y se VALIDA antes de escribirse, la
+    # pantalla dice cuándo vence el certificado, y hay un botón que autentica
+    # contra WSAA de verdad.
+    #
+    # `empresa_por_defecto` es el slug con el que `servicios/facturacion.py` lee
+    # la configuración. Sin él, una instancia que todavía no facturó crearía la
+    # fila como `default` — donde ese servicio no mira nunca.
+    #
+    # ⚠️ `exigir_base` NO es opcional y no viene del motor: sin ella, una
+    # instancia sin `LIBRACLUB_LIBRACORE_DATABASE_URL` contestaría un 500
+    # genérico en vez del 503 que dice **qué variable falta**. Es la misma
+    # dependencia que ya usaba el router propio.
+    app.include_router(
+        build_arca_router(
+            prefix="/config/arca", empresa_por_defecto=servicio_facturacion.EMPRESA,
+        ),
+        dependencies=[Depends(require_admin), Depends(exigir_base)],
+    )
 
     # Los comprobantes: los doce endpoints del motor —listado, alta manual,
     # detalle, duplicar, autorizar, cobrar, mandar por mail, borrar, nota de
@@ -322,7 +343,21 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # Admin por el mismo motivo que ARCA — quien escriba acá cambia a qué cuenta
     # va la plata del complejo. El mostrador *usa* el QR sin poder leer esto:
     # `GET /api/reservas/mp/estado` le dice si está configurado, y nada más.
-    app.include_router(mercadopago_router.router, dependencies=[Depends(require_admin)])
+    #
+    # 🔴 `campo_auto_facturar` es la clave de `config.json` que lee
+    # `servicios/cobro_qr`: acá lo que se cobra con el QR es un TURNO de cancha,
+    # no una venta, y el interruptor se guardó siempre como
+    # `mp_auto_facturar_reservas`. Con la clave por defecto del motor
+    # —`..._ventas`— el interruptor escribiría donde nadie lee: la pantalla
+    # diría que está prendido y no se emitiría ninguna factura, sin un solo
+    # error. Ver LibraCore v1.62.0.
+    app.include_router(
+        build_mp_config_router(
+            prefix="/config/mercadopago",
+            campo_auto_facturar="mp_auto_facturar_reservas",
+        ),
+        dependencies=[Depends(require_admin)],
+    )
 
     # La bandeja de MercadoPago: conciliar lo que entró y facturarlo. Es la
     # del motor, con el reparto por `external_reference` de este producto —
