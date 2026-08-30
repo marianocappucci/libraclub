@@ -17,7 +17,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Caja, partirImporte } from './Caja'
-import type { TurnoPorCobrar } from '@/lib/api'
+import type { Cancha, TurnoPorCobrar } from '@/lib/api'
 
 // La pantalla linkea a `/caja/movimientos`: sin router, `<Link>` tumba el árbol
 // entero con un error de contexto que no dice nada de lo que se está probando.
@@ -46,6 +46,40 @@ const MOVIMIENTOS = [
   { id: 12, fecha: '2026-08-28', tipo: 'egreso' as const, concepto: 'Retiro a banco', monto: 5000, medio_pago: 'efectivo' },
 ]
 
+/** Las canchas de la sede, para el mapa.
+ *
+ * 🔑 **La tercera no tiene cuenta abierta, y ése es el punto.** Antes la
+ * pantalla sólo dibujaba lo que devuelve `/agenda/por-cobrar`, así que una
+ * cancha libre no existía; el mapa tiene que mostrarla igual. Sin esta tercera
+ * fila, un mapa que siguiera dibujando sólo las que deben plata pasaría los
+ * tests igual.
+ *
+ * La cuarta está **inactiva** y no se dibuja: una cancha dada de baja no es una
+ * cancha libre.
+ */
+const CANCHAS: Cancha[] = [
+  {
+    id: 1, sucursal_id: 1, nombre: 'Cancha 1', deporte: 'padel',
+    duracion_turno_min: 90, techada: true, iluminacion: true, superficie: null,
+    orden: 1, activa: true, observaciones: null,
+  },
+  {
+    id: 2, sucursal_id: 1, nombre: 'Cancha 2', deporte: 'padel',
+    duracion_turno_min: 90, techada: true, iluminacion: true, superficie: null,
+    orden: 2, activa: true, observaciones: null,
+  },
+  {
+    id: 3, sucursal_id: 1, nombre: 'Cancha 3', deporte: 'futbol',
+    duracion_turno_min: 60, techada: false, iluminacion: true, superficie: null,
+    orden: 3, activa: true, observaciones: null,
+  },
+  {
+    id: 9, sucursal_id: 1, nombre: 'Cancha vieja', deporte: 'padel',
+    duracion_turno_min: 90, techada: false, iluminacion: false, superficie: null,
+    orden: 9, activa: false, observaciones: null,
+  },
+]
+
 /** Dos canchas con cuenta abierta. La segunda ya tiene una seña.
  *
  * 🔑 Los `pendiente` son **distintos entre sí y distintos del total**: con dos
@@ -70,11 +104,42 @@ const CUENTAS: TurnoPorCobrar[] = [
   },
 ]
 
+/** La grilla del día que devuelve `/api/disponibilidad/semana`.
+ *
+ * 🔑 **Las horas se arman contra el reloj de la corrida y no se escriben fijas.**
+ * El mapa decide «jugando» comparando el turno con `ahora`, así que un fixture
+ * con horas de un día cualquiera daría siempre «libre» y ese camino no se
+ * ejercitaría nunca. La cancha 3 tiene un turno **en curso** —empezó hace media
+ * hora y termina en una— y ninguna cuenta pendiente: es el caso que distingue
+ * «jugando» de «a cobrar».
+ */
+function semanaDeHoy() {
+  const hoy = new Date()
+  const iso = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`
+  const desde = new Date(hoy.getTime() - 30 * 60_000).toISOString()
+  const hasta = new Date(hoy.getTime() + 60 * 60_000).toISOString()
+  return {
+    desde: iso,
+    hasta: iso,
+    canchas: {
+      '3': {
+        [iso]: [{
+          comienza_at: desde, termina_at: hasta, libre: false, precio: '9000.00',
+          reserva_id: 77, estado: 'confirmada', cliente: 'Grupo del martes',
+          motivo: null, cobrado: true,
+        }],
+      },
+    },
+  }
+}
+
 const estado = {
   hayTurno: true,
   mostradores: MOSTRADORES,
   movimientos: MOVIMIENTOS,
   cuentas: CUENTAS,
+  canchas: CANCHAS,
+  semana: semanaDeHoy(),
   consumos: [] as { descripcion: string; cantidad: number; precio_unitario: number; importe: number }[],
   qr: { disponible: true, auto_facturar: true },
   //: Si esta instancia monta el simulador del QR. `false` = producción, y la
@@ -116,6 +181,8 @@ beforeEach(() => {
   rol.valor = 'admin'
   estado.movimientos = MOVIMIENTOS
   estado.cuentas = CUENTAS
+  estado.canchas = CANCHAS
+  estado.semana = semanaDeHoy()
   estado.consumos = []
   estado.qr = { disponible: true, auto_facturar: true }
   estado.puedeSimular = true
@@ -137,6 +204,13 @@ beforeEach(() => {
       ]))
     }
     if (u.includes('/api/cajas')) return Promise.resolve(json(estado.mostradores))
+    // 🔑 Las dos que necesita el mapa de canchas, y que la lista anterior no
+    // pedía: sin ellas la pantalla no sabe qué canchas hay ni cuáles están
+    // jugando, y sólo podría volver a dibujar lo que debe plata.
+    if (u.includes('/api/canchas')) return Promise.resolve(json(estado.canchas))
+    if (u.includes('/api/disponibilidad/semana')) {
+      return Promise.resolve(json(estado.semana))
+    }
     if (u.includes('/api/reservas/agenda/por-cobrar')) {
       return Promise.resolve(json(estado.cuentas))
     }
@@ -291,10 +365,22 @@ describe('un turno de caja es de UNA jornada', () => {
   it('🔴 pero el cierre sigue habilitado: es la salida', async () => {
     // 🔑 Frenar el cobro **y** el cierre dejaría la caja sin ninguna salida —
     // que es peor que el problema, porque el operador no podría ni corregirlo.
+    //
+    // ⚠️ Desde el 2026-08-29 el conteo vive en un diálogo, así que este test
+    // **lo abre**: antes alcanzaba con buscar el campo en la pantalla. Que el
+    // campo aparezca al abrirlo es justamente lo que hay que seguir probando —
+    // esconder el cierre detrás de un botón no puede convertirse en no tenerlo.
     estado.diasAbierto = 2
     montar()
+    await userEvent.click(await screen.findByRole('button', { name: /Cerrar caja/ }))
     expect(await screen.findByLabelText('Efectivo contado')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Cerrar caja/ })).toBeInTheDocument()
+    // Y el esperado se muestra **adentro del diálogo**, que es contra lo que se
+    // compara lo contado: mandarlo a recordarlo de la pantalla de atrás es cómo
+    // se tipea el número equivocado. Se busca con `within` y no en toda la
+    // pantalla porque el arqueo de atrás también lo dice — un `getByText` suelto
+    // pasaría encontrando ése y no probaría nada del diálogo.
+    const dialogo = within(screen.getByRole('dialog'))
+    expect(dialogo.getByText(/Esperado en el cajón/)).toBeInTheDocument()
   })
 
   it('🔑 con UN día dice «un día» y no «1 días»', async () => {
@@ -302,6 +388,78 @@ describe('un turno de caja es de UNA jornada', () => {
     montar()
     expect(await screen.findAllByText(/hace un día/i)).toHaveLength(2)
     expect(screen.queryByText(/1 días/)).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * El mapa de canchas, que reemplazó a la lista el 2026-08-29.
+ *
+ * 🔴 **Lo que se prueba acá es lo que la lista NO hacía.** La pantalla anterior
+ * dibujaba sólo lo que devuelve `/agenda/por-cobrar` —las canchas que ya deben
+ * plata— y por eso se veía vacía. Estos tests fallan si el mapa vuelve a mostrar
+ * únicamente eso, que es la regresión posible.
+ */
+describe('el mapa de canchas', () => {
+  it('🔴 muestra TAMBIÉN la cancha sin cuenta abierta — es el punto del cambio', async () => {
+    montar()
+    // La 1 y la 2 deben plata; la 3 no, y con la lista anterior no existía.
+    expect(await screen.findByRole('button', { name: /Cancha 1/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Cancha 3/ })).toBeInTheDocument()
+  })
+
+  it('🔴 una cancha dada de baja NO es una cancha libre, y no se dibuja', async () => {
+    montar()
+    await screen.findByRole('button', { name: /Cancha 1/ })
+    expect(screen.queryByRole('button', { name: /Cancha vieja/ })).not.toBeInTheDocument()
+  })
+
+  it('🔑 distingue «a cobrar» de «jugando»: no es lo mismo deber que estar adentro', async () => {
+    montar()
+    const conDeuda = await screen.findByRole('button', { name: /Cancha 1/ })
+    expect(conDeuda.textContent).toMatch(/A cobrar/)
+    // La 3 tiene un turno en curso y nada pendiente.
+    expect(screen.getByRole('button', { name: /Cancha 3/ }).textContent).toMatch(/Jugando/)
+  })
+
+  it('🔴 sólo se puede entrar donde hay algo que cobrar', async () => {
+    // Una cancha libre que abre un panel vacío es un click que no lleva a nada.
+    montar()
+    await screen.findByRole('button', { name: /Cancha 1/ })
+    expect(screen.getByRole('button', { name: /Cancha 1/ })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /Cancha 3/ })).toBeDisabled()
+  })
+
+  it('🔑 sin ninguna cuenta abierta lo dice, aunque el mapa ya no esté vacío', async () => {
+    // 🔴 Con la lista, cero cuentas era una pantalla en blanco y el cartel era
+    // lo único que había. Ahora se ven las canchas libres, y sin la frase el
+    // encargado tendría que deducir de tres tarjetas sin ámbar que no le falta
+    // cobrar nada.
+    estado.cuentas = []
+    montar()
+    expect(await screen.findByText(/No hay canchas con cuenta abierta hoy/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Cancha 1/ })).toBeInTheDocument()
+  })
+
+  it('🔴 dos cuentas en la misma cancha se dicen, y se puede elegir cuál cobrar', async () => {
+    // Pasa de verdad: dos turnos del día que quedaron sin cerrar. Con la tarjeta
+    // mostrando sólo la suma, el encargado cobra una y no entiende por qué sigue
+    // en ámbar.
+    estado.cuentas = [
+      ...CUENTAS,
+      {
+        reserva_id: 43, cancha_id: 1, cancha: 'Cancha 1', deporte: 'padel',
+        comienza_at: '2026-08-28T22:00:00-03:00', termina_at: '2026-08-28T23:30:00-03:00',
+        cliente: 'Los del jueves', estado: 'confirmada',
+        total: 5000, cobrado: 0, pendiente: 5000,
+      },
+    ]
+    montar()
+    const tarjeta = await screen.findByRole('button', { name: /Cancha 1/ })
+    expect(tarjeta.textContent).toMatch(/2 cuentas/)
+    // Y el importe es la suma de las dos, no el de la primera.
+    expect(tarjeta.textContent).toMatch(/19\.000/)
+    await userEvent.click(tarjeta)
+    expect(await screen.findByRole('button', { name: /Los del jueves/ })).toBeInTheDocument()
   })
 })
 

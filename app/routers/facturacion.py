@@ -1,48 +1,22 @@
-"""`GET`/`PUT /config/arca` — la configuración de facturación de la instancia.
+"""La guarda de la facturacion: 503 con el motivo cuando falta la base.
 
-El prefijo es `/config/arca` y **no** `/api/config/arca` porque es el que
-consume la pestaña de ARCA de `libra-ui`, que ya comparten los tres verticales
-de instancia única. Renombrarlo obligaría a forkear esa pantalla.
+Hasta el 2026-08-30 este modulo tenia ademas el router de `GET`/`PUT
+/config/arca`. Lo sirve ahora `libracore.arca_router`, que sobre el mismo
+prefijo hace lo que este no podia: subir el certificado y la clave, validarlos
+antes de escribirlos, decir cuando vence, y autenticar contra WSAA.
 
-> ⚠️ Es la excepción a la convención `/api/*` de este producto, y por eso está
-> escrito acá. La otra ruta del kit que no lleva `/api` es
-> `/auth/change-password`, por el mismo motivo.
+🔴 Lo que NO vino del motor y por eso este archivo sigue existiendo es
+`exigir_base`. El router del kit no sabe nada de
+`LIBRACLUB_LIBRACORE_DATABASE_URL`: sin esta dependencia, una instancia sin esa
+variable contestaria un 500 generico y el complejo veria "algo fallo" sin saber
+que lo que hay que hacer es agregar una variable de entorno.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import HTTPException
 
 from app.servicios import facturacion
-
-router = APIRouter(prefix="/config/arca", tags=["facturacion"])
-
-
-class ConfigArcaEntrada(BaseModel):
-    cuit: str = Field(min_length=1, max_length=13)
-    punto_venta: int = Field(ge=1, le=99999)
-    certificado_path: str = ""
-    clave_path: str = ""
-    #: `homologacion` por default: emitir contra producción es deliberado.
-    ambiente: str = "homologacion"
-
-
-class ConfigArcaSalida(BaseModel):
-    empresa: str
-    cuit: str
-    punto_venta: int
-    ambiente: str
-    certificado_path: str
-    clave_path: str
-
-
-def _salida(cfg: dict) -> ConfigArcaSalida:
-    return ConfigArcaSalida(
-        empresa=cfg["empresa"], cuit=cfg["cuit"], punto_venta=cfg["punto_venta"],
-        ambiente=cfg["ambiente"], certificado_path=cfg["certificado_path"],
-        clave_path=cfg["clave_path"],
-    )
 
 
 def exigir_base() -> None:
@@ -69,21 +43,3 @@ def exigir_base() -> None:
             "La facturación no está configurada en esta instancia: falta "
             "LIBRACLUB_LIBRACORE_DATABASE_URL.",
         )
-
-
-@router.get("", response_model=ConfigArcaSalida | None)
-def obtener() -> ConfigArcaSalida | None:
-    exigir_base()
-    cfg = facturacion.obtener_config_arca()
-    return _salida(cfg) if cfg else None
-
-
-@router.put("", response_model=ConfigArcaSalida)
-def guardar(datos: ConfigArcaEntrada) -> ConfigArcaSalida:
-    exigir_base()
-    return _salida(
-        facturacion.guardar_config_arca(
-            datos.cuit, datos.punto_venta, datos.clave_path,
-            datos.certificado_path, datos.ambiente,
-        )
-    )
