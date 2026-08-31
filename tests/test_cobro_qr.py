@@ -121,12 +121,34 @@ def mp(monkeypatch):
     return _MpFalso().instalar(monkeypatch)
 
 
+def prefijo_del_motor() -> str:
+    """El prefijo por defecto de `build_mp_config_router`, leido de su firma.
+
+    🔴 **No se repite el string.** Este archivo lo tenia escrito a mano y por eso
+    no vio nada cuando el producto montaba otro: un test que declara la ruta que
+    espera confirma su propia suposicion, no la del codigo.
+    """
+    import inspect
+
+    from libracore.mp_config_router import build_mp_config_router
+
+    return inspect.signature(build_mp_config_router).parameters["prefix"].default
+
+
 #: Las credenciales las sirve `libracore.mp_config_router` desde el 2026-08-30.
 #: El endpoint propio que vivia aca devolvia el ACCESS TOKEN EN CLARO; el del
-#: motor lo devuelve enmascarado. El prefijo es el mismo, y el interruptor se
-#: sigue guardando en `mp_auto_facturar_reservas` --lo que se cobra con este QR
-#: es un turno de cancha, no una venta-- gracias a `campo_auto_facturar`.
-RUTA_MP = "/config/mercadopago"
+#: motor lo devuelve enmascarado. El interruptor se sigue guardando en
+#: `mp_auto_facturar_reservas` --lo que se cobra con este QR es un turno de
+#: cancha, no una venta-- gracias a `campo_auto_facturar`.
+#:
+#: 🔴 **Acá decia "El prefijo es el mismo", y NO lo era.** El endpoint propio
+#: vivia en `/config/mercadopago` y el del motor va en
+#: `/api/config/mercadopago`; al reemplazar uno por otro se conservo el prefijo
+#: viejo. Este archivo pedia la ruta vieja --asi que pasaba-- y el mock del test
+#: del frontend devolvia datos para la nueva --asi que tambien pasaba--:
+#: **ninguno de los dos cruzaba la frontera**, y la pantalla real recibia un 404
+#: y se dibujaba vacia, con la configuracion perfecta del otro lado.
+RUTA_MP = prefijo_del_motor()
 
 
 def _configurar_mp(api, auto_facturar=False):
@@ -832,3 +854,42 @@ def test_los_dos_simuladores_miran_el_MISMO_predicado():
     # de arriba pasaria con un `es_produccion` que devuelve siempre lo mismo.
     assert any(es_produccion(n) for n in nombres)
     assert any(not es_produccion(n) for n in nombres)
+
+
+# ── El nudo entre el backend y la pantalla ───────────────────────────────────
+
+def test_la_pantalla_de_mercadopago_esta_donde_el_kit_la_busca(api):
+    """🔴 El guard que faltaba: que la ruta montada sea la que pide la tarjeta.
+
+    `MercadoPagoCard` de `libra-ui` pega a su `basePath` por defecto, que es el
+    mismo prefijo por defecto de `build_mp_config_router`. Hasta el 2026-08-31
+    este producto montaba el router en `/config/mercadopago` —la ruta del
+    endpoint propio de antes de la unificación— y la pantalla recibía un **404**:
+    caía al `catch`, se dibujaba vacía, sin campos y sin el cartel de ambiente,
+    con la configuración perfectamente cargada del otro lado. Sin ningún error
+    visible salvo mirar la pantalla.
+
+    Los dos tests que debían agarrarlo estaban en verde: éste pedía la ruta
+    vieja y el mock del test del frontend devolvía datos para la nueva. Cada
+    mitad confirmaba su propia suposición y **ninguna cruzaba la frontera**.
+
+    El prefijo se lee del motor, no se escribe acá: si el motor cambia su
+    default, este test lo dice en vez de seguir tapándolo.
+    """
+    ruta = prefijo_del_motor()
+
+    r = api.get(ruta)
+    assert r.status_code != 404, (
+        f"la pantalla de MercadoPago pide `{ruta}` y este producto no la monta "
+        f"ahí: la tarjeta se va a dibujar vacía, con la configuración cargada.")
+    assert r.status_code == 200, r.text
+
+
+def test_el_prefijo_viejo_ya_no_responde(api):
+    """El control del de arriba, y la mitad que dice que se MOVIÓ.
+
+    Sin esto, montar el router en las dos rutas dejaría el test anterior en
+    verde y la duplicación viva: dos caminos a la misma configuración, que es
+    justo como aparecen los dos stores.
+    """
+    assert api.get("/config/mercadopago").status_code == 404

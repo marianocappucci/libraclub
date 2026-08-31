@@ -340,23 +340,33 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
         dependencies=[Depends(require_admin), Depends(exigir_base)],
     )
 
-    # `GET`/`PUT /config/mercadopago`: con qué cuenta cobra el QR del mostrador.
-    # Admin por el mismo motivo que ARCA — quien escriba acá cambia a qué cuenta
-    # va la plata del complejo. El mostrador *usa* el QR sin poder leer esto:
-    # `GET /api/reservas/mp/estado` le dice si está configurado, y nada más.
+    # `GET`/`PUT /api/config/mercadopago`: con qué cuenta cobra el QR del
+    # mostrador. Admin por el mismo motivo que ARCA — quien escriba acá cambia a
+    # qué cuenta va la plata del complejo. El mostrador *usa* el QR sin poder
+    # leer esto: `GET /api/reservas/mp/estado` le dice si está configurado, y
+    # nada más.
     #
-    # 🔴 `campo_auto_facturar` es la clave de `config.json` que lee
-    # `servicios/cobro_qr`: acá lo que se cobra con el QR es un TURNO de cancha,
-    # no una venta, y el interruptor se guardó siempre como
-    # `mp_auto_facturar_reservas`. Con la clave por defecto del motor
-    # —`..._ventas`— el interruptor escribiría donde nadie lee: la pantalla
-    # diría que está prendido y no se emitiría ninguna factura, sin un solo
-    # error. Ver LibraCore v1.62.0.
+    # 🔴 **El prefijo NO se escribe acá: se deja el del motor.** Hasta el
+    # 2026-08-31 esto montaba en `/config/mercadopago` —la ruta del endpoint
+    # propio que existía antes de la unificación— mientras la tarjeta compartida
+    # de `libra-ui` pide `/api/config/mercadopago`. La pantalla recibía un 404,
+    # caía al `catch` y se dibujaba **vacía**: sin campos y sin el cartel de
+    # ambiente, con la configuración perfectamente cargada del otro lado. Nadie
+    # lo vio hasta que el humano fue a mirar la pantalla.
+    #
+    # Los dos tests que debían agarrarlo estaban en verde porque **ninguno
+    # cruzaba la frontera**: el de backend pedía la ruta vieja y el mock del de
+    # frontend devolvía datos para la nueva. Cada mitad confirmaba su propia
+    # suposición.
+    #
+    # 🔴 `campo_auto_facturar` sí es de acá: es la clave de `config.json` que lee
+    # `servicios/cobro_qr`, porque lo que se cobra con este QR es un TURNO de
+    # cancha, no una venta. Con la clave por defecto del motor —`..._ventas`— el
+    # interruptor escribiría donde nadie lee: la pantalla diría que está
+    # prendido y no se emitiría ninguna factura, sin un solo error. Ver LibraCore
+    # v1.62.0.
     app.include_router(
-        build_mp_config_router(
-            prefix="/config/mercadopago",
-            campo_auto_facturar="mp_auto_facturar_reservas",
-        ),
+        build_mp_config_router(campo_auto_facturar="mp_auto_facturar_reservas"),
         dependencies=[Depends(require_admin)],
     )
 
