@@ -38,6 +38,7 @@ from libracore.config_router import (
 )
 from libracore.mp_config_router import build_mp_config_router
 from libracore.respaldo import Instancia
+from libracore.smtp_router import build_smtp_probe_router
 
 from app import db
 from app.auth import UserRepository, construir_session_auth, require_admin
@@ -473,6 +474,18 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
         smtp_config=smtp_config,
     )
     app.include_router(build_smtp_settings_router())
+    # `POST /admin/smtp/probar`, del motor: abre la conexion, negocia TLS y
+    # hace login.
+    #
+    # 🔑 Resuelve por el MISMO camino que los envios, y por eso el boton
+    # significa algo: un endpoint que probara otra config diria "Conectado"
+    # contra un servidor mientras los mails salen por otro. El gate va afuera
+    # porque el router del motor no trae ninguno propio, y esto abre una
+    # sesion SMTP con las credenciales del cliente.
+    app.include_router(
+        build_smtp_probe_router(smtp_config),
+        dependencies=[Depends(require_admin)],
+    )
     # `GET /terminos`, `POST /terminos/aceptar`, `GET /terminos/historial`.
     # NO se gatea desde afuera: es el unico camino para salir del gate.
     app.include_router(build_terminos_router())

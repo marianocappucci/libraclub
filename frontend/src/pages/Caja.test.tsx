@@ -437,7 +437,11 @@ describe('el mapa de canchas', () => {
     estado.cuentas = []
     montar()
     expect(await screen.findByText(/No hay canchas con cuenta abierta hoy/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Cancha 1/ })).toBeInTheDocument()
+    // 🔴 `findBy` y no `getBy`: el cartel y las tarjetas de cancha salen de dos
+    // pedidos distintos, asi que ver el primero no garantiza que el segundo ya
+    // haya llegado. Con la asercion sincronica esto pasaba casi siempre y
+    // fallaba en el CI (2026-08-31), donde la maquina es mas lenta.
+    expect(await screen.findByRole('button', { name: /Cancha 1/ })).toBeInTheDocument()
   })
 
   it('🔴 dos cuentas en la misma cancha se dicen, y se puede elegir cuál cobrar', async () => {
