@@ -437,7 +437,12 @@ describe('el mapa de canchas', () => {
     estado.cuentas = []
     montar()
     expect(await screen.findByText(/No hay canchas con cuenta abierta hoy/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Cancha 1/ })).toBeInTheDocument()
+    // 🔑 `findByRole` y no `getByRole`: el cartel y las canchas salen de DOS
+    // fetches distintos, asi que haber esperado al primero no dice nada del
+    // segundo. Con `get` el test fallaba **de a ratos** --1 de cada 8 corridas
+    // localmente, y tumbo el CI de develop el 2026-08-31--, que es peor que
+    // fallar siempre: parece un problema del cambio que uno acaba de mergear.
+    expect(await screen.findByRole('button', { name: /Cancha 1/ })).toBeInTheDocument()
   })
 
   it('🔴 dos cuentas en la misma cancha se dicen, y se puede elegir cuál cobrar', async () => {
