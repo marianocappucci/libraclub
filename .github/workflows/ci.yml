@@ -56,6 +56,61 @@ jobs:
           pg_restore --version
           pg_restore --version | grep -q ' 16\.'
 
+      # Los repos de la familia vuelven a PRIVADO el 2026-09-01: sin
+      # credenciales, `pip` no puede clonarlos y el build falla adentro del
+      # install, con un error de git que no dice cual repo fallo.
+      #
+      # Una deploy key ES una identidad por repo, y con dos o mas cargadas SSH
+      # las ofrece en orden: GitHub autentica con la primera que acepta, que
+      # puede no ser la del repo que se esta clonando. Por eso el alias
+      # `github-<repo>` con `IdentitiesOnly yes`, y no `github.com` a secas.
+      #
+      # Estructura generalizada (la misma de libradesk/gestiolibra/medlibra):
+      # agregar una dependencia privada nueva es una linea de `configurar`.
+      - name: Configurar acceso SSH a las dependencias privadas de Libra
+        env:
+          LIBRAAUTH_DEPLOY_KEY: ${{ secrets.LIBRAAUTH_DEPLOY_KEY }}
+          LIBRACORE_DEPLOY_KEY: ${{ secrets.LIBRACORE_DEPLOY_KEY }}
+          LIBRACOMMERCE_DEPLOY_KEY: ${{ secrets.LIBRACOMMERCE_DEPLOY_KEY }}
+          LIBRAGENDA_DEPLOY_KEY: ${{ secrets.LIBRAGENDA_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          configurar() {
+            repo=$1; clave=$2
+            if [ -z "$clave" ]; then
+              echo "::error::Falta el secret con la deploy key de $repo en este repositorio."
+              echo "Sin el, pip no puede clonar $repo (repo privado) y el build falla."
+              echo "Es la clave privada de una deploy key de solo lectura sobre marianocappucci/$repo."
+              exit 1
+            fi
+            printf '%s\n' "$clave" > ~/.ssh/id_"$repo"
+            chmod 600 ~/.ssh/id_"$repo"
+            printf 'Host github-%s\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/id_%s\n  IdentitiesOnly yes\n' \
+              "$repo" "$repo" >> ~/.ssh/config
+            git config --global \
+              url."git@github-$repo:marianocappucci/$repo".insteadOf \
+              "https://github.com/marianocappucci/$repo"
+          }
+          configurar libraauth "$LIBRAAUTH_DEPLOY_KEY"
+          configurar libracore "$LIBRACORE_DEPLOY_KEY"
+          configurar libracommerce "$LIBRACOMMERCE_DEPLOY_KEY"
+          configurar libragenda "$LIBRAGENDA_DEPLOY_KEY"
+
+      # Confirma que cada clave autentica contra SU repo y no contra otro: es
+      # exactamente el modo de fallar que motiva los alias de arriba, y sin
+      # este paso recien se notaria adentro del pip install.
+      - name: Verificar que cada deploy key resuelve a su propio repo
+        run: |
+          for repo in libraauth libracore libracommerce libragenda; do
+            saludo=$(ssh -o StrictHostKeyChecking=yes -T "git@github-$repo" 2>&1 || true)
+            echo "$repo -> $saludo"
+            case "$saludo" in
+              *"marianocappucci/$repo"*) ;;
+              *) echo "::error::La deploy key de $repo no resuelve a marianocappucci/$repo."; exit 1 ;;
+            esac
+          done
+
       - run: pip install -e '.[dev]'
 
       - name: Lint
@@ -113,6 +168,31 @@ jobs:
       # `npm ci`, no `npm install`: instala exactamente lo del lock. Con
       # `install` el CI podría estar probando otras versiones que las que se
       # publican.
+      # `libra-ui` vuelve a repo PRIVADO el 2026-09-01 y se instala por
+      # git+https: sin credenciales `npm ci` falla al clonarlo. Mismo alias por
+      # repo que el backend, y misma verificacion del saludo.
+      - name: Configurar acceso a libra-ui
+        env:
+          LIBRA_UI_DEPLOY_KEY: ${{ secrets.LIBRA_UI_DEPLOY_KEY }}
+        run: |
+          if [ -z "$LIBRA_UI_DEPLOY_KEY" ]; then
+            echo "::error::Falta el secret LIBRA_UI_DEPLOY_KEY en este repositorio."
+            exit 1
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          printf '%s\n' "$LIBRA_UI_DEPLOY_KEY" > ~/.ssh/id_libra_ui
+          chmod 600 ~/.ssh/id_libra_ui
+          printf 'Host github-libra-ui\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/id_libra_ui\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+          git config --global url."git@github-libra-ui:marianocappucci/libra-ui".insteadOf "https://github.com/marianocappucci/libra-ui"
+          saludo=$(ssh -o StrictHostKeyChecking=yes -T git@github-libra-ui 2>&1 || true)
+          echo "libra-ui -> $saludo"
+          case "$saludo" in
+            *"marianocappucci/libra-ui"*) ;;
+            *) echo "::error::La deploy key no resuelve a marianocappucci/libra-ui."; exit 1 ;;
+          esac
+        working-directory: .
+
       - run: npm ci
 
       - name: Lint
