@@ -24,6 +24,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from libracore import config_manager, mp_api, mp_sync
+from libracore import pagos as acreditacion
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
@@ -480,14 +481,19 @@ async def webhook(request: Request, sesion: Session = Depends(obtener_sesion)):
         # bandeja tampoco va — ahí lo resolvió alguien más.
         return {"ok": True, "motivo": "referencia desconocida"}
 
-    if estado_mp == "approved":
+    # 🔑 La MISMA traducción que usa el poll del QR (`servicios/cobro_qr.py`).
+    # Estaba escrita dos veces con los mismos literales, y dos copias del mismo
+    # `if` es de donde salen las divergencias.
+    traducido = acreditacion.estado_desde_mercadopago(estado_mp)
+
+    if traducido is acreditacion.EstadoAcreditacion.APROBADO:
         cambio = servicio_pagos.aplicar_pago_aprobado(
             sesion, pago, payment_id=payment_id, estado_mp=estado_mp
         )
         sesion.commit()
         return {"ok": True, "confirmada": cambio}
 
-    if estado_mp in ("rejected", "cancelled"):
+    if traducido is acreditacion.EstadoAcreditacion.RECHAZADO:
         servicio_pagos.aplicar_pago_rechazado(
             sesion, pago, payment_id=payment_id, estado_mp=estado_mp
         )
