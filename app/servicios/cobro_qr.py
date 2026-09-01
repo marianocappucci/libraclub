@@ -49,6 +49,7 @@ import logging
 from decimal import Decimal
 
 from libracore import config_manager, mp_api
+from libracore import pagos as acreditacion
 from sqlalchemy.orm import Session
 
 from app.models.reservas import EstadoPago, PagoDeReserva, Reserva
@@ -303,13 +304,30 @@ async def estado_del_cobro(
     estado_mp = str(detalle.get("status") or "pendiente")
     payment_id = str(detalle["id"])
 
-    if estado_mp in ("rejected", "cancelled"):
+    # 🔑 **La traducción sale del motor, no de un `if` escrito acá.**
+    #
+    # Este producto tiene su propio `EstadoPago` y lo conserva: dice algo que el
+    # del motor no dice —"APROBADO es lo único que confirma la reserva"—, y es
+    # la regla del portal. Lo que se unifica es la otra mitad: **qué quiso decir
+    # MercadoPago**, que no tiene nada de propio.
+    #
+    # Antes estaba escrito dos veces, acá y en el webhook del portal, con los
+    # mismos literales. Dos copias del mismo `if` es de donde salen las
+    # divergencias: si MercadoPago agrega un estado que hay que tratar como
+    # rechazado, actualizar una y olvidar la otra deja al portal y al mostrador
+    # cobrando distinto el mismo pago.
+    traducido = acreditacion.estado_desde_mercadopago(estado_mp)
+
+    if traducido is acreditacion.EstadoAcreditacion.RECHAZADO:
         servicio_pagos.aplicar_pago_rechazado(
             sesion, pago, payment_id=payment_id, estado_mp=estado_mp
         )
         return {"estado": "rechazado", "payment_id": payment_id, "factura_id": None}
 
-    if estado_mp != "approved":
+    if traducido is not acreditacion.EstadoAcreditacion.APROBADO:
+        # `authorized` entra por acá: MercadoPago retuvo el dinero y todavía no
+        # lo capturó. El estado crudo se guarda igual, que es lo único que
+        # después dice cuál era.
         pago.estado_mp = estado_mp
         return {"estado": "pendiente", "payment_id": None, "factura_id": None}
 
