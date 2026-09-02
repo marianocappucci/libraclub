@@ -60,13 +60,35 @@ class PasarelaFalsa:
 
 
 def _en(horas: int) -> datetime:
-    """Un turno dentro de N horas, redondeado a la hora en punto local.
+    """Un turno dentro de N horas, redondeado a la hora en punto local y **sin
+    cruzar la medianoche**.
 
     Redondeado para que el turno caiga siempre a la misma hora de pared y no
     dependa del minuto en que corra la suite.
+
+    🔴 **Y corrido al día siguiente si arrancaría a las 23.** El turno dura 90
+    minutos, así que uno de las 23:00 termina 00:30 — y `esta_abierto` exige que
+    la reserva entre **entera en una sola franja**, que es correcto y
+    deliberado: la de `abierto` va de 00:00 a 00:00 y cierra justo en la
+    medianoche. Esa reserva no entra, y `crear()` levanta `FueraDelHorario`.
+
+    Sin esto los diez tests de este archivo fallan **sólo si la suite corre
+    entre las 23 y la medianoche** —le pasó al CI el 2026-09-02 a las 02:43
+    UTC—, y el rojo habla de horarios de atención en un archivo que prueba la
+    política de cancelación.
+
+    Correrlo al día siguiente **alarga** la distancia en una hora como mucho, y
+    ninguna aserción depende de eso: las de 3 h siguen adentro de la ventana de
+    24 y las de 48 siguen afuera. El único test que necesita el borde exacto
+    —`test_el_borde_de_la_ventana_devuelve`— se calcula su propio `momento` a
+    partir de `reserva.comienza_at`, así que no lo toca.
     """
-    momento = ahora() + timedelta(hours=horas)
-    return momento.replace(minute=0, second=0, microsecond=0)
+    momento = (ahora() + timedelta(hours=horas)).replace(
+        minute=0, second=0, microsecond=0
+    )
+    if momento.hour == 23:
+        momento = (momento + timedelta(hours=1)).replace(hour=0)
+    return momento
 
 
 @pytest.fixture
