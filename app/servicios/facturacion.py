@@ -342,6 +342,18 @@ async def facturar_reserva(reserva, cliente, cancha_nombre: str = "cancha") -> d
         # Consumidor Final. Ver la nota en `tipo_de_comprobante`.
         IVA_CODES["Consumidor Final"],
         lineas, float(neto), float(iva), float(total),
+        # 🔴 Obligatorio desde LibraCore v1.71.0, y **sin default a propósito**:
+        # un comprobante emitido contra homologación trae CAE y numeración del
+        # WSFE de homologación. Sin marcarlo entra al Libro IVA del cliente y le
+        # rompe la correlatividad.
+        #
+        # Sale de `ambiente_de(arca_usado)` —el MISMO `arca` con el que se acaba
+        # de pedir el número— y no de `obtener_config_arca()` leído aparte: dos
+        # lecturas dejarían la factura marcada con un ambiente distinto del que
+        # la numeró si el selector cambia en el medio. Además ese tercer valor
+        # no siempre es un dict —en dev es el string `"_dev_mock_"`— y
+        # `ambiente_de` es justamente quien sabe traducirlo.
+        ambiente=arca_facturacion.ambiente_de(arca_usado),
     )
     factura = db_facturas.get_factura(factura_id)
     factura = await arca_facturacion.solicitar_cae(factura_id, factura, ta, arca_usado)
