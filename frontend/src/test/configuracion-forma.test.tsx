@@ -126,7 +126,14 @@ describe('la Configuración de LibraClub', () => {
   it('ARCA sube el certificado: ya no hay dónde tipear una ruta del servidor', async () => {
     montar('/configuracion?seccion=integraciones&integracion=arca')
 
-    expect(await screen.findByLabelText(/Certificado/)).toHaveAttribute('type', 'file')
+    // 🔑 Se nombra el ambiente: desde libra-ui v0.57.0 la tarjeta muestra los
+    // DOS pares de credenciales, así que hay dos "Certificado (.crt)" en la
+    // misma pantalla. Sin distinguirlos la consulta es ambigua — y además no
+    // diría a qué par se refiere.
+    expect(await screen.findByLabelText(/Certificado.*Homologaci/))
+      .toHaveAttribute('type', 'file')
+    // Y el par de producción también está, que es lo que el cambio agrega.
+    expect(screen.getByLabelText(/Certificado.*Producci/)).toHaveAttribute('type', 'file')
     expect(screen.queryByLabelText(/Path del certificado/)).toBeNull()
   })
 
