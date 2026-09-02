@@ -274,7 +274,21 @@ def test_la_provisoria_vencida_no_avisa_nada(sesion, cancha, jugador, tarifa_bas
     """
     reserva = _reserva(sesion, cancha, jugador, estado=EstadoReserva.PROVISORIA)
     _creada(sesion, reserva, CUANDO - timedelta(hours=11))
-    servicio_reservas.vencer_provisorias(sesion, CUANDO - timedelta(hours=10))
+
+    # 🔴 El corte sale del `vence_at` de LA PROPIA reserva, no de `CUANDO`.
+    #
+    # `CUANDO` es el reloj fijo de este archivo, pero `servicio_reservas.crear()`
+    # calcula `vence_at` con `ahora()` — el reloj REAL. Mientras la fecha de hoy
+    # coincidió con `CUANDO` los dos valores estaban cerca y el test pasaba; el
+    # 2026-09-02 se separaron un día, `vence_at` quedó después del corte, la
+    # provisoria no venció y el test se puso rojo sin que nadie tocara nada.
+    #
+    # Es el idioma que ya usa `test_reservas.py`: vencerla "desde el futuro"
+    # relativo a su propio vencimiento. Así el test no depende del calendario.
+    assert reserva.vence_at is not None, "una provisoria nace con vencimiento"
+    servicio_reservas.vencer_provisorias(
+        sesion, reserva.vence_at + timedelta(seconds=1)
+    )
     sesion.commit()
 
     resumen = servicio.despachar(sesion, TransporteFalso(), CUANDO - timedelta(hours=9))

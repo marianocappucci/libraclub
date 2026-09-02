@@ -13,7 +13,7 @@ hasta el 2026-08-21 no existía:
 from __future__ import annotations
 
 import os
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +24,7 @@ from app.main import crear_app
 from app.models.enums import AlcanceDia, EstadoReserva
 from app.models.maestros import FranjaDeAtencion
 from app.models.reservas import Reserva
+from app.tiempo import ahora
 
 USUARIO, CLAVE = "admin", "clave-de-prueba"
 
@@ -307,9 +308,20 @@ def test_proximas_cuenta_solo_las_FUTURAS(
         hace_un_mes += timedelta(days=1)
     creada = _crear_serie(api, cancha, cliente, desde=hace_un_mes)
 
+    # 🔴 Se compara con la MISMA granularidad que el endpoint. Él cuenta
+    # `comienza_at >= ahora()` —un instante— y acá se restaba con
+    # `< date.today()`, un día entero.
+    #
+    # La ocurrencia de HOY a las 20:00, cuando ya pasaron las 20:00, no caía en
+    # ninguno de los dos lados: su fecha no es menor que hoy, así que no entraba
+    # en `pasadas`, y su instante ya pasó, así que el endpoint no la cuenta en
+    # `proximas`. De ahí el off-by-one — y sólo los martes después de las 20:00,
+    # que es como se puso rojo el 2026-09-01 por la noche sin que nadie tocara
+    # nada.
+    corte = ahora()
     pasadas = [
         r for r in creada["creadas"]
-        if date.fromisoformat(r["comienza_at"][:10]) < date.today()
+        if datetime.fromisoformat(r["comienza_at"]) < corte
     ]
     assert pasadas, "el escenario necesita ocurrencias de los dos lados"
 
