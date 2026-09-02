@@ -47,7 +47,7 @@ def _numero_de(monkeypatch):
     return _aplicar
 
 
-def _facturar(api, cancha, cliente) -> dict:
+def _facturar(api, cancha, cliente) -> dict:  # noqa: F811
     reserva = _reserva(api, cancha, cliente)
     r = api.post(f"/api/reservas/{reserva['id']}/facturar")
     assert r.status_code == 201, r.text
@@ -55,7 +55,7 @@ def _facturar(api, cancha, cliente) -> dict:
 
 
 def test_en_homologacion_la_factura_queda_marcada_como_de_prueba(
-        api, cancha, cliente, tarifa_base, _numero_de):
+        api, cancha, cliente, tarifa_base, _numero_de):  # noqa: F811
     """🔴 Sin esto el comprobante de prueba entra al Libro IVA del cliente."""
     _numero_de("homologacion")
     factura = _facturar(api, cancha, cliente)
@@ -64,7 +64,7 @@ def test_en_homologacion_la_factura_queda_marcada_como_de_prueba(
 
 
 def test_en_produccion_la_factura_queda_marcada_como_real(
-        api, cancha, cliente, tarifa_base, _numero_de):
+        api, cancha, cliente, tarifa_base, _numero_de):  # noqa: F811
     """El control positivo: marcar **todo** como homologación pasaría el test de
     arriba — y sacaría del Libro IVA los comprobantes reales."""
     _numero_de("produccion")
@@ -74,7 +74,7 @@ def test_en_produccion_la_factura_queda_marcada_como_real(
 
 
 def test_sin_arca_configurado_la_factura_es_real(
-        api, cancha, cliente, tarifa_base, _numero_de):
+        api, cancha, cliente, tarifa_base, _numero_de):  # noqa: F811
     """Sin ARCA no hay CAE y el número es el de la propia instancia: ese
     comprobante **es** el real del cliente."""
     _numero_de(None)
