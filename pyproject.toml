@@ -32,7 +32,7 @@ dependencies = [
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
-    "libragenda @ git+https://github.com/marianocappucci/libragenda.git@v0.9.0",
+    "libragenda @ git+https://github.com/marianocappucci/libragenda.git@v0.10.0",
     # El buffet (F4): catalogo, stock y ventas. Se consume el motor entero
     # —dominio, casos de uso y repositorio SQLite/PostgreSQL— y no solo el
     # dominio como en LibraGenda: aca no hay una persistencia propia que valga
