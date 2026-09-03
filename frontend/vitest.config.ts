@@ -30,6 +30,23 @@ export default mergeConfig(
       env: { TZ: 'America/Argentina/Buenos_Aires' },
       setupFiles: ['./src/test/setup.ts'],
       include: ['src/**/*.test.{ts,tsx}'],
+      coverage: {
+        provider: 'v8',
+        // Trinquete, no meta. Se fija 2 puntos por debajo de lo que la suite
+        // mide hoy (79.32% de lineas, medido el 2026-09-03), asi que pasa
+        // holgado y lo unico que puede ponerlo en rojo es una regresion.
+        // Sirve para que nadie borre tests, no para medir calidad.
+        thresholds: { lines: 77 },
+        reporter: ['text-summary', 'json-summary'],
+        // Solo el codigo propio del producto: `libra-ui` tiene su propia
+        // suite y su propio CI, medirlo aca contaria dos veces lo mismo.
+        include: ['src/**/*.{ts,tsx}'],
+        exclude: [
+          'src/test/**',
+          'src/**/*.d.ts',
+          'src/main.tsx',
+        ],
+      },
     },
   }),
 )

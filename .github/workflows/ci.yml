@@ -205,7 +205,7 @@ jobs:
       - name: Tests
         run: |
           rm -f vitest.xml
-          npm run test -- --reporter=default --reporter=junit --outputFile.junit=vitest.xml
+          npm run test:coverage -- --reporter=default --reporter=junit --outputFile.junit=vitest.xml
 
       # 🔑 Mismo patrón que el gate de concurrencia del job de arriba, y por el
       # mismo motivo: que la suite haya CORRIDO no se deduce de que el paso
