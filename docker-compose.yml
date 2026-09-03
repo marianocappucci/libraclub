@@ -15,6 +15,13 @@ services:
     # La MISMA imagen que el CI y que producción: el collation viene de la
     # imagen y la alpine ordena por bytes.
     image: postgres:16
+    # 🔴 `TZ` NO alcanza. La imagen escribe `timezone` en `postgresql.conf`
+    # una sola vez, en el `initdb`: sobre un volumen que ya existe, `TZ` le
+    # cambia el `date` del contenedor y no lo que hace el SERVIDOR. Y `now()`
+    # es el reloj que estampa los `server_default=func.now()`, asi que mover
+    # solo la app deja base y proceso desfasados. Medir con `select now()`,
+    # nunca con `docker exec ... date`.
+    command: postgres -c timezone=America/Argentina/Buenos_Aires
     container_name: libraclub-postgres
     restart: unless-stopped
     environment:
