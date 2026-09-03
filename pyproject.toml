@@ -28,11 +28,11 @@ dependencies = [
     #
     # 🔑 Lo pidió **este mismo producto**: la revisión `0008` del cobro con QR
     # llegó a `main` sin nadie en el camino de deploy que la aplicara.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.73.0",
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.75.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
-    "libragenda @ git+https://github.com/marianocappucci/libragenda.git@v0.9.0",
+    "libragenda @ git+https://github.com/marianocappucci/libragenda.git@v0.10.0",
     # El buffet (F4): catalogo, stock y ventas. Se consume el motor entero
     # —dominio, casos de uso y repositorio SQLite/PostgreSQL— y no solo el
     # dominio como en LibraGenda: aca no hay una persistencia propia que valga
@@ -56,20 +56,32 @@ build-backend = "setuptools.build_meta"
 include = ["app*"]
 
 [tool.ruff]
-line-length = 100
-target-version = "py312"
+line-length = 120
+extend-exclude = ["frontend", "website", "node_modules"]
 
 [tool.ruff.lint]
+# Un solo regimen de lint para los 17 repos de la familia (etapa E2 de la
+# auditoria, 2026-09-03). Antes convivian dos: este --el que ya usaban
+# LibraCargo y LibraClub-- y uno mucho mas corto en los otros 15, que solo
+# miraba errores seguros en runtime (E9/F63/F7/F811/F821/F822/F823/F841) y
+# no veia orden de imports, modernizacion ni los patrones de bugbear.
+#
+# La longitud queda en 120, que es la que ya usaban 13 de los 15: bajarla a
+# 100 agregaba ~400 E501 en la familia, que no tienen fix automatico y no
+# arreglan nada.
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.per-file-ignores]
 # Las migraciones las escribe el autogenerate: no se reformatean a mano.
-"migrations/versions/*.py" = ["E501"]
+"**/migrations/versions/*.py" = ["E501"]
+# En un `__init__.py` el import "sin usar" ES la interfaz del paquete.
+"**/__init__.py" = ["F401"]
 
 [tool.ruff.lint.flake8-bugbear]
 # `Depends()` en el default es el idioma de FastAPI, no un descuido.
 extend-immutable-calls = [
     "fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.File",
+    "fastapi.Form", "fastapi.Header", "fastapi.Cookie", "fastapi.Body",
 ]
 
 [tool.pytest.ini_options]
@@ -78,3 +90,12 @@ markers = [
 ]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.coverage.report]
+show_missing = true
+# Piso de cobertura. Es un TRINQUETE, no una meta: se fija 2 puntos por
+# debajo de lo que el repo mide HOY (92%, medido en el CI del
+# 2026-09-03), asi que pasa holgado y lo unico que puede ponerlo en rojo es
+# una regresion. Cuando la cobertura suba de verdad, subir tambien este
+# numero -- nunca bajarlo para que pase un cambio.
+fail_under = 90

@@ -1,13 +1,5 @@
-import { cn } from "@/lib/utils"
-
-function Skeleton({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="skeleton"
-      className={cn("animate-pulse rounded-md bg-accent", className)}
-      {...props}
-    />
-  )
-}
-
-export { Skeleton }
+// Re-export de la primitiva canonica de la familia (E4, 2026-09-03). La
+// implementacion vive en libra-ui; aca solo se re-exporta para que el resto
+// del producto la importe desde @/components/ui/skeleton como siempre. Si este
+// producto la necesitara distinta, reemplaza este archivo por una copia propia.
+export * from "libra-ui/ui/skeleton"
