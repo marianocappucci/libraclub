@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from libracore.db.url_de_instancia import url_de_instancia
+
 
 @dataclass(frozen=True)
 class Config:
@@ -32,15 +34,33 @@ class Config:
 
     @classmethod
     def desde_entorno(cls) -> Config:
-        url = os.environ.get("DATABASE_URL")
+        # 🔴 **Los DOS nombres, y por eso no alcanza con leer `DATABASE_URL`.**
+        # `libracore.provisioning.nuevo_cliente` escribe en el compose los
+        # nombres que dice `nombres_aceptados("libraclub")`, o sea **sólo**
+        # `LIBRACLUB_DATABASE_URL`. Leyendo la genérica a secas, una instancia
+        # recién creada moría al arrancar con "Falta DATABASE_URL" — y eso no se
+        # ve en las instancias vivas, que tienen el compose de cuando se
+        # crearon, con la genérica.
+        #
+        # ⚠️ **La genérica NO se puede meter en `_HISTORICOS` del motor**, que
+        # sería el lugar natural. Ahí la toma también `migrar.url_de_core`, que
+        # cae a la base del DOMINIO cuando no encuentra la del core: un
+        # `libracore-migrar --prefijo libraclub` sin la variable del core
+        # migraría el schema del motor adentro de la base del dominio y
+        # devolvería éxito. Hay un test del motor que lo fija.
+        url = (url_de_instancia("libraclub")
+               or (os.environ.get("DATABASE_URL") or "").strip())
         if not url:
             raise RuntimeError(
-                "Falta DATABASE_URL. LibraClub corre sobre PostgreSQL; no hay "
-                "default a SQLite a propósito (DECISIONS.md ADR-001)."
+                "Falta la URL de la base: definí LIBRACLUB_DATABASE_URL (el "
+                "nombre vigente) o DATABASE_URL. LibraClub corre sobre "
+                "PostgreSQL; no hay default a SQLite a propósito "
+                "(DECISIONS.md ADR-001)."
             )
         if not url.startswith(("postgresql://", "postgresql+psycopg://")):
             raise RuntimeError(
-                f"DATABASE_URL debe apuntar a PostgreSQL, no a {url.split(':', 1)[0]!r}. "
+                f"LIBRACLUB_DATABASE_URL debe apuntar a PostgreSQL, no a "
+                f"{url.split(':', 1)[0]!r}. "
                 "La garantía de no-superposición de este producto es un constraint "
                 "de exclusión GiST, que sólo existe en PostgreSQL."
             )
