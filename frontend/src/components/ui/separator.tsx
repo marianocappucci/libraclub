@@ -1,26 +1,5 @@
-import * as React from "react"
-import { Separator as SeparatorPrimitive } from "radix-ui"
-
-import { cn } from "@/lib/utils"
-
-function Separator({
-  className,
-  orientation = "horizontal",
-  decorative = true,
-  ...props
-}: React.ComponentProps<typeof SeparatorPrimitive.Root>) {
-  return (
-    <SeparatorPrimitive.Root
-      data-slot="separator"
-      decorative={decorative}
-      orientation={orientation}
-      className={cn(
-        "shrink-0 bg-border data-[orientation=horizontal]:h-px data-[orientation=horizontal]:w-full data-[orientation=vertical]:h-full data-[orientation=vertical]:w-px",
-        className
-      )}
-      {...props}
-    />
-  )
-}
-
-export { Separator }
+// Re-export de la primitiva canonica de la familia (E4, 2026-09-03). La
+// implementacion vive en libra-ui; aca solo se re-exporta para que el resto
+// del producto la importe desde @/components/ui/separator como siempre. Si este
+// producto la necesitara distinta, reemplaza este archivo por una copia propia.
+export * from "libra-ui/ui/separator"
