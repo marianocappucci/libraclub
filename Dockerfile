@@ -69,7 +69,8 @@ RUN pg_restore --version | grep -q ' 16\.' \
 
 WORKDIR /app
 
-COPY pyproject.toml ./
+# F1: uv sync --frozen necesita el lock (y .python-version) dentro de la imagen.
+COPY pyproject.toml uv.lock .python-version ./
 COPY app ./app
 RUN uv sync --frozen --no-dev --no-editable
 
