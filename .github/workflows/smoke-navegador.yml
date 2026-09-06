@@ -1,0 +1,142 @@
+name: Smoke de navegador
+
+# F6.3 del plan de la familia Libra (2026-09-06), replicado desde el piloto de
+# Contalibra: el unico test que ve lo que ve el humano. Levanta la app real
+# --PostgreSQL del CI (postgres:16, la misma imagen que la suite), las migraciones
+# que declara scripts/panel_admin.py, uvicorn sirviendo la SPA construida-- y un
+# Chromium entra por /login con el admin, atraviesa el gate de Terminos como un
+# cliente nuevo y espera la primera pantalla. Medido en el piloto: ~1:30 por
+# corrida. No es un check requerido por la proteccion de rama.
+
+on:
+  pull_request:
+    branches: [develop, main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TZ: America/Argentina/Buenos_Aires
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: libraclub
+          POSTGRES_USER: libraclub
+          POSTGRES_PASSWORD: libraclub-ci
+          TZ: America/Argentina/Buenos_Aires
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U libraclub -d libraclub"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - uses: actions/checkout@v4
+
+      # -- Dependencias privadas: la misma receta que los jobs test y frontend --
+      - name: Acceso SSH a los motores y a libra-ui
+        env:
+          LIBRAAUTH_DEPLOY_KEY: ${{ secrets.LIBRAAUTH_DEPLOY_KEY }}
+          LIBRACORE_DEPLOY_KEY: ${{ secrets.LIBRACORE_DEPLOY_KEY }}
+          LIBRACOMMERCE_DEPLOY_KEY: ${{ secrets.LIBRACOMMERCE_DEPLOY_KEY }}
+          LIBRAGENDA_DEPLOY_KEY: ${{ secrets.LIBRAGENDA_DEPLOY_KEY }}
+          LIBRA_UI_DEPLOY_KEY: ${{ secrets.LIBRA_UI_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          configurar() {
+            repo=$1; clave=$2
+            if [ -z "$clave" ]; then echo "::error::Falta el secret con la deploy key de $repo."; exit 1; fi
+            printf '%s\n' "$clave" > ~/.ssh/id_"$repo"; chmod 600 ~/.ssh/id_"$repo"
+            printf 'Host github-%s\n  HostName github.com\n  User git\n  IdentityFile ~/.ssh/id_%s\n  IdentitiesOnly yes\n' "$repo" "$repo" >> ~/.ssh/config
+            git config --global url."git@github-$repo:marianocappucci/$repo".insteadOf "https://github.com/marianocappucci/$repo"
+            saludo=$(ssh -o StrictHostKeyChecking=yes -T "git@github-$repo" 2>&1 || true)
+            case "$saludo" in *"marianocappucci/$repo"*) echo "$repo OK" ;; *) echo "::error::La deploy key de $repo no resuelve a marianocappucci/$repo: $saludo"; exit 1 ;; esac
+          }
+          configurar libraauth "$LIBRAAUTH_DEPLOY_KEY"
+          configurar libracore "$LIBRACORE_DEPLOY_KEY"
+          configurar libracommerce "$LIBRACOMMERCE_DEPLOY_KEY"
+          configurar libragenda "$LIBRAGENDA_DEPLOY_KEY"
+          configurar libra-ui "$LIBRA_UI_DEPLOY_KEY"
+
+      # -- Backend --
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.10"
+      - name: Instalar el backend desde el lock
+        run: |
+          uv sync --locked
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      # -- Frontend: el bundle real, el que sirve uvicorn desde frontend/dist --
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Construir la SPA
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          test -f dist/index.html
+
+      # -- La app real: las mismas migraciones que corre panel_admin.py en un deploy --
+      - name: Migraciones y arranque de uvicorn
+        env:
+          ENV: development
+          DATA_DIR: ${{ github.workspace }}/smoke-data
+          LIBRACLUB_DATABASE_URL: postgresql+psycopg://libraclub:libraclub-ci@localhost:5432/libraclub
+          LIBRACLUB_LIBRACORE_DATABASE_URL: postgresql://libraclub:libraclub-ci@localhost:5432/libraclub_core
+          DATABASE_URL: postgresql+psycopg://libraclub:libraclub-ci@localhost:5432/libraclub
+          SECRET_KEY: smoke-de-navegador-no-es-un-secreto-real-0123456789
+          DOCS_AUTH_SECRET: smoke-docs
+          ADMIN_USER: admin
+          ADMIN_PASSWORD: smoke-admin-1234
+          ADMIN_NOMBRE: Administrador
+          LIBRACLUB_ADMIN_USERNAME: admin
+          LIBRACLUB_ADMIN_PASSWORD: smoke-admin-1234
+        run: |
+          mkdir -p "$DATA_DIR"
+          PGPASSWORD=libraclub-ci psql -h localhost -U libraclub -d libraclub -c 'CREATE DATABASE libraclub_core'
+          libracore-migrar upgrade --prefijo libraclub
+          alembic upgrade head
+          nohup uvicorn app.asgi:app --host 127.0.0.1 --port 8000 > uvicorn.log 2>&1 &
+          for i in $(seq 1 40); do
+            if curl -sf http://localhost:8000/health | grep -q 'ok"'; then echo "app arriba tras $i intentos"; exit 0; fi
+            sleep 1
+          done
+          echo "::error::la app no levanto"; tail -50 uvicorn.log; exit 1
+
+      # -- El navegador --
+      - name: Chromium de Playwright
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Login y primera pantalla en Chromium
+        working-directory: frontend
+        env:
+          SMOKE_USER: admin
+          SMOKE_PASSWORD: smoke-admin-1234
+        run: npx playwright test
+      - name: Log de uvicorn si algo fallo
+        if: failure()
+        run: tail -80 uvicorn.log
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: smoke-playwright
+          path: frontend/test-results/
+          if-no-files-found: ignore
