@@ -100,7 +100,7 @@ jobs:
           ENV: development
           DATA_DIR: ${{ github.workspace }}/smoke-data
           LIBRACLUB_DATABASE_URL: postgresql+psycopg://libraclub:libraclub-ci@localhost:5432/libraclub
-          LIBRACLUB_LIBRACORE_DATABASE_URL: postgresql+psycopg://libraclub:libraclub-ci@localhost:5432/libraclub_core
+          LIBRACLUB_LIBRACORE_DATABASE_URL: postgresql://libraclub:libraclub-ci@localhost:5432/libraclub_core
           DATABASE_URL: postgresql+psycopg://libraclub:libraclub-ci@localhost:5432/libraclub
           SECRET_KEY: smoke-de-navegador-no-es-un-secreto-real-0123456789
           DOCS_AUTH_SECRET: smoke-docs
