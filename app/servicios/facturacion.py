@@ -181,6 +181,14 @@ def _crear_base_si_falta(url: str) -> None:
     """
     import psycopg
 
+    # 🔴 psycopg habla libpq y no entiende el prefijo `postgresql+psycopg://` que
+    # SQLAlchemy necesita — y que es exactamente la forma que escribe la
+    # plantilla del alta de LibraCore desde el 2026-08-13. Hasta el 2026-09-06
+    # esto pasaba la URL cruda: una instancia dada de alta por el backoffice
+    # moría al arrancar con `ProgrammingError: missing "="`, y la demo no lo
+    # sufría porque su compose está a mano con la forma plana. Misma
+    # normalización que hace `libracore.db.core` antes de conectar.
+    url = url.replace("postgresql+psycopg://", "postgresql://", 1)
     servidor, _, nombre = url.rpartition("/")
     nombre = nombre.split("?", 1)[0]
     if not nombre:
