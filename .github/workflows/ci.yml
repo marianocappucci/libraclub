@@ -38,9 +38,41 @@ jobs:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/libraclub_test
       TZ: America/Argentina/Buenos_Aires
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v7
+      # F3 (2026-09-05): un PR que solo toca frontend/ o documentacion no corre
+      # la suite de backend. Es el job caro -de 4 a 11 minutos por corrida en
+      # los ocho productos, medido en la auditoria de F3-; el de frontend cuesta
+      # el minimo facturable y no se toca. Los pasos de abajo llevan
+      # `if: steps.cambios.outputs.backend == 'true'`: el job sigue existiendo
+      # y termina en verde con los pasos salteados, asi que la proteccion de
+      # rama, que exige `test`, no cambia. Ante cualquier duda -no es un PR, la
+      # API no contesta, lista vacia- corre todo. La lista sale de la API y no
+      # de `git diff` porque el checkout es superficial.
+      - name: Que toca el PR
+        id: cambios
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n="${{ github.event.pull_request.number }}"
+          if [ -z "$n" ]; then echo "backend=true" >> "$GITHUB_OUTPUT"; echo "no es un PR: corre todo"; exit 0; fi
+          if ! archivos=$(gh api "repos/${{ github.repository }}/pulls/$n/files" --paginate --jq '.[].filename'); then
+            echo "backend=true" >> "$GITHUB_OUTPUT"; echo "la API no contesto: corre todo"; exit 0
+          fi
+          backend=false
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              frontend/*) ;;
+              *.md|docs/*|*.txt) ;;
+              *) backend=true ;;
+            esac
+          done <<< "$archivos"
+          [ -z "$archivos" ] && backend=true
+          echo "backend=$backend" >> "$GITHUB_OUTPUT"
+          echo "backend=$backend"; echo "$archivos" | head -80
+      - uses: actions/setup-python@v5
+        if: steps.cambios.outputs.backend == 'true'
         with:
           python-version: '3.12'
 
@@ -50,6 +82,7 @@ jobs:
       # entero. El `grep` convierte eso en un CI rojo hoy en vez de un botón roto
       # en producción.
       - name: Cliente de PostgreSQL (mismo major que el servicio)
+        if: steps.cambios.outputs.backend == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends postgresql-client-16
@@ -68,6 +101,7 @@ jobs:
       # Estructura generalizada (la misma de libradesk/gestiolibra/medlibra):
       # agregar una dependencia privada nueva es una linea de `configurar`.
       - name: Configurar acceso SSH a las dependencias privadas de Libra
+        if: steps.cambios.outputs.backend == 'true'
         env:
           LIBRAAUTH_DEPLOY_KEY: ${{ secrets.LIBRAAUTH_DEPLOY_KEY }}
           LIBRACORE_DEPLOY_KEY: ${{ secrets.LIBRACORE_DEPLOY_KEY }}
@@ -101,6 +135,7 @@ jobs:
       # exactamente el modo de fallar que motiva los alias de arriba, y sin
       # este paso recien se notaria adentro del pip install.
       - name: Verificar que cada deploy key resuelve a su propio repo
+        if: steps.cambios.outputs.backend == 'true'
         run: |
           for repo in libraauth libracore libracommerce libragenda; do
             saludo=$(ssh -o StrictHostKeyChecking=yes -T "git@github-$repo" 2>&1 || true)
@@ -117,14 +152,17 @@ jobs:
       # al PATH para que los pasos siguientes (ruff, pytest, alembic, scripts)
       # sigan invocandose igual que antes.
       - uses: astral-sh/setup-uv@v7
+        if: steps.cambios.outputs.backend == 'true'
         with:
           version: "0.12.10"
       - name: Install package + dev deps (uv.lock)
+        if: steps.cambios.outputs.backend == 'true'
         run: |
           uv sync --locked --extra dev
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Lint
+        if: steps.cambios.outputs.backend == 'true'
         run: ruff check .
 
       # La suite corre contra PostgreSQL real. Nunca contra SQLite: la garantía
@@ -132,6 +170,7 @@ jobs:
       # ni siquiera tiene — una suite verde sobre SQLite estaría midiendo otro
       # producto.
       - name: Tests
+        if: steps.cambios.outputs.backend == 'true'
         # `-rs` lista los tests SALTEADOS con su motivo. Sin eso, un módulo que
         # se saltea entero —por una dependencia que falta en el runner— deja el
         # job igual de verde que uno que corrió todo. Y en esta suite el módulo
@@ -154,6 +193,7 @@ jobs:
       # dependencia que falta en el runner— deja el job igual de verde que uno
       # que corrió todo.
       - name: El gate de concurrencia corrio de verdad
+        if: steps.cambios.outputs.backend == 'true'
         run: |
           pytest tests/test_concurrencia.py -q --junit-xml=gate.xml
           CORRIDOS=$(grep -o 'tests="[0-9]*"' gate.xml | head -1 | tr -dc '0-9')
@@ -168,9 +208,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
@@ -262,3 +302,18 @@ jobs:
       # exactamente lo que el job tiene que impedir.
       - name: El build dejo algo de verdad
         run: test -f dist/index.html
+
+  # F2 (2026-09-05): que el CI ponga rojo un commit con un secreto. Barre los
+  # commits del PR (no toda la historia) con la configuracion de
+  # `.gitleaks.toml` en la raiz, que exime `tests/` porque ahi viven las
+  # contrasenas de prueba de la suite. Job independiente: corre en paralelo y
+  # su rojo no se mezcla con el de la suite.
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
