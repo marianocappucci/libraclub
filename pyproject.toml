@@ -14,7 +14,7 @@ dependencies = [
     # anda en dev local sin identidad SSH propia. Cuando la familia pase a
     # repos privados, el build reescribe la URL a `git+ssh` con la deploy key
     # de solo lectura del motor.
-    "libraauth @ git+https://github.com/marianocappucci/libraauth.git@v0.35.0",
+    "libraauth @ git+https://github.com/marianocappucci/libraauth.git@v0.36.0",
     # Entra en F1 sólo por `respaldo`: una instancia sin backup no se puede
     # poner en produccion. Su alcance crece en F2 (`mp_api`, `pdf_generator`)
     # y F3 (ARCA) — ver ARCHITECTURE.md.
@@ -28,7 +28,7 @@ dependencies = [
     #
     # 🔑 Lo pidió **este mismo producto**: la revisión `0008` del cobro con QR
     # llegó a `main` sin nadie en el camino de deploy que la aplicara.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.83.0",
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.89.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
@@ -37,7 +37,7 @@ dependencies = [
     # —dominio, casos de uso y repositorio SQLite/PostgreSQL— y no solo el
     # dominio como en LibraGenda: aca no hay una persistencia propia que valga
     # la pena escribir, y VentaLibra ya probo ese camino.
-    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.9.1",
+    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.15.0",
 ]
 
 [project.optional-dependencies]

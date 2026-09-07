@@ -38,6 +38,7 @@ from libracore.config_router import (
 )
 from libracore.mp_config_router import build_mp_config_router
 from libracore.respaldo import Instancia
+from libracore.security_headers import CSP_SPA, SecurityHeadersMiddleware
 from libracore.smtp_router import build_smtp_probe_router
 
 from app import db
@@ -218,6 +219,15 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # `request.state` de `app/auditoria.py` existe por lo contrario — ver el
     # comentario largo ahí.
     agregar_middleware_de_usuario(app)
+
+    # 🔴 Los headers de seguridad. Se agrega **al final** a proposito: en
+    # Starlette el ultimo middleware agregado es el mas externo, asi que asi
+    # envuelve a todas las respuestas, incluidas las de error que devuelven los
+    # de adentro.
+    #
+    # `CSP_SPA` y no la CSP por defecto: esa habilita `cdn.jsdelivr.net` para las
+    # apps Jinja2, y este producto no carga nada externo. Ver libracore.
+    app.add_middleware(SecurityHeadersMiddleware, csp=CSP_SPA)
 
     app.include_router(salud.router)
     # `construir_router()` y no un `router` de módulo: lee `DEMO_MODE` al
