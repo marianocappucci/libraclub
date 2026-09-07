@@ -23,7 +23,12 @@ from app.main import crear_app
 
 
 @pytest.fixture
-def http(engine, sesion):
+def http(engine, sesion, monkeypatch):
+    # `crear_app` no levanta sin una contrasena de admin inicial —
+    # `libraauth.bootstrap` lo exige a proposito, para que una instancia no nazca
+    # con un admin sin clave. La fixture de `test_api.py` hace lo mismo.
+    monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", "clave-de-prueba")
     cfg = Config(
         database_url=os.environ["DATABASE_URL"],
         entorno="test",
