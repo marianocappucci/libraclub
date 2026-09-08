@@ -239,6 +239,16 @@ beforeEach(() => {
     if (u.includes('/api/caja/motivos-de-egreso')) {
       return Promise.resolve(json(['Pago a proveedor', 'Retiro a banco']))
     }
+    // 🔴 **Dos, y NO los cinco del cobro.** De una caja no se egresa por
+    // MercadoPago ni por tarjeta: el bucket de esos medios es el que se concilia
+    // contra el resumen de ellos, y el resumen netea el egreso ahí mismo. El
+    // stub espeja `servicios/caja.MEDIOS_DE_EGRESO`.
+    if (u.includes('/api/caja/medios-de-egreso')) {
+      return Promise.resolve(json([
+        { valor: 'efectivo', etiqueta: 'Efectivo' },
+        { valor: 'transferencia', etiqueta: 'Transferencia' },
+      ]))
+    }
     if (u.includes('/api/caja/turnos/actual')) {
       if (!estado.hayTurno) return Promise.resolve(json(null))
       return Promise.resolve(json({
@@ -992,6 +1002,43 @@ describe('el egreso', () => {
       .toEqual(['Pago a proveedor', 'Retiro a banco'])
     expect(llamadas.some((l) => l.ruta.endsWith('/api/caja/motivos-de-egreso'))).toBe(true)
   })
+
+  it('🔴 el Medio del egreso NO ofrece MercadoPago ni tarjeta', async () => {
+    // Reportado por el humano el 2026-09-08: el selector traía los cinco medios
+    // del cobro *"aunque no puedo hacer un egreso por mercadopago desde ahí"*.
+    // Y no era sólo una opción sin sentido: el resumen agrupa por medio y netea
+    // el egreso dentro de su bucket, así que un egreso por MercadoPago baja
+    // justo el número que se concilia contra lo que ellos van a depositar.
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: /Registrar un egreso/ }))
+
+    const medios = await screen.findByLabelText('Medio')
+    await waitFor(() => expect(
+      within(medios).getAllByRole('option').map((o) => o.textContent),
+    ).toEqual(['Efectivo', 'Transferencia']))
+
+    // 🔑 Y el control positivo, en la MISMA corrida: el selector del cobro sí
+    // los trae. Sin esto, un stub que devolviera vacío para los dos endpoints
+    // haría pasar el assert de arriba sin probar la distinción.
+    await user.click(screen.getByRole('button', { name: /^Venta suelta$/ }))
+    const cobro = await screen.findByLabelText('Cobrar con')
+    expect(within(cobro).getAllByRole('option').map((o) => o.textContent))
+      .toContain('MercadoPago')
+  })
+
+  it('🔑 los medios del egreso salen de SU endpoint, no de la lista del cobro',
+    async () => {
+      // Un `filter` del lado de la pantalla sería una segunda declaración de la
+      // regla, y la de este repo ya divergió una vez (decía `tarjeta`).
+      const user = userEvent.setup()
+      montar()
+      await user.click(await screen.findByRole('button', { name: /Registrar un egreso/ }))
+      await screen.findByLabelText('Medio')
+
+      expect(llamadas.some((l) => l.ruta.endsWith('/api/caja/medios-de-egreso')))
+        .toBe(true)
+    })
 })
 
 describe('los accesos del encabezado', () => {

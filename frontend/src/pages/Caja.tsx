@@ -324,7 +324,7 @@ function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
           <>
             <PuntoDeVenta medios={medios} onCambio={onCambio} onError={onError} />
 
-            <Egreso medios={medios} onHecho={onCambio} onError={onError} />
+            <Egreso onHecho={onCambio} onError={onError} />
           </>
         )}
       </div>
@@ -1240,8 +1240,23 @@ function CobroLibre({ medios, onCobrado, onError }: {
   )
 }
 
-function Egreso({ medios, onHecho, onError }: {
-  medios: { valor: string; etiqueta: string }[]
+/** Plata que sale del cajón, con su motivo y su medio.
+ *
+ * 🔴 **Los medios del egreso NO son los del cobro, y por eso este componente
+ * pide su propia lista.** Hasta el 2026-09-08 recibía por prop la lista de
+ * cobro, así que ofrecía «MercadoPago» y las dos tarjetas. Lo reportó el humano:
+ * *"no puedo hacer un egreso por mercadopago desde ahí aunque técnicamente se
+ * pudiera… usemos la lógica de lo que podemos egresar de una caja"*.
+ *
+ * Y el daño no era sólo ofrecer una opción sin sentido: el resumen agrupa por
+ * medio y **netea el egreso dentro de su propio bucket**, así que un egreso por
+ * MercadoPago baja justamente el número que se concilia contra lo que ellos van
+ * a depositar.
+ *
+ * 🔑 **Pide la lista en vez de filtrar la de cobro.** Un `filter` acá sería una
+ * segunda declaración de la regla, y la de este repo ya divergió una vez.
+ */
+function Egreso({ onHecho, onError }: {
   onHecho: () => void
   onError: (m: string) => void
 }) {
@@ -1250,6 +1265,7 @@ function Egreso({ medios, onHecho, onError }: {
   const [motivo, setMotivo] = useState('')
   const [monto, setMonto] = useState('')
   const [detalle, setDetalle] = useState('')
+  const [medios, setMedios] = useState<{ valor: string; etiqueta: string }[]>([])
   const [medio, setMedio] = useState('')
   const [enviando, setEnviando] = useState(false)
 
@@ -1260,6 +1276,11 @@ function Egreso({ medios, onHecho, onError }: {
         setMotivos(ms)
         if (ms.length > 0) setMotivo((m) => m || ms[0])
       })
+      .catch((e: Error) => onError(e.message))
+    caja.mediosDeEgreso()
+      // Se comprueba la forma y no se confía en ella: un cuerpo truncado es
+      // truthy y el `.map()` del selector tumbaría el formulario.
+      .then((ms) => setMedios(Array.isArray(ms) ? ms : []))
       .catch((e: Error) => onError(e.message))
   }, [abierto, onError])
 

@@ -185,6 +185,21 @@ def motivos_de_egreso(_: object = Depends(require_staff)) -> list[str]:
     return list(servicio.MOTIVOS_DE_EGRESO)
 
 
+@router.get("/medios-de-egreso")
+def medios_de_egreso(_: object = Depends(require_staff)) -> list[dict]:
+    """Por qué medio puede salir plata del cajón. **No son los mismos que para
+    cobrar**, y por eso es un endpoint aparte y no un filtro en la pantalla:
+    una segunda lista del lado del cliente es lo que divergía antes.
+
+    Hermano de `/motivos-de-egreso`. Ver `servicios/caja.MEDIOS_DE_EGRESO` por
+    qué quedan sólo dos.
+    """
+    return [
+        {"valor": m, "etiqueta": medios_pago.label(m)}
+        for m in servicio.MEDIOS_DE_EGRESO
+    ]
+
+
 @router.post("/egresos")
 def registrar_egreso(datos: EgresoEntrada, usuario: dict = Depends(require_staff)):
     """Plata que **sale** del cajón. Devuelve el resumen al momento.
