@@ -38,7 +38,7 @@ jobs:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/libraclub_test
       TZ: America/Argentina/Buenos_Aires
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # F3 (2026-09-05): un PR que solo toca frontend/ o documentacion no corre
       # la suite de backend. Es el job caro -de 4 a 11 minutos por corrida en
@@ -71,7 +71,7 @@ jobs:
           [ -z "$archivos" ] && backend=true
           echo "backend=$backend" >> "$GITHUB_OUTPUT"
           echo "backend=$backend"; echo "$archivos" | head -80
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: steps.cambios.outputs.backend == 'true'
         with:
           python-version: '3.12'
@@ -208,9 +208,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
@@ -311,9 +311,9 @@ jobs:
   gitleaks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
