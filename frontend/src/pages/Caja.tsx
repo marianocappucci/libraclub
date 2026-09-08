@@ -37,7 +37,11 @@ import type {
 } from '@/lib/api'
 import { diaISO, diasDeDiferencia, fecha, hora, pesos } from '@/lib/fechas'
 import { AvisoDeError } from '@/components/listado'
-import { DialogoDeConsumo } from '@/components/DialogoDeConsumo'
+// 🔑 Los dos, y no es redundancia: el mismo carrito se dibuja **inline** en la
+// pestaña «Venta suelta» —que es el punto de venta del buffet— y **en una
+// ventana** cuando se le carga consumo a la cuenta de una cancha, donde abajo
+// hay una cuenta abierta que no se puede reemplazar. Ver `DialogoDeConsumo.tsx`.
+import { DialogoDeConsumo, PanelDeConsumo } from '@/components/DialogoDeConsumo'
 import { SeccionDeCobroConQr } from '@/components/CobroConQr'
 import { MapaDeCanchas } from '@/components/MapaDeCanchas'
 import { Button } from '@/components/ui/button'
@@ -1127,36 +1131,37 @@ function CierreDeCuenta({ turno, medios, sucursalId, onCobrado, onError }: {
  * 🔴 **La diferencia con «Cargar buffet» de una cuenta no es de forma, es de
  * plata.** Acá el consumo se cobra al confirmar; allá no se cobra, se le cuelga
  * al turno. Confundirlas es cobrar dos veces las mismas gaseosas.
+ *
+ * 🔴 **Y desde el 2026-09-08 es un panel inline, no un botón que abre un
+ * diálogo.** El humano lo reportó así: *"hay que hacer clic en vender del buffet
+ * y la pantalla queda sin nada… debería aparecer todo eso en vez del modal"*.
+ * Esta pestaña **es** el punto de venta del buffet: el click intermedio no
+ * decidía nada —no había otra cosa que se pudiera hacer acá— y lo único que
+ * lograba era dejar la pestaña vacía hasta que se apretara, para después taparla
+ * con una ventana encima.
+ *
+ * El diálogo sigue existiendo para el otro caso, y ahí sí gana: en «Canchas» hay
+ * una cuenta abierta abajo que no se puede reemplazar, y la ventana es lo que
+ * deja volver a ella.
  */
 function VentaDeMostrador({ sucursalId, onCargado }: {
   sucursalId: number | null
   onCargado: () => void
 }) {
-  const [abierto, setAbierto] = useState(false)
-
   if (sucursalId === null) {
     return <p className="text-sm text-muted-foreground">Elegí una sucursal.</p>
   }
 
   return (
     <div className="space-y-3">
+      {/* Este texto lo pide un test, y con razón: las dos formas de cargar
+          buffet se ven casi iguales y hacen cosas distintas con la plata. Si la
+          pantalla no lo dice, la única forma de saberlo es el arqueo. */}
       <p className="text-sm text-muted-foreground">
         Para quien no está jugando: se cobra al confirmar. Lo que consume una
         cancha abierta se carga desde su cuenta, en «Canchas».
       </p>
-      <Button variant="outline" onClick={() => setAbierto(true)}>
-        <CupSoda className="size-4" /> Vender del buffet
-      </Button>
-      <DialogoDeConsumo
-        abierto={abierto}
-        sucursalId={sucursalId}
-        reservaId={null}
-        onCerrar={() => setAbierto(false)}
-        onCargado={() => {
-          setAbierto(false)
-          onCargado()
-        }}
-      />
+      <PanelDeConsumo sucursalId={sucursalId} reservaId={null} onCargado={onCargado} />
     </div>
   )
 }

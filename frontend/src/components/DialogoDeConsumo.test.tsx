@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -50,7 +51,7 @@ vi.mock('@/lib/api', async (original) => {
   }
 })
 
-const { DialogoDeConsumo } = await import('./DialogoDeConsumo')
+const { DialogoDeConsumo, PanelDeConsumo } = await import('./DialogoDeConsumo')
 
 beforeEach(() => {
   productos.mockReset()
@@ -156,33 +157,41 @@ describe('la venta suelta, que se cobra en el acto', () => {
   // se retiró: la venta suelta se hace desde la Caja. Se mudaron y no se
   // borraron porque son lo único que cubre el carrito y el cobro del modo que
   // **sí** mueve plata.
-  function montar() {
+  //
+  // 🔑 **Y desde el 2026-09-08 se montan INLINE**, que es como la Caja los usa:
+  // la pestaña «Venta suelta» dibuja el carrito directo, sin diálogo. Montarlos
+  // en el diálogo seguiría pasando y mediría una pantalla que ya no existe.
+  function montar(onCargado = () => {}) {
     return render(
-      <DialogoDeConsumo
-        abierto
-        sucursalId={1}
-        reservaId={null}
-        onCerrar={() => {}}
-        onCargado={() => {}}
-      />,
+      <PanelDeConsumo sucursalId={1} reservaId={null} onCargado={onCargado} />,
     )
   }
 
+  it('🔴 no hay diálogo: el carrito se dibuja en la pestaña', async () => {
+    // Es la mitad medible del reporte del humano —*"la pantalla queda sin nada…
+    // debería aparecer todo eso en vez del modal"*—: los productos están sin que
+    // nadie apriete nada, y no hay ventana encima.
+    montar()
+    expect(await screen.findByText('Gaseosa 500ml')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Vender del buffet/i }))
+      .not.toBeInTheDocument()
+  })
+
   it('el carrito suma por precio de lista y manda medio de pago', async () => {
     montar()
-    const dialogo = await screen.findByRole('dialog')
     // Se espera a que los medios lleguen: el default se fija en un efecto,
     // y sin esperarlo el cobro saldría con el medio en blanco por carrera.
     await waitFor(() => expect(
-      within(dialogo).getByLabelText('Cobrar con')).toHaveValue('efectivo'))
+      screen.getByLabelText('Cobrar con')).toHaveValue('efectivo'))
     // Dos gaseosas y un agua: 1200×2 + 900 = 3300.
-    await userEvent.click(await within(dialogo).findByText('Gaseosa 500ml'))
-    await userEvent.click(within(dialogo).getByLabelText('Agregar uno de Gaseosa 500ml'))
-    await userEvent.click(within(dialogo).getByText('Agua'))
+    await userEvent.click(await screen.findByText('Gaseosa 500ml'))
+    await userEvent.click(screen.getByLabelText('Agregar uno de Gaseosa 500ml'))
+    await userEvent.click(screen.getByText('Agua'))
 
-    expect(within(dialogo).getByText('$ 3.300,00')).toBeInTheDocument()
+    expect(screen.getByText('$ 3.300,00')).toBeInTheDocument()
 
-    await userEvent.click(within(dialogo).getByRole('button', { name: 'Cobrar' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cobrar' }))
     await waitFor(() => expect(consumir).toHaveBeenCalled())
 
     const [sucursalId, cuerpo] = consumir.mock.calls[0]
@@ -199,59 +208,78 @@ describe('la venta suelta, que se cobra en el acto', () => {
 
   it('el stock se ve al vender, no sólo en la tabla', async () => {
     montar()
-    const dialogo = await screen.findByRole('dialog')
     // El encargado tiene que ver que quedan 4 antes de prometer 6.
-    expect(await within(dialogo).findByText('4 en stock')).toBeInTheDocument()
+    expect(await screen.findByText('4 en stock')).toBeInTheDocument()
   })
 
   it('quitar la última unidad saca la línea del carrito', async () => {
     montar()
-    const dialogo = await screen.findByRole('dialog')
-    await userEvent.click(await within(dialogo).findByText('Agua'))
+    await userEvent.click(await screen.findByText('Agua'))
     // El control de cantidad sólo existe si la línea está en el carrito. Se
     // asierta sobre él y no sobre el importe: `$ 900,00` aparece tres veces
     // —precio del producto, importe de la línea y total—, así que contarlo
     // haría un test que se rompe al agregar cualquier columna.
-    expect(within(dialogo).getByLabelText('Quitar uno de Agua')).toBeInTheDocument()
-    expect(within(dialogo).getByRole('button', { name: 'Cobrar' })).toBeEnabled()
+    expect(screen.getByLabelText('Quitar uno de Agua')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cobrar' })).toBeEnabled()
 
-    await userEvent.click(within(dialogo).getByLabelText('Quitar uno de Agua'))
-    expect(within(dialogo).queryByLabelText('Quitar uno de Agua')).not.toBeInTheDocument()
-    expect(within(dialogo).getByRole('button', { name: 'Cobrar' })).toBeDisabled()
+    await userEvent.click(screen.getByLabelText('Quitar uno de Agua'))
+    expect(screen.queryByLabelText('Quitar uno de Agua')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Cobrar' })).toBeDisabled()
   })
+
+  it('🔑 inline no hay «Cancelar»: no hay nada que cerrar', async () => {
+    // Un botón que no hace nada es peor que ninguno. En el diálogo sí está, y
+    // el otro describe de este archivo lo cubre.
+    montar()
+    await screen.findByText('Gaseosa 500ml')
+    expect(screen.queryByRole('button', { name: 'Cancelar' })).not.toBeInTheDocument()
+  })
+
+  it('🔴 después de cobrar, el carrito vuelve a cero y el stock se relee',
+    async () => {
+      // Inline el panel no se cierra, así que si no se limpiara solo, la venta
+      // siguiente arrancaría con las gaseosas de la anterior ya cargadas — y el
+      // stock seguiría diciendo 24 después de vender dos.
+      const cargado = vi.fn()
+      montar(cargado)
+      await userEvent.click(await screen.findByText('Gaseosa 500ml'))
+      expect(screen.getByLabelText('Quitar uno de Gaseosa 500ml')).toBeInTheDocument()
+
+      await userEvent.click(screen.getByRole('button', { name: 'Cobrar' }))
+      await waitFor(() => expect(cargado).toHaveBeenCalled())
+
+      expect(screen.queryByLabelText('Quitar uno de Gaseosa 500ml'))
+        .not.toBeInTheDocument()
+      // Dos llamadas: la del montaje y la de después de la venta.
+      expect(productos.mock.calls.length).toBeGreaterThanOrEqual(2)
+    })
 })
 
 describe('cobrar la venta suelta con el QR de MercadoPago', () => {
-  function montar(onCargado = () => {}, onCerrar = () => {}) {
+  // Inline, que es como vive en la Caja. El caso del diálogo tiene su propio
+  // describe abajo: lo único que se mide ahí es que cerrarlo baje el monto.
+  function montar(onCargado = () => {}) {
     return render(
-      <DialogoDeConsumo
-        abierto
-        sucursalId={1}
-        reservaId={null}
-        onCerrar={onCerrar}
-        onCargado={onCargado}
-      />,
+      <PanelDeConsumo sucursalId={1} reservaId={null} onCargado={onCargado} />,
     )
   }
 
   /** Elige MercadoPago y deja una gaseosa en el carrito. */
-  async function elegirMercadoPago(dialogo: HTMLElement) {
+  async function elegirMercadoPago() {
     await waitFor(() => expect(
-      within(dialogo).getByLabelText('Cobrar con')).toHaveValue('efectivo'))
-    await userEvent.click(await within(dialogo).findByText('Gaseosa 500ml'))
-    await userEvent.selectOptions(
-      within(dialogo).getByLabelText('Cobrar con'), 'mercadopago')
+      screen.getByLabelText('Cobrar con')).toHaveValue('efectivo'))
+    await userEvent.click(await screen.findByText('Gaseosa 500ml'))
+    await userEvent.selectOptions(screen.getByLabelText('Cobrar con'), 'mercadopago')
   }
 
   it('🔴 el botón lleva al QR y NO anota un movimiento a mano', async () => {
     montar()
-    const dialogo = await screen.findByRole('dialog')
-    await elegirMercadoPago(dialogo)
+    await elegirMercadoPago()
 
     // Es la mitad visible del reporte del humano: el botón cambia de nombre.
-    const boton = within(dialogo).getByRole('button', { name: /Cobrar con QR/i })
+    const boton = screen.getByRole('button', { name: /Cobrar con QR/i })
     expect(boton).toBeEnabled()
-    expect(within(dialogo).queryByRole('button', { name: 'Cobrar' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Cobrar' })).not.toBeInTheDocument()
 
     await userEvent.click(boton)
     await waitFor(() => expect(ponerEnElQr).toHaveBeenCalled())
@@ -267,13 +295,12 @@ describe('cobrar la venta suelta con el QR de MercadoPago', () => {
 
   it('mientras espera dice cuánto está cobrando el cartel', async () => {
     montar()
-    const dialogo = await screen.findByRole('dialog')
-    await elegirMercadoPago(dialogo)
-    await userEvent.click(within(dialogo).getByRole('button', { name: /Cobrar con QR/i }))
+    await elegirMercadoPago()
+    await userEvent.click(screen.getByRole('button', { name: /Cobrar con QR/i }))
 
-    expect(await within(dialogo).findByText(/Esperando el pago/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Esperando el pago/i)).toBeInTheDocument()
     // El monto lo decide el backend, y es el que la pantalla repite.
-    expect(within(dialogo).getByText('$ 3.300,00')).toBeInTheDocument()
+    expect(screen.getByText('$ 3.300,00')).toBeInTheDocument()
   })
 
   it('al acreditarse cierra la venta: avisa al llamador una sola vez', async () => {
@@ -282,44 +309,40 @@ describe('cobrar la venta suelta con el QR de MercadoPago', () => {
       estado: 'aprobado', payment_id: '778899', factura_id: null,
     })
     montar(cargado)
-    const dialogo = await screen.findByRole('dialog')
-    await elegirMercadoPago(dialogo)
-    await userEvent.click(within(dialogo).getByRole('button', { name: /Cobrar con QR/i }))
+    await elegirMercadoPago()
+    await userEvent.click(screen.getByRole('button', { name: /Cobrar con QR/i }))
 
     // El poll corre cada 3 segundos, así que se le da tiempo a un tick.
     await waitFor(() => expect(cargado).toHaveBeenCalledTimes(1), { timeout: 8000 })
     expect(consumir).not.toHaveBeenCalled()
+    // Y el panel vuelve a quedar listo para la venta siguiente.
+    expect(screen.queryByText(/Esperando el pago/i)).not.toBeInTheDocument()
   })
 
   it('🔴 cancelar el cobro BAJA el monto del QR', async () => {
     montar()
-    const dialogo = await screen.findByRole('dialog')
-    await elegirMercadoPago(dialogo)
-    await userEvent.click(within(dialogo).getByRole('button', { name: /Cobrar con QR/i }))
-    await within(dialogo).findByText(/Esperando el pago/i)
+    await elegirMercadoPago()
+    await userEvent.click(screen.getByRole('button', { name: /Cobrar con QR/i }))
+    await screen.findByText(/Esperando el pago/i)
 
     await userEvent.click(
-      within(dialogo).getByRole('button', { name: /Cancelar el cobro por QR/i }))
+      screen.getByRole('button', { name: /Cancelar el cobro por QR/i }))
     // Sin esto el cartel sigue cobrando esa venta: el próximo que escanee paga
     // las gaseosas de otro.
     await waitFor(() => expect(bajarDelQr).toHaveBeenCalledWith(42))
   })
 
-  it('🔴 y cerrar el diálogo mientras espera, también', async () => {
-    const cerrar = vi.fn()
-    montar(() => {}, cerrar)
-    const dialogo = await screen.findByRole('dialog')
-    await elegirMercadoPago(dialogo)
-    await userEvent.click(within(dialogo).getByRole('button', { name: /Cobrar con QR/i }))
-    await within(dialogo).findByText(/Esperando el pago/i)
+  it('🔴 y desmontar el panel mientras espera, también', async () => {
+    // Inline éste es el camino MÁS probable y no hay ningún botón que lo cubra:
+    // el cajero cambia de pestaña —a «Canchas», a «Otro»— y el panel se
+    // desmonta sin que nadie apriete nada.
+    const { unmount } = montar()
+    await elegirMercadoPago()
+    await userEvent.click(screen.getByRole('button', { name: /Cobrar con QR/i }))
+    await screen.findByText(/Esperando el pago/i)
 
-    // Es la salida más probable del cajero que se arrepiente, y la que el
-    // botón «Cancelar el cobro» no cubre. Mientras espera, la fila de botones
-    // se reemplaza por el cartel, así que la salida es la ✕ del diálogo — que
-    // es justamente el camino que hay que cubrir.
-    await userEvent.click(within(dialogo).getByRole('button', { name: /close/i }))
+    unmount()
     await waitFor(() => expect(bajarDelQr).toHaveBeenCalledWith(42))
-    expect(cerrar).toHaveBeenCalled()
   })
 
   it('el pago rechazado lo dice y no cierra la venta', async () => {
@@ -328,11 +351,10 @@ describe('cobrar la venta suelta con el QR de MercadoPago', () => {
       estado: 'rechazado', payment_id: '778899', factura_id: null,
     })
     montar(cargado)
-    const dialogo = await screen.findByRole('dialog')
-    await elegirMercadoPago(dialogo)
-    await userEvent.click(within(dialogo).getByRole('button', { name: /Cobrar con QR/i }))
+    await elegirMercadoPago()
+    await userEvent.click(screen.getByRole('button', { name: /Cobrar con QR/i }))
 
-    expect(await within(dialogo).findByText(/rechazado o cancelado/i, {}, { timeout: 8000 }))
+    expect(await screen.findByText(/rechazado o cancelado/i, {}, { timeout: 8000 }))
       .toBeInTheDocument()
     expect(cargado).not.toHaveBeenCalled()
   })
@@ -347,24 +369,22 @@ describe('cobrar la venta suelta con el QR de MercadoPago', () => {
       // `return null` dejaba la pantalla sin botón y sin motivo, y el humano lo
       // reportó como "no me dirige a ningún lado".
       montar()
-      const dialogo = await screen.findByRole('dialog')
-      await elegirMercadoPago(dialogo)
+      await elegirMercadoPago()
 
-      expect(await within(dialogo).findByText(/faltan las credenciales de/i))
+      expect(await screen.findByText(/faltan las credenciales de/i))
         .toBeInTheDocument()
-      expect(within(dialogo).getByText(/Configuración → Mercado Pago/i)).toBeInTheDocument()
+      expect(screen.getByText(/Configuración → Mercado Pago/i)).toBeInTheDocument()
       // Y el botón no se ofrece habilitado: sólo podría fallar.
-      expect(within(dialogo).getByRole('button', { name: /Cobrar con QR/i })).toBeDisabled()
+      expect(screen.getByRole('button', { name: /Cobrar con QR/i })).toBeDisabled()
     })
 
     it('fuera de producción ofrece simular el pago, y simula la venta entera',
       async () => {
         const cargado = vi.fn()
         montar(cargado)
-        const dialogo = await screen.findByRole('dialog')
-        await elegirMercadoPago(dialogo)
+        await elegirMercadoPago()
 
-        const boton = await within(dialogo).findByRole(
+        const boton = await screen.findByRole(
           'button', { name: /Simular pago aprobado/i })
         await userEvent.click(boton)
 
@@ -378,11 +398,10 @@ describe('cobrar la venta suelta con el QR de MercadoPago', () => {
       // el MISMO en dev y en producción. El 404 es la respuesta.
       simulacionDisponible.mockRejectedValue(new Error('404'))
       montar()
-      const dialogo = await screen.findByRole('dialog')
-      await elegirMercadoPago(dialogo)
+      await elegirMercadoPago()
 
-      await within(dialogo).findByText(/faltan las credenciales de/i)
-      expect(within(dialogo).queryByRole('button', { name: /Simular pago aprobado/i }))
+      await screen.findByText(/faltan las credenciales de/i)
+      expect(screen.queryByRole('button', { name: /Simular pago aprobado/i }))
         .not.toBeInTheDocument()
     })
   })
@@ -390,19 +409,56 @@ describe('cobrar la venta suelta con el QR de MercadoPago', () => {
   it('con reserva no hay nada de QR: eso se cobra con el turno', async () => {
     // Control de todo el describe: si el bloque del QR se dibujara siempre,
     // los tests de arriba pasarían igual sin probar la distinción.
-    render(
-      <DialogoDeConsumo
-        abierto
-        sucursalId={1}
-        reservaId={7}
-        onCerrar={() => {}}
-        onCargado={() => {}}
-      />,
-    )
-    const dialogo = await screen.findByRole('dialog')
-    await within(dialogo).findByText('Gaseosa 500ml')
-    expect(within(dialogo).queryByRole('button', { name: /Cobrar con QR/i }))
+    render(<PanelDeConsumo sucursalId={1} reservaId={7} onCargado={() => {}} />)
+    await screen.findByText('Gaseosa 500ml')
+    expect(screen.queryByRole('button', { name: /Cobrar con QR/i }))
       .not.toBeInTheDocument()
     expect(estadoDelQr).not.toHaveBeenCalled()
+  })
+})
+
+describe('el diálogo, que sigue existiendo para la cuenta de una cancha', () => {
+  /** Un padre realista: el que ignora `onCerrar` deja un diálogo que no se
+   *  cierra nunca, y medir sobre eso no dice nada de la pantalla real. */
+  function MontarDialogo({ reservaId = null as number | null }) {
+    const [abierto, setAbierto] = useState(true)
+    return (
+      <DialogoDeConsumo
+        abierto={abierto}
+        sucursalId={1}
+        reservaId={reservaId}
+        onCerrar={() => setAbierto(false)}
+        onCargado={() => setAbierto(false)}
+      />
+    )
+  }
+
+  it('ahí sí hay «Cancelar», porque hay algo que cerrar', async () => {
+    render(<MontarDialogo reservaId={7} />)
+    const dialogo = await screen.findByRole('dialog')
+    expect(within(dialogo).getByRole('button', { name: 'Cancelar' })).toBeInTheDocument()
+
+    await userEvent.click(within(dialogo).getByRole('button', { name: 'Cancelar' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('🔴 cerrarlo mientras espera el QR BAJA el monto del cartel', async () => {
+    // Es la regresión que este refactor introdujo y el test agarró: al partir el
+    // componente en dos, el `onOpenChange` del diálogo dejó de pasar por el
+    // `cerrar` del panel. Lo cubre el cleanup del desmontaje, que además alcanza
+    // a la ✕, a Escape, al click afuera y al cambio de pestaña.
+    render(<MontarDialogo />)
+    const dialogo = await screen.findByRole('dialog')
+    await waitFor(() => expect(
+      within(dialogo).getByLabelText('Cobrar con')).toHaveValue('efectivo'))
+    await userEvent.click(await within(dialogo).findByText('Gaseosa 500ml'))
+    await userEvent.selectOptions(
+      within(dialogo).getByLabelText('Cobrar con'), 'mercadopago')
+    await userEvent.click(
+      within(dialogo).getByRole('button', { name: /Cobrar con QR/i }))
+    await within(dialogo).findByText(/Esperando el pago/i)
+
+    await userEvent.click(within(dialogo).getByRole('button', { name: /close/i }))
+    await waitFor(() => expect(bajarDelQr).toHaveBeenCalledWith(42))
   })
 })
