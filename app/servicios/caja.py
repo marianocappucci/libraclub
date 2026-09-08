@@ -183,6 +183,36 @@ MOTIVOS_DE_EGRESO = (
     "Vuelto / diferencia",
 )
 
+#: **Por qué medio puede salir plata, que no son los mismos que para cobrar.**
+#:
+#: 🔴 Hasta el 2026-09-08 el egreso aceptaba los cinco de `MEDIOS_PAGO`, así que
+#: la pantalla ofrecía «MercadoPago» y las dos tarjetas. Lo reportó el humano:
+#: *"no puedo hacer un egreso por mercadopago desde ahí aunque técnicamente se
+#: pudiera… usemos la lógica de lo que podemos egresar de una caja"*.
+#:
+#: **Y el daño no era sólo ofrecer una opción sin sentido.** El resumen del motor
+#: agrupa por medio y **netea el egreso dentro de su propio bucket**
+#: (`SUM(CASE WHEN tipo='egreso' THEN -monto ELSE monto END) … GROUP BY
+#: medio_pago`). El bucket `mercadopago` es justamente lo que se concilia contra
+#: lo que MercadoPago va a depositar: un egreso ahí lo baja, y la conciliación
+#: deja de cerrar contra el resumen de ellos. Lo mismo con las tarjetas, que se
+#: cotejan contra el cierre de la terminal.
+#:
+#: Los dos que quedan, y por qué:
+#:
+#: - **`efectivo`**: el caso real. Sale del cajón, y netear su bucket es
+#:   exactamente lo que corrige el esperado del arqueo.
+#: - **`transferencia`**: el peor caso admitido —pagarle a un proveedor por
+#:   banco—. No sale del cajón, así que no toca el efectivo esperado; queda
+#:   anotado para que el egreso exista en el turno y no aparezca como un
+#:   faltante sin explicación.
+#:
+#: 🔑 **Se derivan de `MEDIOS_PAGO`, no se escriben de nuevo.** Lo que este
+#: producto no acepta para cobrar no puede ser egresable, y una segunda lista de
+#: claves a mano es de donde salió el `tarjeta` que no existía.
+MEDIOS_DE_EGRESO = tuple(m for m in MEDIOS_PAGO if m in ("efectivo", "transferencia"))
+assert len(MEDIOS_DE_EGRESO) == 2, MEDIOS_DE_EGRESO
+
 
 def registrar_egreso(usuario: dict, monto: Decimal, motivo: str, detalle: str,
                      medio_pago: str) -> dict:
@@ -196,6 +226,14 @@ def registrar_egreso(usuario: dict, monto: Decimal, motivo: str, detalle: str,
     """
     if motivo not in MOTIVOS_DE_EGRESO:
         raise MotivoInvalido(f"Motivo de egreso desconocido: {motivo!r}")
+    # 🔴 **Acá y no sólo en la pantalla.** El endpoint es el mismo para cualquier
+    # cliente de la API, y un egreso por `mercadopago` le baja el bucket que se
+    # concilia contra el resumen de ellos. Ver `MEDIOS_DE_EGRESO`.
+    if medio_pago not in MEDIOS_DE_EGRESO:
+        raise MedioDePagoInvalido(
+            f"De una caja no se puede egresar por {medio_pago!r}. "
+            f"Medios válidos para un egreso: {', '.join(MEDIOS_DE_EGRESO)}."
+        )
     concepto = f"{motivo}{f' — {detalle}' if detalle.strip() else ''}"
     registrar_movimiento(usuario, "egreso", monto, concepto, medio_pago)
     return db_turnos.get_resumen_turno_caja(turno_abierto(usuario)["id"])

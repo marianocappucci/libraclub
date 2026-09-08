@@ -645,6 +645,12 @@ export const caja = {
   actual: () => api.get<{ turno: TurnoDeCaja; resumen: ResumenDeCaja } | null>('/api/caja/turnos/actual'),
   /** Por qué puede salir plata del cajón. Lista cerrada del backend. */
   motivosDeEgreso: () => api.get<string[]>('/api/caja/motivos-de-egreso'),
+  /** Por qué medio puede SALIR plata: **no son los mismos que para cobrar**.
+   *  De una caja no se egresa por MercadoPago ni por tarjeta — el bucket de esos
+   *  medios es el que se concilia contra el resumen de ellos, y un egreso ahí lo
+   *  desarma. Lista del backend (`servicios/caja.MEDIOS_DE_EGRESO`), no un
+   *  filtro de esta pantalla. */
+  mediosDeEgreso: () => api.get<MedioDePago[]>('/api/caja/medios-de-egreso'),
   /** Plata que **sale**. Devuelve el resumen al momento, como el cobro. */
   egreso: (datos: { monto: string; motivo: string; detalle?: string; medio_pago: string }) =>
     api.post<ResumenDeCaja>('/api/caja/egresos', datos),
