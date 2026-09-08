@@ -34,6 +34,17 @@ updates:
       # Los motores de la familia se pinean por tag de git y se propagan
       # con el workflow bump-motores (ver libra-bump), no por dependabot.
       - dependency-name: "libra*"
+      # 🔴 `vitest` y su proveedor de cobertura quedan en 3.x a proposito
+      # (2026-09-08). `@vitest/coverage-v8` v5 cuenta las lineas de otra
+      # manera --sobre los MISMOS archivos mide una fraccion de las lineas que
+      # medía v3--, asi que el umbral de cobertura de este repo dejaria de
+      # significar lo mismo, y no hay `include`/`exclude` que lo recupere.
+      # Los dos van juntos: coverage-v8@3.2.7 pide vitest 3.2.7 exacto.
+      # Se ignoran los MAJORS, no las correcciones dentro de 3.x.
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitest/coverage-v8"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: "github-actions"
     target-branch: develop
     directory: "/"
