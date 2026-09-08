@@ -232,26 +232,21 @@ def _numero_de_venta(conexion) -> str:
     return f"BUF-{proximo:06d}"
 
 
-def registrar_consumo(
+def _armar_venta(
     *,
     sucursal_id: int,
     lineas: list[tuple[int, Decimal]],
     usuario_id: int | None,
-    reserva_id: int | None = None,
-    cliente_nombre: str = "",
-) -> Sale:
-    """Una venta del buffet. Descuenta stock y queda lista para facturar.
+    reserva_id: int | None,
+    cliente_nombre: str,
+) -> tuple[Sale, Location]:
+    """La venta en borrador, sin guardar y sin tocar stock.
 
-    `lineas` son `(item_id, cantidad)`. El **precio se congela acá**, con el
-    precio de lista del momento: si mañana sube la gaseosa, el consumo de ayer
-    no cambia de importe. Es el mismo criterio que la reserva.
-
-    Con `reserva_id` la venta queda colgada de esa reserva y entra en su factura;
-    sin él es una venta de mostrador que se factura sola.
-
-    ⚠️ **No registra movimiento de caja.** El consumo cargado a una reserva se
-    cobra cuando se cobra la reserva; el de mostrador, en la pantalla del buffet.
-    Anotar la plata acá la contaría dos veces.
+    Está separada porque hay **dos** finales posibles y comparten todo lo de
+    acá: `registrar_consumo` la confirma en el acto, y `preparar_consumo` la deja
+    en borrador esperando que alguien escanee el QR. Duplicar el armado sería
+    duplicar el congelamiento de precios, que es la parte que no se puede
+    equivocar.
     """
     if not lineas:
         raise VentaVacia("No hay nada cargado.")
@@ -296,7 +291,93 @@ def registrar_consumo(
         created_by=usuario_id,
         occurred_on=ahora().date().isoformat(),
     )
-    return confirm_sale(repo, venta, ubicacion.id, ahora())
+    return venta, ubicacion
+
+
+def preparar_consumo(
+    *,
+    sucursal_id: int,
+    lineas: list[tuple[int, Decimal]],
+    usuario_id: int | None,
+    cliente_nombre: str = "",
+) -> Sale:
+    """La venta de mostrador **en borrador**: guardada, sin mover stock.
+
+    🔴 **Es lo que hace que un QR que nadie escanea no deje rastro.** El cobro
+    con QR necesita un id y un total *antes* de que el cliente pague —la
+    referencia que viaja a MercadoPago sale de ahí— pero descontar el stock ahí
+    sería descontarlo por una venta que puede no ocurrir nunca: el cliente se va,
+    la app le falla, se arrepiente. El borrador se queda quieto y el stock se
+    mueve recién en `confirmar_consumo`, cuando la plata entró.
+
+    Lo único que sí consume es un **número** de la serie `BUF-`: un QR abandonado
+    deja un hueco en la numeración. Es aceptable a propósito — no es numeración
+    fiscal (ver `_numero_de_venta`), y la alternativa es numerar al confirmar, o
+    sea que el número dependa del orden en que paguen dos clientes.
+    """
+    venta, _ubicacion = _armar_venta(
+        sucursal_id=sucursal_id,
+        lineas=lineas,
+        usuario_id=usuario_id,
+        reserva_id=None,
+        cliente_nombre=cliente_nombre,
+    )
+    return _repo().save_sale(venta)
+
+
+def confirmar_consumo(venta_id: int) -> Sale:
+    """Confirma un borrador de `preparar_consumo`: acá recién se mueve el stock.
+
+    🔑 **Idempotente**, y no por prolijidad: la llama el poll del QR, que corre
+    cada 3 segundos y puede pegarle dos veces al mismo pago aprobado. Una venta
+    ya confirmada se devuelve tal cual — `confirm_sale` del motor levantaría
+    `ValueError` y el segundo tick se vería como un error del cobro.
+
+    🔴 **La sucursal sale de la venta y no del caller**, a propósito: el stock es
+    físico y por sucursal (ver `ubicacion_de`), así que un caller que pase la
+    equivocada descuenta las gaseosas del depósito de la otra sede. La venta ya
+    sabe de dónde salió; preguntárselo a otro es abrir la puerta a que no
+    coincidan.
+    """
+    venta = _repo().get_sale(venta_id)
+    if venta is None:
+        raise ProductoInexistente(f"No existe la venta {venta_id}.")
+    if venta.status is not SaleStatus.DRAFT:
+        return venta
+    if venta.branch_id is None:
+        raise ValueError(f"La venta {venta_id} no tiene sucursal: no se sabe qué stock mover.")
+    return confirm_sale(_repo(), venta, ubicacion_de(venta.branch_id).id, ahora())
+
+
+def registrar_consumo(
+    *,
+    sucursal_id: int,
+    lineas: list[tuple[int, Decimal]],
+    usuario_id: int | None,
+    reserva_id: int | None = None,
+    cliente_nombre: str = "",
+) -> Sale:
+    """Una venta del buffet. Descuenta stock y queda lista para facturar.
+
+    `lineas` son `(item_id, cantidad)`. El **precio se congela acá**, con el
+    precio de lista del momento: si mañana sube la gaseosa, el consumo de ayer
+    no cambia de importe. Es el mismo criterio que la reserva.
+
+    Con `reserva_id` la venta queda colgada de esa reserva y entra en su factura;
+    sin él es una venta de mostrador que se factura sola.
+
+    ⚠️ **No registra movimiento de caja.** El consumo cargado a una reserva se
+    cobra cuando se cobra la reserva; el de mostrador, en la pantalla del buffet.
+    Anotar la plata acá la contaría dos veces.
+    """
+    venta, ubicacion = _armar_venta(
+        sucursal_id=sucursal_id,
+        lineas=lineas,
+        usuario_id=usuario_id,
+        reserva_id=reserva_id,
+        cliente_nombre=cliente_nombre,
+    )
+    return confirm_sale(_repo(), venta, ubicacion.id, ahora())
 
 
 def consumos_de_reserva(reserva_id: int) -> list[Sale]:

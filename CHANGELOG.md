@@ -7,6 +7,26 @@ versionado [SemVer](https://semver.org/lang/es/).
 
 ### Agregado
 
+- **La venta de buffet del mostrador se cobra con el QR de MercadoPago.** En
+  Caja → Venta suelta → «Vender del buffet», elegir «MercadoPago» ahora pone el
+  total en el cartel de la caja y espera la acreditación, en vez de anotar un
+  movimiento a mano como si fuera una transferencia. Es el mismo agujero que el
+  detalle del turno tenía hasta el 2026-08-28, sobre la otra cosa que se cobra
+  en el mostrador.
+  > 🔴 **La venta queda en BORRADOR hasta que MercadoPago acredita**: poner el
+  > monto en el QR **no mueve stock ni plata**. Un QR que nadie escanea no
+  > descuenta las gaseosas —que siguen en la heladera— ni deja una venta cobrada
+  > que nadie pagó. El stock sale y el ingreso entra en el mismo tick del poll,
+  > y sólo entonces.
+  >
+  > El pago vive en `pagos_de_reserva` con `reserva_id` en `NULL` y `venta_id`
+  > cargado (revisión `0011`, con un CHECK que exige **uno de los dos**): así el
+  > webhook lo encuentra por la misma referencia, con la misma traducción de
+  > estados y la misma máquina de `EstadoPago`, sin una segunda tabla ni un
+  > segundo `if`. Y sin credenciales cargadas la pantalla **dice** qué falta y
+  > dónde se carga, que es la mitad del reporte del 2026-08-28 que era una
+  > pantalla muda.
+
 - **La pantalla dice de qué ambiente es el token de MercadoPago** — `Ambiente
   de prueba`, `Ambiente de producción` o `Ambiente sin verificar`, con la fecha
   en que se determinó.

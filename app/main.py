@@ -445,6 +445,14 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     if simulador_qr is not None:
         app.include_router(simulador_qr)
 
+    # Y el de la venta de buffet, que confirma una venta y anota el ingreso sin
+    # que haya entrado un peso: en la instancia de un complejo, cualquiera con la
+    # URL vacía el buffet. Es un builder propio y no el de arriba a propósito —
+    # ver el docstring de `buffet.construir_router_de_simulacion_qr`.
+    simulador_qr_buffet = buffet_router.construir_router_de_simulacion_qr(config.entorno)
+    if simulador_qr_buffet is not None:
+        app.include_router(simulador_qr_buffet)
+
     resumen = resumen_router.construir_router()
     if resumen is not None:
         app.include_router(resumen)

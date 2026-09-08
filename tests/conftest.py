@@ -30,7 +30,17 @@ RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: `avisos` va explícita aunque el `CASCADE` la alcanzaría por su FK contra
 #: `reservas`: una tabla que sólo se limpia de rebote deja de limpiarse el día
 #: que alguien le saca la FK, y el síntoma es un test que ve avisos de otro.
-TABLAS = "avisos, reservas, series, tarifas, feriados, canchas, clientes, sucursales"
+#:
+#: 🔴 **`pagos_de_reserva` va explícita porque el `CASCADE` ya NO la alcanza
+#: entera.** Desde la revisión `0011` un pago de **venta de buffet** tiene
+#: `reserva_id` en `NULL`: no cuelga de ninguna reserva, así que truncar
+#: `reservas` en cascada no se lo lleva. Sin esta línea el pago aprobado de un
+#: test sobrevive al siguiente, y el que ahí se rompe es el guard de "esta venta
+#: ya está cobrada" — con un rojo que habla de la venta de otro test.
+TABLAS = (
+    "pagos_de_reserva, avisos, reservas, series, tarifas, feriados, "
+    "canchas, clientes, sucursales"
+)
 
 
 #: Secreto de firma de sesión para la suite. Fijo y evidente: no es una clave,
