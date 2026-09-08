@@ -41,7 +41,7 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # -- Dependencias privadas: la misma receta que los jobs test y frontend --
       - name: Acceso SSH a los motores y a libra-ui
@@ -70,10 +70,10 @@ jobs:
           configurar libra-ui "$LIBRA_UI_DEPLOY_KEY"
 
       # -- Backend --
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           version: "0.12.10"
       - name: Instalar el backend desde el lock
@@ -82,7 +82,7 @@ jobs:
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       # -- Frontend: el bundle real, el que sirve uvicorn desde frontend/dist --
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
@@ -134,7 +134,7 @@ jobs:
       - name: Log de uvicorn si algo fallo
         if: failure()
         run: tail -80 uvicorn.log
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: smoke-playwright
