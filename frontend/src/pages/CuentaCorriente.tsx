@@ -17,7 +17,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import type { ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from 'libra-ui/data-table'
 import { Eye, NotebookText } from 'lucide-react'
 import { DataTable, anchoColumnaAcciones, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'

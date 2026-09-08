@@ -13,7 +13,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import type { ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from 'libra-ui/data-table'
 import {
   ArrowDownCircle, ArrowLeft, ArrowUpCircle, CircleDollarSign, NotebookText,
 } from 'lucide-react'

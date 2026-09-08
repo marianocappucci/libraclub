@@ -14,7 +14,7 @@
  * contestarle al jugador que llama sin poder mover plata hacia afuera.
  */
 import { useCallback, useEffect, useState } from 'react'
-import type { ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from 'libra-ui/data-table'
 import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 import { RotateCw, Undo2 } from 'lucide-react'

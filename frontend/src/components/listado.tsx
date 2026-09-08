@@ -7,7 +7,7 @@
  *  dominio propias, y meterlos en un molde común sería perderlas—: son sólo las
  *  piezas comunes.
  */
-import type { ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef, RowData } from 'libra-ui/data-table'
 import { Pencil, Trash2 } from 'lucide-react'
 import { anchoColumnaAcciones } from 'libra-ui/data-table'
 
@@ -49,7 +49,7 @@ export function AvisoDeError({ mensaje }: { mensaje: string | null }) {
  *  idénticos y no hay forma de saber cuál es cuál. El texto visible no cambia:
  *  los botones siguen siendo sólo el icono.
  */
-export function columnaDeAcciones<T>({ onEditar, onBorrar, nombreDe }: {
+export function columnaDeAcciones<T extends RowData>({ onEditar, onBorrar, nombreDe }: {
   onEditar: (fila: T) => void
   onBorrar: (fila: T) => void
   /** Cómo se nombra la fila en el `aria-label` de cada botón. */

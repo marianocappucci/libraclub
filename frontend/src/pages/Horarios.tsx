@@ -6,7 +6,7 @@
  * ofreciendo ocho horas de turnos que no da, y no tiene cómo enterarse.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from 'libra-ui/data-table'
 import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
 import { Clock, Plus } from 'lucide-react'
