@@ -75,6 +75,21 @@ def nueva_referencia(reserva_id: int) -> str:
     return f"{PREFIJO_DE_REFERENCIA}{reserva_id}-{secrets.token_hex(6)}"
 
 
+def nueva_referencia_de_venta(venta_id: int) -> str:
+    """La referencia de un cobro de buffet. Mismo prefijo, otro cuerpo.
+
+    🔑 **Arranca con `PREFIJO_DE_REFERENCIA` igual que la del turno**, y no es
+    cosmético: la bandeja de conciliación del motor omite lo que empieza con ese
+    prefijo porque el producto ya lo resuelve. Una referencia de buffet con otro
+    prefijo aparecería en la bandeja como si nadie la hubiera conciliado, con el
+    cobro ya registrado en la caja — el mismo ingreso, contado dos veces.
+
+    El `buf-` que sigue es para que un humano mirando el panel de MercadoPago
+    sepa de un vistazo si esa referencia es un turno o una gaseosa.
+    """
+    return f"{PREFIJO_DE_REFERENCIA}buf-{venta_id}-{secrets.token_hex(6)}"
+
+
 def crear_pago(sesion: Session, reserva: Reserva, monto: Decimal) -> PagoDeReserva:
     """Registra el intento de pago de una reserva provisoria."""
     if reserva.estado is not EstadoReserva.PROVISORIA:
@@ -135,6 +150,39 @@ def crear_pago_de_mostrador(
     return pago
 
 
+def crear_pago_de_buffet(
+    sesion: Session, venta_id: int, monto: Decimal
+) -> PagoDeReserva:
+    """El intento de cobro con QR de una venta suelta del buffet.
+
+    Sin reserva: `reserva_id` queda en `NULL` y el CHECK de la tabla exige que
+    entonces venga `venta_id`. Ver el docstring de `PagoDeReserva`.
+
+    🔑 **Una venta con un cobro aprobado no se vuelve a cobrar**, igual que un
+    turno. El índice parcial `uq_pagos_venta_aprobado` lo impide en la base, pero
+    fallar ahí sería un 500; acá sale como error de dominio y el router lo
+    traduce a 409.
+
+    ⚠️ No se valida ningún estado de la venta, y ésa es la diferencia con
+    `crear_pago_de_mostrador`: la venta se crea **en borrador y en este mismo
+    request**, así que no hay ciclo de vida previo que pueda estar mal. Lo que sí
+    se valida es que no esté ya cobrada.
+    """
+    if aprobado_de_venta(sesion, venta_id) is not None:
+        raise PagoInvalido(f"La venta {venta_id} ya tiene un pago aprobado.")
+    pago = PagoDeReserva(
+        reserva_id=None,
+        venta_id=venta_id,
+        monto=monto,
+        estado=EstadoPago.PENDIENTE,
+        referencia=nueva_referencia_de_venta(venta_id),
+        canal=CanalDePago.MOSTRADOR,
+    )
+    sesion.add(pago)
+    sesion.flush()
+    return pago
+
+
 def por_referencia(sesion: Session, referencia: str) -> PagoDeReserva | None:
     return sesion.scalars(
         select(PagoDeReserva).where(PagoDeReserva.referencia == referencia)
@@ -148,6 +196,29 @@ def aprobado_de(sesion: Session, reserva_id: int) -> PagoDeReserva | None:
             PagoDeReserva.reserva_id == reserva_id,
             PagoDeReserva.estado == EstadoPago.APROBADO,
         )
+    ).first()
+
+
+def aprobado_de_venta(sesion: Session, venta_id: int) -> PagoDeReserva | None:
+    """El pago aprobado de una venta de buffet, si lo hay. Hay a lo sumo uno."""
+    return sesion.scalars(
+        select(PagoDeReserva).where(
+            PagoDeReserva.venta_id == venta_id,
+            PagoDeReserva.estado == EstadoPago.APROBADO,
+        )
+    ).first()
+
+
+def ultimo_de_venta(sesion: Session, venta_id: int) -> PagoDeReserva | None:
+    """El último intento de cobro con QR de una venta de buffet.
+
+    El último y no "el pendiente", por lo mismo que `ultimo_de_mostrador`: si el
+    cajero volvió a poner el monto en el QR, el intento vivo es el nuevo.
+    """
+    return sesion.scalars(
+        select(PagoDeReserva)
+        .where(PagoDeReserva.venta_id == venta_id)
+        .order_by(PagoDeReserva.id.desc())
     ).first()
 
 
@@ -198,6 +269,15 @@ def aplicar_pago_aprobado(
     pago.estado_mp = estado_mp
     pago.pagado_at = ahora()
 
+    if pago.reserva_id is None:
+        # Una venta de buffet: no hay turno que confirmar, y el `sesion.get`
+        # de abajo con `None` devolvería `None` y haría saltar el
+        # `PagoInvalido` como si el pago apuntara a una reserva borrada. Lo que
+        # le falta a este caso —confirmar la venta, el movimiento de caja— lo
+        # agrega `cobro_qr._completar_venta`, por lo mismo que en el turno: hace
+        # falta saber quién cobra, y el webhook no lo sabe.
+        return True
+
     reserva = sesion.get(Reserva, pago.reserva_id)
     if reserva is None:
         raise PagoInvalido(f"El pago {pago.id} apunta a una reserva que no existe.")
@@ -236,6 +316,12 @@ def marcar_vencidos(sesion: Session, momento: datetime | None = None) -> int:
 
     Corre junto con `vencer_provisorias`: sin esto, un pago pendiente de una
     reserva que se liberó hace un mes sigue figurando como "esperando pago".
+
+    ⚠️ **No toca los pagos de buffet, y es correcto.** El `JOIN` contra
+    `reservas` los deja afuera solo —`reserva_id` es `NULL`— pero el motivo no es
+    ése: un cobro de buffet no vence porque no hay ninguna reserva provisoria que
+    liberar. Lo que lo baja del QR es el propio mostrador, cancelando o dejando
+    correr los cinco minutos de espera de la pantalla.
     """
     momento = momento or ahora()
     pendientes = sesion.scalars(

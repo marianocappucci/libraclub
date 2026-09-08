@@ -290,21 +290,44 @@ class CanalDePago(enum.Enum):
 
 
 class PagoDeReserva(Base, Auditable):
-    """El pago de MercadoPago de una reserva — del portal o del mostrador.
+    """El pago de MercadoPago de un turno, o de una venta de buffet.
 
     Vive en la base del **dominio** y no en la de LibraCore, a diferencia de los
     movimientos de caja: es parte del ciclo de vida de la reserva —decide si
     existe o no— y necesita una FK real contra `reservas`. Cuando el pago se
     aprueba, el ingreso **también** se registra en la caja de LibraCore, que es
     donde vive la plata.
+
+    🔑 **Se llama «de reserva» y desde el 2026-09-08 también cubre la venta de
+    buffet del mostrador**, que no tiene reserva ninguna. La tabla NO se
+    renombró a propósito: renombrarla obliga a tocar datos vivos en las
+    instancias para no ganar nada que este docstring no diga. Lo que sí cambió
+    es que el origen es **uno de dos**, y lo fija un CHECK: o `reserva_id` —el
+    turno de la cancha, venga del portal o del mostrador— o `venta_id` —la venta
+    suelta del buffet—, nunca los dos ni ninguno.
+
+    Un solo lugar para las dos cosas, y no una tabla nueva, porque lo que
+    comparten es todo lo que importa: **la referencia** que el webhook busca, la
+    máquina de estados de `EstadoPago`, el `estado_mp` crudo y las columnas de la
+    devolución. Una tabla aparte obligaría al webhook a preguntar dos veces y a
+    que la traducción de MercadoPago exista dos veces — que es exactamente lo
+    que `estado_desde_mercadopago` vino a evitar.
     """
 
     __tablename__ = "pagos_de_reserva"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    reserva_id: Mapped[int] = mapped_column(
-        ForeignKey("reservas.id", ondelete="CASCADE"), nullable=False
+    #: El turno que se paga. `NULL` en una venta de buffet del mostrador.
+    reserva_id: Mapped[int | None] = mapped_column(
+        ForeignKey("reservas.id", ondelete="CASCADE"), nullable=True
     )
+    #: La venta de buffet que se cobra, cuando no hay turno detrás.
+    #:
+    #: ⚠️ **Sin FK, por lo mismo que `caja_movimiento_id`**: la venta es una fila
+    #: de `sales` en la base de LibraCore, que es otra base. Lo que garantiza que
+    #: exista es que la crea el mismo request —en borrador— antes de poner el
+    #: monto en el QR.
+    venta_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     monto: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     estado: Mapped[EstadoPago] = mapped_column(
         Enum(EstadoPago, name="estado_pago", values_callable=lambda e: [m.value for m in e]),
@@ -357,7 +380,7 @@ class PagoDeReserva(Base, Auditable):
     #: logs del contenedor.
     detalle_devolucion: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
-    reserva: Mapped[Reserva] = relationship()
+    reserva: Mapped[Reserva | None] = relationship()
 
     __table_args__ = (
         # 🔴 **Único, y es lo que hace idempotente al webhook.** MercadoPago
@@ -372,8 +395,25 @@ class PagoDeReserva(Base, Auditable):
             unique=True,
             postgresql_where="estado = 'aprobado'",
         ),
+        # Lo mismo para la venta de buffet: un cobro aprobado por venta y ni
+        # uno más. Los `NULL` no chocan entre sí —PostgreSQL los considera
+        # distintos en un índice único— así que este índice no dice nada de los
+        # pagos de turnos, ni el de arriba de los de buffet.
+        Index(
+            "uq_pagos_venta_aprobado",
+            "venta_id",
+            unique=True,
+            postgresql_where="estado = 'aprobado'",
+        ),
         Index("ix_pagos_reserva_payment", "payment_id"),
         CheckConstraint("monto > 0", name="ck_pagos_reserva_monto"),
+        # 🔴 **Uno de los dos orígenes, nunca los dos ni ninguno.** Sin esto una
+        # fila con las dos columnas en `NULL` es un cobro que no cobra nada a
+        # nadie, y el que lo descubre es el arqueo.
+        CheckConstraint(
+            "(reserva_id IS NULL) <> (venta_id IS NULL)",
+            name="ck_pagos_reserva_origen",
+        ),
     )
 
 

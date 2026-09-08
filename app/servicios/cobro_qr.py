@@ -372,6 +372,176 @@ async def _completar(
             "factura_id": reserva.factura_id}
 
 
+# ── La venta de buffet, que no tiene turno detrás ────────────────────────
+#
+# 🔑 **El mismo QR, la misma tabla de pagos y el mismo poll.** Lo único distinto
+# es qué se cobra y qué se completa al acreditar: allá un turno —con su factura—,
+# acá una venta suelta del buffet. Duplicar el módulo habría duplicado la
+# traducción de estados de MercadoPago, que es la parte que ya se unificó una vez.
+#
+# 🔴 **Y no factura sola.** El interruptor `mp_auto_facturar_reservas` es de los
+# turnos, y una venta de buffet no es un comprobante fiscal (ver
+# `_numero_de_venta` en `servicios/buffet.py`): quemarle numeración de ARCA a
+# cada gaseosa es exactamente lo que el diseño del buffet evita. El comprobante,
+# si hace falta, se pide después con el botón de siempre.
+
+
+def items_de_la_venta(venta) -> list[dict]:
+    """Las líneas que ve el cliente en la app de MercadoPago al escanear.
+
+    Con el precio **final**, igual que `items_para_mp`: el desglose de IVA es de
+    la factura, no del cobro. Salen del borrador —donde el precio ya quedó
+    congelado— y no del catálogo: si la gaseosa sube de precio entre el escaneo
+    y la acreditación, se cobra lo que se le mostró al cliente.
+    """
+    return [
+        {
+            "producto_id": linea.item_id,
+            "nombre": linea.description_snapshot,
+            "qty": float(linea.quantity),
+            "precio": float(linea.unit_price),
+            "subtotal": float(linea.quantity * linea.unit_price),
+        }
+        for linea in venta.items
+    ]
+
+
+async def poner_venta_en_el_qr(sesion: Session, venta) -> PagoDeReserva:
+    """Pone el total de una venta de buffet a cobrar en el QR del mostrador.
+
+    `venta` es el **borrador** que dejó `buffet.preparar_consumo`: existe, tiene
+    id y total, y todavía no movió stock. Ver ahí por qué el borrador y no la
+    venta confirmada.
+    """
+    total = Decimal(str(venta.total))
+    if total <= 0:
+        raise NadaQueCobrar("Esa venta no tiene importe: no hay nada que cobrar.")
+    token, user_id, pos_id = credenciales()
+
+    # El pago se crea ANTES de llamar a MercadoPago para que la referencia
+    # exista: es lo que viaja en la orden. Si MercadoPago falla, el caller no
+    # commitea y la fila no queda.
+    pago = servicio_pagos.crear_pago_de_buffet(sesion, venta.id, total)
+
+    try:
+        await mp_api.crear_orden_qr(
+            user_id=user_id,
+            pos_id=pos_id,
+            access_token=token,
+            external_reference=pago.referencia,
+            titulo=f"Buffet {venta.number}",
+            items=items_de_la_venta(venta),
+            total=float(total),
+        )
+    except RuntimeError as exc:
+        raise QrError(str(exc)) from exc
+
+    logger.info("Venta de buffet %s puesta en el QR por %s (ref %s)",
+                venta.id, total, pago.referencia)
+    return pago
+
+
+async def bajar_venta_del_qr(sesion: Session, venta_id: int) -> bool:
+    """Saca del QR la orden de esa venta. Mismo criterio que `bajar_del_qr`.
+
+    🔴 **Sin esto, el próximo que escanee paga las gaseosas del anterior.**
+    """
+    pago = servicio_pagos.ultimo_de_venta(sesion, venta_id)
+    if pago is None or pago.estado is not EstadoPago.PENDIENTE:
+        return False
+    try:
+        token, user_id, pos_id = credenciales()
+    except QrNoConfigurado:
+        return False
+    await mp_api.eliminar_orden_qr(user_id, pos_id, token)
+    pago.estado = EstadoPago.VENCIDO
+    return True
+
+
+async def estado_del_cobro_de_venta(
+    sesion: Session, venta_id: int, usuario: dict
+) -> dict:
+    """Si el QR de esa venta de buffet ya se pagó, y si sí, termina de cobrarla.
+
+    Espeja `estado_del_cobro` paso por paso —incluida la traducción de estados,
+    que sale del motor— y difiere sólo en `_completar_venta`. El caller commitea.
+    """
+    pago = servicio_pagos.ultimo_de_venta(sesion, venta_id)
+    if pago is None:
+        return {"estado": "sin_orden", "payment_id": None, "factura_id": None}
+
+    if pago.estado is EstadoPago.APROBADO:
+        # Puede haberlo sellado el webhook. Se completa igual: es idempotente y
+        # es el único camino que sabe quién cobra.
+        return _completar_venta(sesion, pago, usuario)
+
+    if pago.estado is not EstadoPago.PENDIENTE:
+        return {"estado": pago.estado.value, "payment_id": pago.payment_id,
+                "factura_id": None}
+
+    token, _user_id, _pos_id = credenciales()
+    try:
+        detalle = await mp_api.buscar_pago_por_referencia(pago.referencia, token)
+    except Exception as exc:
+        raise QrError(f"No se pudo consultar el pago en MercadoPago: {exc}") from exc
+
+    if not detalle:
+        return {"estado": "pendiente", "payment_id": None, "factura_id": None}
+
+    estado_mp = str(detalle.get("status") or "pendiente")
+    payment_id = str(detalle["id"])
+    traducido = acreditacion.estado_desde_mercadopago(estado_mp)
+
+    if traducido is acreditacion.EstadoAcreditacion.RECHAZADO:
+        servicio_pagos.aplicar_pago_rechazado(
+            sesion, pago, payment_id=payment_id, estado_mp=estado_mp
+        )
+        return {"estado": "rechazado", "payment_id": payment_id, "factura_id": None}
+
+    if traducido is not acreditacion.EstadoAcreditacion.APROBADO:
+        pago.estado_mp = estado_mp
+        return {"estado": "pendiente", "payment_id": None, "factura_id": None}
+
+    servicio_pagos.aplicar_pago_aprobado(
+        sesion, pago, payment_id=payment_id, estado_mp=estado_mp
+    )
+    return _completar_venta(sesion, pago, usuario)
+
+
+def _completar_venta(sesion: Session, pago: PagoDeReserva, usuario: dict) -> dict:
+    """La venta confirmada y el movimiento de caja de un pago ya aprobado.
+
+    🔴 **Primero el stock, después la caja**, al revés del turno —donde primero
+    va la factura— y por el mismo motivo de fondo: lo que se hace último es lo
+    que, si falla, se puede reintentar sin contar plata dos veces. Si
+    `registrar_ingreso` falla porque no hay turno abierto, la venta queda
+    confirmada y el tick siguiente del poll la ve confirmada (es idempotente) y
+    reintenta sólo el ingreso.
+
+    Idempotente por `caja_movimiento_id`, igual que `_completar`.
+    """
+    if pago.caja_movimiento_id is not None:
+        return {"estado": "aprobado", "payment_id": pago.payment_id, "factura_id": None}
+
+    venta = buffet.confirmar_consumo(pago.venta_id)
+
+    movimiento_id = caja.registrar_ingreso(
+        usuario,
+        pago.monto,
+        f"Buffet {venta.number}",
+        MEDIO,
+        # 🔑 La MISMA referencia que el cobro en efectivo de una venta de buffet
+        # (`app/routers/buffet.py`). Es lo que hace que el arqueo y los reportes
+        # por medio vean una sola clase de movimiento «venta de buffet», cobrada
+        # como se haya cobrado.
+        referencia=f"buffet-{venta.id}",
+    )
+    pago.caja_movimiento_id = movimiento_id
+    logger.info("Venta de buffet %s cobrada por QR: payment_id=%s, movimiento=%s",
+                venta.id, pago.payment_id, movimiento_id)
+    return {"estado": "aprobado", "payment_id": pago.payment_id, "factura_id": None}
+
+
 async def _facturar_si_corresponde(reserva: Reserva, cliente, cancha_nombre: str) -> None:
     """Emite la factura del turno si la instancia tiene la automática prendida.
 

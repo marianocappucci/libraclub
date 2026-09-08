@@ -858,6 +858,52 @@ export const buffet = {
     ),
 }
 
+/** Las líneas de una venta de mostrador que se va a cobrar por QR. */
+export interface VentaParaCobrar {
+  lineas: { item_id: number; cantidad: string }[]
+}
+
+/** El borrador que quedó esperando el escaneo, con lo que se puso en el QR. */
+export interface VentaConQr {
+  venta_id: number
+  numero: string
+  referencia: string
+  monto: number
+}
+
+/** El cobro con QR de una **venta suelta del buffet**.
+ *
+ * 🔑 **Es el mismo cartel de la caja que el del turno**, y por eso comparte
+ * `QrEstado` y la disponibilidad (`cobroQr.estado()`): tener credenciales
+ * cargadas es un hecho de la instancia, no del turno ni de la venta. Lo que
+ * cambia es qué se cobra.
+ *
+ * 🔴 **`poner` deja la venta en BORRADOR: el stock no se mueve hasta que
+ * MercadoPago acredita.** Un QR que nadie escanea no descuenta las gaseosas.
+ */
+export const cobroQrBuffet = {
+  poner: (sucursalId: number, cuerpo: VentaParaCobrar) =>
+    api.post<VentaConQr>(`/api/buffet/ventas/qr?sucursal_id=${sucursalId}`, cuerpo),
+  /** 🔴 Sin esto, el próximo que escanee paga las gaseosas del anterior. */
+  bajar: (ventaId: number) => api.del(`/api/buffet/ventas/${ventaId}/mp-qr`),
+  consultar: (ventaId: number) =>
+    api.get<QrEstado>(`/api/buffet/ventas/${ventaId}/mp-status`),
+  /** Si esta instancia monta el simulador del buffet — o sea, si no es
+   *  producción. Tiene su propia ruta y no reusa la de `/api/reservas`: sondear
+   *  una para ofrecer el botón de la otra mide algo distinto de lo que se va a
+   *  llamar. **404 significa que no se puede simular**, así que quien la llame
+   *  mira `ErrorDeApi.status`, no el texto. */
+  simulacionDisponible: () =>
+    api.get<{ disponible: boolean }>('/api/buffet/mp-qr/simulacion'),
+  /** Hace de cuenta que alguien escaneó el QR y pagó la venta. Sólo fuera de
+   *  producción. Deja lo mismo que el cobro real: la venta confirmada con su
+   *  stock descontado y el movimiento en la caja del turno abierto. */
+  simular: (sucursalId: number, cuerpo: VentaParaCobrar) =>
+    api.post<VentaConQr & { estado: string; simulado: boolean }>(
+      `/api/buffet/ventas/qr/simular?sucursal_id=${sucursalId}`, cuerpo,
+    ),
+}
+
 // ── Turnos fijos (canchas fijas / series) ────────────────────────────────
 
 export interface SerieEntrada {
