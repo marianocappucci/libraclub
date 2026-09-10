@@ -40,8 +40,14 @@ import { buttonVariants } from '@/components/ui/button'
  *  el segundo consumidor, o sea el momento en que corresponde evaluar mudarlo a
  *  `libra-ui` — pero mudarlo obliga a tocar Contalibra, que hoy anda, para no
  *  ganar nada visible. Se anota como candidato, no se hace de arrastre.
+ *
+ *  🔑 **Se exporta desde el 2026-09-08**, cuando la venta de buffet de la Caja
+ *  sumó su propio cobro por QR (`DialogoDeConsumo`). Ahí la elección era una
+ *  TERCERA copia dentro del mismo repo o un import: la tercera copia es la que
+ *  después suena distinto en una pantalla y en la otra. Mudarlo a `libra-ui`
+ *  sigue siendo el candidato; esto no lo reemplaza.
  */
-function crearAudio(): AudioContext | null {
+export function crearAudio(): AudioContext | null {
   try {
     const Ctor = window.AudioContext
       ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
@@ -51,7 +57,7 @@ function crearAudio(): AudioContext | null {
   }
 }
 
-function sonarCampanita(ctx: AudioContext | null) {
+export function sonarCampanita(ctx: AudioContext | null) {
   if (!ctx) return
   // Un contexto creado antes de cualquier gesto puede quedar suspendido.
   if (ctx.state === 'suspended') void ctx.resume()
@@ -74,10 +80,10 @@ function sonarCampanita(ctx: AudioContext | null) {
   }
 }
 
-const POLL_MS = 3000
+export const POLL_MS = 3000
 
 /** Cinco minutos: si el cliente no escaneó, el monto se baja del cartel. */
-const ESPERA_MAXIMA_MS = 5 * 60 * 1000
+export const ESPERA_MAXIMA_MS = 5 * 60 * 1000
 
 /** Los estados en los que tiene sentido cobrar. Espeja `ESTADOS_COBRABLES` del
  *  backend: cobrar una reserva cancelada no es un caso de uso, es un error. */

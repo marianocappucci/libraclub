@@ -201,6 +201,82 @@ def test_sin_caja_abierta_no_se_registra_un_egreso(api, sucursal):
     assert r.status_code == 409, r.text
 
 
+def test_de_una_caja_NO_se_egresa_por_mercadopago_ni_por_tarjeta(
+    api, sucursal, abrir_caja,
+):
+    """🔴 **El resumen netea el egreso dentro del bucket de su medio.**
+
+    `pagos_por_medio` agrupa por `medio_pago` y resta los egresos ahí mismo, así
+    que un egreso por `mercadopago` **baja el número que se concilia contra lo
+    que MercadoPago va a depositar** — y el bucket de las tarjetas es el que se
+    cruza contra el cierre de la terminal. De una caja sale efectivo; en el peor
+    caso, una transferencia.
+
+    Reportado por el humano el 2026-09-08: la pantalla ofrecía los cinco medios
+    del cobro *"aunque no puedo hacer un egreso por mercadopago desde ahí"*.
+    """
+    abrir_caja(api, sucursal, "10000")
+    for medio in ("mercadopago", "tarjeta_debito", "tarjeta_credito"):
+        r = api.post("/api/caja/egresos", json={
+            "monto": "1000", "motivo": "Retiro a banco", "medio_pago": medio,
+        })
+        assert r.status_code == 422, (medio, r.text)
+        assert medio in r.json()["detail"], "el error tiene que nombrar el medio"
+
+    # 🔑 Y no dejó rastro: el esperado sigue intacto. Sin esto, un rechazo que
+    # igual registrara el movimiento pasaría el assert de arriba.
+    resumen = api.get("/api/caja/turnos/actual").json()["resumen"]
+    assert resumen["total_ventas"] == 0.0
+    assert "mercadopago" not in resumen["pagos_por_medio"]
+
+
+def test_los_dos_medios_que_SI_se_pueden_egresar(api, sucursal, abrir_caja):
+    """Control del test de arriba: si el egreso rechazara todo, aquél pasaría
+    igual sin probar la distinción.
+
+    Y el efecto de cada uno sobre el arqueo es distinto, que es la razón de que
+    los dos estén: el efectivo **baja el esperado del cajón** y la transferencia
+    no lo toca — no salió del cajón.
+    """
+    abrir_caja(api, sucursal, "10000")
+    api.post("/api/caja/cobros", json={
+        "monto": "5000", "concepto": "Turno", "medio_pago": "efectivo",
+    })
+
+    efectivo = api.post("/api/caja/egresos", json={
+        "monto": "1000", "motivo": "Pago a proveedor", "medio_pago": "efectivo",
+    })
+    assert efectivo.status_code == 200, efectivo.text
+    assert efectivo.json()["efectivo_ventas"] == 4000.0, "5000 menos 1000"
+
+    transferencia = api.post("/api/caja/egresos", json={
+        "monto": "2000", "motivo": "Pago a proveedor", "medio_pago": "transferencia",
+    })
+    assert transferencia.status_code == 200, transferencia.text
+    resumen = transferencia.json()
+    assert resumen["efectivo_ventas"] == 4000.0, (
+        "una transferencia no sale del cajón: no toca el efectivo esperado")
+    assert resumen["pagos_por_medio"]["transferencia"] == -2000.0
+
+
+def test_la_lista_de_medios_de_egreso_es_mas_corta_que_la_de_cobro(api, sucursal):
+    """La pantalla pide **esta** lista y no filtra la de cobro: un filtro del
+    lado del cliente es una segunda declaración de la regla."""
+    cobro = api.get("/api/caja/medios-pago")
+    egreso = api.get("/api/caja/medios-de-egreso")
+    assert cobro.status_code == egreso.status_code == 200, egreso.text
+
+    valores_cobro = [m["valor"] for m in cobro.json()]
+    valores_egreso = [m["valor"] for m in egreso.json()]
+    assert valores_egreso == ["efectivo", "transferencia"]
+    # 🔑 Subconjunto, y estrictamente menor: lo que el producto no acepta para
+    # cobrar no puede ser egresable, y si fueran iguales este endpoint no
+    # existiría por nada.
+    assert set(valores_egreso) < set(valores_cobro)
+    # Con etiqueta, como el otro: el selector muestra "Efectivo", no "efectivo".
+    assert all(m["etiqueta"] for m in egreso.json())
+
+
 # ── Anular un movimiento ──────────────────────────────────────────────────
 
 

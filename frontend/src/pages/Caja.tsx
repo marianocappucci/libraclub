@@ -37,7 +37,11 @@ import type {
 } from '@/lib/api'
 import { diaISO, diasDeDiferencia, fecha, hora, pesos } from '@/lib/fechas'
 import { AvisoDeError } from '@/components/listado'
-import { DialogoDeConsumo } from '@/components/DialogoDeConsumo'
+// 🔑 Los dos, y no es redundancia: el mismo carrito se dibuja **inline** en la
+// pestaña «Venta suelta» —que es el punto de venta del buffet— y **en una
+// ventana** cuando se le carga consumo a la cuenta de una cancha, donde abajo
+// hay una cuenta abierta que no se puede reemplazar. Ver `DialogoDeConsumo.tsx`.
+import { DialogoDeConsumo, PanelDeConsumo } from '@/components/DialogoDeConsumo'
 import { SeccionDeCobroConQr } from '@/components/CobroConQr'
 import { MapaDeCanchas } from '@/components/MapaDeCanchas'
 import { Button } from '@/components/ui/button'
@@ -320,7 +324,7 @@ function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
           <>
             <PuntoDeVenta medios={medios} onCambio={onCambio} onError={onError} />
 
-            <Egreso medios={medios} onHecho={onCambio} onError={onError} />
+            <Egreso onHecho={onCambio} onError={onError} />
           </>
         )}
       </div>
@@ -1127,36 +1131,37 @@ function CierreDeCuenta({ turno, medios, sucursalId, onCobrado, onError }: {
  * 🔴 **La diferencia con «Cargar buffet» de una cuenta no es de forma, es de
  * plata.** Acá el consumo se cobra al confirmar; allá no se cobra, se le cuelga
  * al turno. Confundirlas es cobrar dos veces las mismas gaseosas.
+ *
+ * 🔴 **Y desde el 2026-09-08 es un panel inline, no un botón que abre un
+ * diálogo.** El humano lo reportó así: *"hay que hacer clic en vender del buffet
+ * y la pantalla queda sin nada… debería aparecer todo eso en vez del modal"*.
+ * Esta pestaña **es** el punto de venta del buffet: el click intermedio no
+ * decidía nada —no había otra cosa que se pudiera hacer acá— y lo único que
+ * lograba era dejar la pestaña vacía hasta que se apretara, para después taparla
+ * con una ventana encima.
+ *
+ * El diálogo sigue existiendo para el otro caso, y ahí sí gana: en «Canchas» hay
+ * una cuenta abierta abajo que no se puede reemplazar, y la ventana es lo que
+ * deja volver a ella.
  */
 function VentaDeMostrador({ sucursalId, onCargado }: {
   sucursalId: number | null
   onCargado: () => void
 }) {
-  const [abierto, setAbierto] = useState(false)
-
   if (sucursalId === null) {
     return <p className="text-sm text-muted-foreground">Elegí una sucursal.</p>
   }
 
   return (
     <div className="space-y-3">
+      {/* Este texto lo pide un test, y con razón: las dos formas de cargar
+          buffet se ven casi iguales y hacen cosas distintas con la plata. Si la
+          pantalla no lo dice, la única forma de saberlo es el arqueo. */}
       <p className="text-sm text-muted-foreground">
         Para quien no está jugando: se cobra al confirmar. Lo que consume una
         cancha abierta se carga desde su cuenta, en «Canchas».
       </p>
-      <Button variant="outline" onClick={() => setAbierto(true)}>
-        <CupSoda className="size-4" /> Vender del buffet
-      </Button>
-      <DialogoDeConsumo
-        abierto={abierto}
-        sucursalId={sucursalId}
-        reservaId={null}
-        onCerrar={() => setAbierto(false)}
-        onCargado={() => {
-          setAbierto(false)
-          onCargado()
-        }}
-      />
+      <PanelDeConsumo sucursalId={sucursalId} reservaId={null} onCargado={onCargado} />
     </div>
   )
 }
@@ -1235,8 +1240,23 @@ function CobroLibre({ medios, onCobrado, onError }: {
   )
 }
 
-function Egreso({ medios, onHecho, onError }: {
-  medios: { valor: string; etiqueta: string }[]
+/** Plata que sale del cajón, con su motivo y su medio.
+ *
+ * 🔴 **Los medios del egreso NO son los del cobro, y por eso este componente
+ * pide su propia lista.** Hasta el 2026-09-08 recibía por prop la lista de
+ * cobro, así que ofrecía «MercadoPago» y las dos tarjetas. Lo reportó el humano:
+ * *"no puedo hacer un egreso por mercadopago desde ahí aunque técnicamente se
+ * pudiera… usemos la lógica de lo que podemos egresar de una caja"*.
+ *
+ * Y el daño no era sólo ofrecer una opción sin sentido: el resumen agrupa por
+ * medio y **netea el egreso dentro de su propio bucket**, así que un egreso por
+ * MercadoPago baja justamente el número que se concilia contra lo que ellos van
+ * a depositar.
+ *
+ * 🔑 **Pide la lista en vez de filtrar la de cobro.** Un `filter` acá sería una
+ * segunda declaración de la regla, y la de este repo ya divergió una vez.
+ */
+function Egreso({ onHecho, onError }: {
   onHecho: () => void
   onError: (m: string) => void
 }) {
@@ -1245,6 +1265,7 @@ function Egreso({ medios, onHecho, onError }: {
   const [motivo, setMotivo] = useState('')
   const [monto, setMonto] = useState('')
   const [detalle, setDetalle] = useState('')
+  const [medios, setMedios] = useState<{ valor: string; etiqueta: string }[]>([])
   const [medio, setMedio] = useState('')
   const [enviando, setEnviando] = useState(false)
 
@@ -1255,6 +1276,11 @@ function Egreso({ medios, onHecho, onError }: {
         setMotivos(ms)
         if (ms.length > 0) setMotivo((m) => m || ms[0])
       })
+      .catch((e: Error) => onError(e.message))
+    caja.mediosDeEgreso()
+      // Se comprueba la forma y no se confía en ella: un cuerpo truncado es
+      // truthy y el `.map()` del selector tumbaría el formulario.
+      .then((ms) => setMedios(Array.isArray(ms) ? ms : []))
       .catch((e: Error) => onError(e.message))
   }, [abierto, onError])
 
