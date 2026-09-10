@@ -7,6 +7,22 @@ versionado [SemVer](https://semver.org/lang/es/).
 
 ### Agregado
 
+- **La copia externa en la nube del cliente, como add-on `resguardo_externo`.**
+  Con el add-on prendido, el admin conecta su Google Drive o Dropbox desde
+  Configuración → Datos / Backup (`/api/config/resguardo-externo/enlace`, el
+  router de LibraCore v1.93.0, carpeta «Resguardo LibraClub»). Es el primer
+  add-on de LibraClub: disponible en cualquier plan, **viene apagado** y se
+  prende por instancia desde el backoffice.
+  > 🔴 Apagado —sin fila en `modulos`, con la fila en falso, o sin poder leerla
+  > (instancia sin base de LibraCore, tabla que falta)— contesta **403 y nunca
+  > 500**: la pantalla lo lee como "sin plan" y esconde la tarjeta. El gate es
+  > `app/addons.py` y no el `require_module` del motor, que lee
+  > `app.state.modules`, que este producto no carga.
+  >
+  > `app/database.py` es el contrato del backoffice (`get_modulos` /
+  > `set_addon`, por `docker exec`), delegando en `libracore.db.modulos` contra
+  > la base de LibraCore — no la del dominio, que no tiene la tabla.
+
 - **La venta de buffet del mostrador se cobra con el QR de MercadoPago.** En
   Caja → Venta suelta → «Vender del buffet», elegir «MercadoPago» ahora pone el
   total en el cartel de la caja y espera la acreditación, en vez de anotar un
