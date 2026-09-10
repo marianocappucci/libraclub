@@ -37,11 +37,13 @@ from libracore.config_router import (
     build_empresa_router,
 )
 from libracore.mp_config_router import build_mp_config_router
+from libracore.resguardo_enlace import build_resguardo_enlace_router
 from libracore.respaldo import Instancia
 from libracore.security_headers import CSP_SPA, SecurityHeadersMiddleware
 from libracore.smtp_router import build_smtp_probe_router
 
 from app import db
+from app.addons import require_addon
 from app.auth import UserRepository, construir_session_auth, require_admin
 from app.config import Config
 from app.models.maestros import Sucursal
@@ -508,13 +510,33 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # NO se gatea desde afuera: es el unico camino para salir del gate.
     app.include_router(build_terminos_router())
 
+    # Una sola variable para los dos routers de abajo: el enlace deja el
+    # `rclone.conf` adentro de ESTE directorio (`.resguardo/`), y el subidor del
+    # host lo busca ahí. Si cada uno armara su ruta, divergir sería un typo.
+    backups_dir = os.path.join(config.directorio_de_datos, "backups")
     app.include_router(
         build_backup_router(
             _instancia_a_respaldar(config),
-            os.path.join(config.directorio_de_datos, "backups"),
+            backups_dir,
             cerrar_conexiones=motor.dispose,
             reabrir_conexiones=motor.dispose,
         ),
         dependencies=[Depends(require_admin)],
+    )
+
+    # La copia externa: el cliente conecta su Google Drive o Dropbox desde
+    # Configuración → Datos / Backup (`/api/config/resguardo-externo/enlace`).
+    # El router es del motor; subir sigue siendo del host, por cron.
+    #
+    # 🔴 **Es un ADD-ON**, no parte de ningún plan: viene apagado y se prende por
+    # instancia desde el backoffice. Por eso el segundo gate es `require_addon`
+    # y no el `require_module` del motor — ver `app/addons.py`. Apagado contesta
+    # 403, que la pantalla lee como "sin plan" y esconde la tarjeta.
+    #
+    # El callback de OAuth queda detrás de los MISMOS dos gates a propósito: ver
+    # el docstring de `build_resguardo_enlace_router`.
+    app.include_router(
+        build_resguardo_enlace_router(backups_dir, carpeta="Resguardo LibraClub"),
+        dependencies=[Depends(require_admin), Depends(require_addon("resguardo_externo"))],
     )
     return app

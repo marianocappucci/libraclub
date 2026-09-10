@@ -66,3 +66,22 @@ PLAN_MODULOS = {
 MODULOS = sorted(_PREMIUM)
 
 MODULO_LABELS: dict[str, str] = {}
+
+#: Add-ons: módulos sueltos que se prenden **por instancia** desde el
+#: backoffice, fuera de todo plan. Vienen apagados.
+#:
+#: 🔑 **Esto NO contradice el encabezado.** La regla de arriba es no declarar lo
+#: que la instancia no sirve, y `resguardo_externo` **sí existe y se sirve**: es
+#: el enlace de la copia externa con la nube del cliente
+#: (`/api/config/resguardo-externo/enlace`, del motor), montado en
+#: `app/main.py` detrás de `require_addon`. Es el primer add-on de LibraClub.
+#:
+#: 🔴 **No va en `MODULOS` ni en `MODULO_LABELS`, ni en ningún plan.** Un add-on
+#: no se vende con el plan: si entrara en `_PREMIUM`, subir o bajar de plan lo
+#: prendería o apagaría solo. Por lo mismo `libracore.db.modulos.apply_plan`
+#: saltea las claves de `ADDONS`.
+#:
+#: El backoffice lo valida contra este conjunto y lo lee y escribe corriendo
+#: `app.database.get_modulos` / `set_addon` adentro del contenedor
+#: (`libracore.admin.services`). Sin fila en `modulos`, está apagado.
+ADDONS = {"resguardo_externo"}
