@@ -32,9 +32,7 @@ permissions:
 
 jobs:
   backoffice:
-    # TEMPORAL: apunta a la rama del PR del backoffice para probar el cableado
-    # antes de que el reusable exista en `main`. Se cambia a `@main` en el
-    # commit siguiente de este mismo PR.
-    uses: marianocappucci/libra-backoffice/.github/workflows/scripts-de-producto.yml@ci/control-configure-backoffice
-    with:
-      backoffice_ref: ci/control-configure-backoffice
+    # `@main` y no un tag: lo que se verifica es el backoffice DESPLEGADO, y la
+    # imagen se construye de `main`. Un tag fijo acá volvería a separar los dos
+    # pines, que es justo el defecto que este workflow existe para ver.
+    uses: marianocappucci/libra-backoffice/.github/workflows/scripts-de-producto.yml@main
