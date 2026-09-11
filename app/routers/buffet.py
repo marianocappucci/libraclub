@@ -7,6 +7,7 @@ el 2026-09-08 (ver `servicios/cobro_qr.py`, sección de la venta de buffet).
 
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -227,6 +228,16 @@ def consumir(
 # existe y no se duplica acá: si esta instancia tiene las tres credenciales
 # cargadas es un hecho **de la instancia**, no del turno ni de la venta. Un
 # segundo endpoint que lo calcule igual es una segunda puerta al mismo cuarto.
+#
+# 🔴 **Las tres son `def` y no `async def`, a propósito.** Las corrutinas de
+# `servicios/cobro_qr.py` son `async` sólo en los bordes: lo que esperan de
+# MercadoPago va por `httpx` asincrónico, pero entre medio leen y escriben la
+# base con la `Session` sincrónica. uvicorn corre con **un solo proceso**: con
+# `await` desde el loop, cada consulta frenaba la instancia entera —y el poll
+# pega cada 3 segundos—. Como `def` corren en el threadpool, y la corrutina va
+# con `asyncio.run` en un loop propio de ese hilo: lo sincrónico bloquea a ese
+# hilo y a nadie más. La firma del servicio no cambia: el arreglo va del lado
+# de quien llama.
 
 
 class VentaConQr(BaseModel):
@@ -238,7 +249,7 @@ class VentaConQr(BaseModel):
 
 
 @router.post("/ventas/qr", response_model=VentaConQr, status_code=201)
-async def poner_venta_en_el_qr(
+def poner_venta_en_el_qr(
     datos: ConsumoEntrada,
     sucursal_id: int,
     sesion: Session = Depends(obtener_sesion),
@@ -273,7 +284,8 @@ async def poner_venta_en_el_qr(
         raise HTTPException(422, str(e)) from e
 
     try:
-        pago = await cobro_qr.poner_venta_en_el_qr(sesion, venta)
+        # En un loop propio de este hilo, no en el de uvicorn: ver arriba.
+        pago = asyncio.run(cobro_qr.poner_venta_en_el_qr(sesion, venta))
     except cobro_qr.QrNoConfigurado as e:
         raise HTTPException(400, str(e)) from e
     except cobro_qr.NadaQueCobrar as e:
@@ -292,7 +304,7 @@ async def poner_venta_en_el_qr(
 
 
 @router.delete("/ventas/{venta_id}/mp-qr", status_code=204)
-async def bajar_venta_del_qr(
+def bajar_venta_del_qr(
     venta_id: int,
     sesion: Session = Depends(obtener_sesion),
     _: object = Depends(require_staff),
@@ -303,12 +315,13 @@ async def bajar_venta_del_qr(
     Idempotente: sin orden pendiente no hace nada. El borrador de la venta queda
     donde está, sin stock movido y sin plata anotada.
     """
-    await cobro_qr.bajar_venta_del_qr(sesion, venta_id)
+    # En un loop propio de este hilo, no en el de uvicorn: ver arriba.
+    asyncio.run(cobro_qr.bajar_venta_del_qr(sesion, venta_id))
     sesion.commit()
 
 
 @router.get("/ventas/{venta_id}/mp-status", response_model=EstadoDelQr)
-async def estado_del_qr_de_la_venta(
+def estado_del_qr_de_la_venta(
     venta_id: int,
     sesion: Session = Depends(obtener_sesion),
     usuario: dict = Depends(require_staff),
@@ -321,7 +334,8 @@ async def estado_del_qr_de_la_venta(
     """
     _exigir_base()
     try:
-        estado = await cobro_qr.estado_del_cobro_de_venta(sesion, venta_id, usuario)
+        # En un loop propio de este hilo, no en el de uvicorn: ver arriba.
+        estado = asyncio.run(cobro_qr.estado_del_cobro_de_venta(sesion, venta_id, usuario))
     except cobro_qr.QrNoConfigurado as e:
         raise HTTPException(400, str(e)) from e
     except servicio_caja.SinTurnoAbierto as e:

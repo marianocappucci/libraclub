@@ -17,6 +17,7 @@ El circuito completo:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import date, datetime
@@ -27,6 +28,7 @@ from libracore import config_manager, mp_api, mp_sync
 from libracore import pagos as acreditacion
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from app.config import es_produccion
 from app.db import obtener_sesion
@@ -404,8 +406,30 @@ async def webhook(request: Request, sesion: Session = Depends(obtener_sesion)):
     200 y se registra qué se hizo.
 
     Los 401 sí se devuelven: una firma inválida no es un caso normal.
+
+    🔴 **Sigue siendo `async` sólo por el `await request.body()`**: la firma
+    se verifica sobre el cuerpo crudo. Todo lo demás —`config.json`, la base
+    y las dos corrutinas del motor— va a `_procesar_webhook`, en el
+    threadpool: uvicorn corre con **un solo proceso**, y hecho acá cada
+    consulta frenaba la instancia entera.
     """
     cuerpo = await request.body()
+    return await run_in_threadpool(
+        _procesar_webhook, cuerpo, sesion,
+        x_signature=request.headers.get("x-signature", ""),
+        x_request_id=request.headers.get("x-request-id", ""),
+    )
+
+
+def _procesar_webhook(
+    cuerpo: bytes, sesion: Session, *, x_signature: str, x_request_id: str
+) -> dict:
+    """Lo que hace el webhook con el cuerpo ya leído. Corre en el threadpool.
+
+    Las dos llamadas a MercadoPago van con `asyncio.run`, en un loop propio de
+    este hilo: `mp_sync.ingerir` escribe la bandeja entre medio de lo que le
+    pide a la red, y con `await` desde el loop de uvicorn eso lo frenaba.
+    """
     try:
         payload = json.loads(cuerpo)
     except ValueError:
@@ -430,8 +454,8 @@ async def webhook(request: Request, sesion: Session = Depends(obtener_sesion)):
         return {"ok": False, "motivo": "webhook sin secreto configurado"}
 
     if not servicio_pagos.firma_valida(
-        x_signature=request.headers.get("x-signature", ""),
-        x_request_id=request.headers.get("x-request-id", ""),
+        x_signature=x_signature,
+        x_request_id=x_request_id,
         payment_id=payment_id,
         secreto=secreto,
     ):
@@ -445,7 +469,7 @@ async def webhook(request: Request, sesion: Session = Depends(obtener_sesion)):
     # no se cree.** El webhook avisa "pasó algo con el pago 123"; qué pasó se
     # consulta. Confiar en el payload haría que una notificación forjada —si
     # alguna vez se filtrara el secreto— pudiera decir "aprobado" sola.
-    detalle = await mp_api.obtener_pago(payment_id, token)
+    detalle = asyncio.run(mp_api.obtener_pago(payment_id, token))
     referencia = str(detalle.get("external_reference") or "")
     estado_mp = str(detalle.get("status") or "")
 
@@ -462,9 +486,9 @@ async def webhook(request: Request, sesion: Session = Depends(obtener_sesion)):
         # lo duplica.
         if not referencia.startswith(servicio_pagos.PREFIJO_DE_REFERENCIA):
             try:
-                nuevos = await mp_sync.ingerir(
+                nuevos = asyncio.run(mp_sync.ingerir(
                     config, dias=1, referencias_a_omitir=REFERENCIAS_PROPIAS,
-                )
+                ))
             except Exception:
                 # 🔴 200 igual, y a propósito: el cobro **ya está hecho** del
                 # lado de MercadoPago. Un error haría que MP reintente durante
