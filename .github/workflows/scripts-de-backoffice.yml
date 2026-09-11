@@ -1,0 +1,40 @@
+name: Scripts vs backoffice
+
+# 🔴 El backoffice compartido (contenedor `<producto>-admin`) importa
+# `scripts/panel_admin.py` y `scripts/nuevo_cliente.py` de ESTE repo y los
+# ejecuta con la libracore de SU imagen, no con la de acá. Si este repo le suma
+# a `configure()` un argumento que esa libracore no conoce, el panel devuelve
+# 500 a todo — pasó tres veces (`v1.3.0`; `backup_zip` el 2026-08-12;
+# `migraciones` el 2026-08-24), y siempre nos enteramos abriendo el panel.
+#
+# Este workflow importa los dos scripts del PR con la libracore que tiene HOY
+# `libra-backoffice` en `main` (su `backend/uv.lock`, leído en el momento). Si
+# se pone rojo, hay dos salidas: subir el pin del backoffice primero, o no usar
+# el argumento todavía.
+#
+# La lógica vive en el workflow reusable del backoffice, no acá: la fuente de la
+# versión es de aquel repo, y así un cambio en cómo se construye la imagen no
+# requiere un PR en cada producto.
+#
+# Archivo aparte de `ci.yml` a propósito: si el reusable no se pudiera resolver,
+# se cae este workflow y no la suite.
+
+on:
+  pull_request:
+    branches: [develop, main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backoffice:
+    # TEMPORAL: apunta a la rama del PR del backoffice para probar el cableado
+    # antes de que el reusable exista en `main`. Se cambia a `@main` en el
+    # commit siguiente de este mismo PR.
+    uses: marianocappucci/libra-backoffice/.github/workflows/scripts-de-producto.yml@ci/control-configure-backoffice
+    with:
+      backoffice_ref: ci/control-configure-backoffice
