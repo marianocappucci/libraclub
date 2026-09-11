@@ -246,6 +246,35 @@ jobs:
 
       - run: npm ci
 
+      # El pin de libra-ui se verifica ACÁ y no sólo en local: un `npm install`
+      # a secas no re-resuelve un pin git, y el build pasa en verde contra la
+      # versión anterior (regla del 2026-07-30). `npm ci` respeta el lock, así
+      # que lo que hay que confirmar es que el lock apunte a donde dice el
+      # package.json. Mismo paso que libra-panel y libra-backoffice, que eran
+      # los únicos dos consumidores que lo tenían (2026-09-10).
+      #
+      # Se desreferencia el tag con `^{}`: los tags de esta familia son
+      # ANOTADOS, así que `rev-parse vX.Y.Z` devuelve el SHA del objeto tag y
+      # nunca coincidiría con el `resolved` del lock, que guarda el commit.
+      - name: Verificar que el pin de libra-ui es el que dice package.json
+        working-directory: frontend
+        run: |
+          TAG=$(node -p "require('./package.json').dependencies['libra-ui'].split('#')[1]")
+          RESUELTO=$(node -p "require('./package-lock.json').packages['node_modules/libra-ui'].resolved")
+          INSTALADO=$(node -p "require('./node_modules/libra-ui/package.json').version")
+          ESPERADO=$(git ls-remote https://github.com/marianocappucci/libra-ui.git "refs/tags/$TAG^{}" | cut -f1)
+          echo "package.json: $TAG"
+          echo "instalado:    $INSTALADO"
+          echo "lock:         $RESUELTO"
+          echo "commit real:  $ESPERADO"
+          if [ -z "$ESPERADO" ]; then
+            echo "::error::No se pudo resolver el commit del tag $TAG."; exit 1
+          fi
+          case "$RESUELTO" in
+            *"$ESPERADO"*) echo "OK: el lock apunta al commit de $TAG" ;;
+            *) echo "::error::El lock no apunta al commit de $TAG."; exit 1 ;;
+          esac
+
       - name: Lint
         run: npm run lint
 
