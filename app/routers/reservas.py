@@ -386,7 +386,10 @@ async def facturar(
     cancha = sesion.get(Cancha, reserva.cancha_id)
     try:
         factura = await servicio_facturacion.facturar_reserva(
-            reserva, cliente, cancha.nombre if cancha else "cancha"
+            reserva, cliente, cancha.nombre if cancha else "cancha",
+            punto_venta_de_la_sucursal=(
+                cancha.sucursal.punto_venta_arca if cancha else None
+            ),
         )
     except servicio_facturacion.FacturacionNoConfigurada as e:
         raise HTTPException(503, str(e)) from e

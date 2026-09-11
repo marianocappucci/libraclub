@@ -300,8 +300,31 @@ def lineas_de_la_reserva(reserva, cancha_nombre: str, tipo: int) -> list[dict]:
     return lineas
 
 
-async def facturar_reserva(reserva, cliente, cancha_nombre: str = "cancha") -> dict:
+def punto_de_venta(de_la_sucursal: int | None, arca: dict | None) -> int:
+    """El punto de venta con el que se emite: **el de la sucursal** si lo tiene.
+
+    🔴 **La numeración de ARCA es por `(tipo, punto_venta)` y no lleva CUIT.**
+    Hasta el 2026-09-10 este servicio emitía siempre con el PV de la config
+    global de ARCA, mientras el panel del dueño ya leía `Sucursal.punto_venta_arca`:
+    dos sucursales del mismo CUIT facturando se habrían pisado la numeración.
+    Sin PV propio se cae al global —el caso de un complejo con una sola sede—, y
+    sin config de ARCA a `1`, que es lo que hacía antes.
+    """
+    if de_la_sucursal is not None:
+        return de_la_sucursal
+    return arca["punto_venta"] if arca else 1
+
+
+async def facturar_reserva(
+    reserva, cliente, cancha_nombre: str = "cancha", *,
+    punto_venta_de_la_sucursal: int | None,
+) -> dict:
     """Emite el comprobante de una reserva **con su consumo de buffet** adentro.
+
+    `punto_venta_de_la_sucursal` es **obligatorio y sin default a propósito**:
+    lo resuelve quien llama, que es quien tiene la sesión y el modelo del
+    dominio. Un caller nuevo que no lo pase falla al escribirse, en vez de
+    emitir con el PV global en silencio. Ver `punto_de_venta`.
 
     Una factura por reserva, emitida **cuando alguien la pide** — no por cada
     pago. Es el mismo diseño que MedLibra y Gestiolibra: si hubo seña, la seña y
@@ -337,7 +360,7 @@ async def facturar_reserva(reserva, cliente, cancha_nombre: str = "cancha") -> d
     neto, iva = importes(total, tipo)
 
     arca = obtener_config_arca()
-    punto_venta = arca["punto_venta"] if arca else 1
+    punto_venta = punto_de_venta(punto_venta_de_la_sucursal, arca)
 
     numero, ta, arca_usado = await arca_facturacion.get_next_numero_with_arca(
         punto_venta, tipo

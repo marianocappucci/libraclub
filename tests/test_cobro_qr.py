@@ -547,6 +547,26 @@ def test_con_la_automatica_prendida_el_turno_sale_facturado(
     assert factura["total"] == 12400.0, "la factura cubre la cancha y el buffet"
 
 
+def test_la_automatica_factura_con_el_punto_de_venta_de_la_sucursal(
+    api, sesion, sucursal, cancha, cliente, tarifa_base, mp, abrir_caja,
+):
+    """🔴 El cobro por QR es el segundo camino que emite, y el que corre sin
+    nadie mirando. Con el PV global, dos sedes del mismo CUIT cobrando por QR
+    se pisarían la numeración ante ARCA."""
+    sucursal.punto_venta_arca = 5
+    sesion.commit()
+    _configurar_mp(api, auto_facturar=True)
+    abrir_caja(api, sucursal)
+    reserva = _reserva(api, cancha, cliente, precio="10000.00")
+    referencia = api.post(f"/api/reservas/{reserva['id']}/mp-qr").json()["referencia"]
+    mp.aprobado(referencia)
+
+    assert api.get(f"/api/reservas/{reserva['id']}/mp-status").status_code == 200
+    factura = api.get(f"/api/reservas/{reserva['id']}/factura").json()
+    assert factura is not None
+    assert factura["punto_venta"] == 5
+
+
 def test_sin_la_automatica_el_mismo_cobro_no_factura(
     api, cancha, cliente, tarifa_base, mp, abrir_caja, sucursal,
 ):

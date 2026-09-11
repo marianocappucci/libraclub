@@ -300,6 +300,45 @@ def test_algo_sin_precio_no_se_factura(api, cancha):
     assert api.post(f"/api/reservas/{b.json()['id']}/facturar").status_code == 422
 
 
+@pytest.mark.parametrize("de_la_sucursal, arca, esperado", [
+    (7, {"punto_venta": 3}, 7),
+    (None, {"punto_venta": 3}, 3),
+    (None, None, 1),
+])
+def test_el_punto_de_venta_prefiere_el_de_la_sucursal(de_la_sucursal, arca, esperado):
+    """🔴 La numeración de ARCA es por `(tipo, punto_venta)` y no lleva CUIT:
+    dos sucursales del mismo CUIT emitiendo con el PV global se pisan."""
+    assert servicio.punto_de_venta(de_la_sucursal, arca) == esperado
+
+
+def test_la_factura_sale_con_el_punto_de_venta_de_su_sucursal(
+    api, sesion, sucursal, cancha, cliente, tarifa_base,
+):
+    """El PV de la sucursal **distinto** del global (que sin config de ARCA es
+    1): si el comprobante dijera 1, no se sabría de dónde salió."""
+    sucursal.punto_venta_arca = 7
+    sesion.commit()
+    reserva = _reserva_facturable(api, cancha, cliente, tarifa_base)
+
+    emitida = api.post(f"/api/reservas/{reserva['id']}/facturar")
+    assert emitida.status_code == 201, emitida.text
+    assert emitida.json()["punto_venta"] == 7
+
+
+def test_sin_punto_de_venta_propio_cae_al_global(
+    api, sesion, sucursal, cancha, cliente, tarifa_base,
+):
+    """Control del de arriba: un complejo de una sola sede no tiene por qué
+    cargar el PV en la sucursal, y sigue emitiendo como antes."""
+    sucursal.punto_venta_arca = None
+    sesion.commit()
+    reserva = _reserva_facturable(api, cancha, cliente, tarifa_base)
+
+    emitida = api.post(f"/api/reservas/{reserva['id']}/facturar")
+    assert emitida.status_code == 201, emitida.text
+    assert emitida.json()["punto_venta"] == 1
+
+
 def test_facturar_es_de_admin(api, cancha, cliente, tarifa_base, engine):
     """El mostrador toma reservas y cobra; qué se factura es del dueño."""
     reserva = _reserva_facturable(api, cancha, cliente, tarifa_base)
