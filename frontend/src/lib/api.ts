@@ -262,6 +262,27 @@ export const clientes = {
   borrar: (id: number) => api.del(`/api/clientes/${id}`),
 }
 
+/** Un cliente que pasó el umbral de ausencias sin avisar. */
+export interface Reincidente {
+  cliente_id: number
+  ausentes: number
+  /** El comienzo del último turno al que faltó, en ISO. */
+  ultimo_ausente_at: string
+}
+
+/** 🔑 La regla viaja con la respuesta: la pantalla la **dice** («en los últimos
+ *  90 días») pero no la decide. Quién es reincidente lo resuelve el backend, en
+ *  un solo lugar (`servicios/ausentismo.py`). */
+export interface Reincidentes {
+  umbral: number
+  dias: number
+  reincidentes: Reincidente[]
+}
+
+export const ausentismo = {
+  reincidentes: () => api.get<Reincidentes>('/api/clientes/ausentismo/reincidentes'),
+}
+
 export const agenda = {
   semana: (sucursalId: number, desde?: string) =>
     api.get<Semana>(

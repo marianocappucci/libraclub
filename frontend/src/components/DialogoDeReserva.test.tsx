@@ -33,6 +33,11 @@ const TURNO: Turno = {
 /** Las llamadas que el diálogo hizo, para poder asertar sobre el cuerpo. */
 let llamadas: { url: string; metodo: string; cuerpo: Record<string, unknown> | null }[]
 
+const REINCIDENTES = '/api/clientes/ausentismo/reincidentes'
+
+/** Los reincidentes que contesta el doble. Vacío salvo en los tests del aviso. */
+let reincidentes: { cliente_id: number; ausentes: number; ultimo_ausente_at: string }[]
+
 /**
  * El doble de la API.
  *
@@ -46,6 +51,7 @@ function responder(url: string, metodo: string): { status: number; body: unknown
   if (url === '/api/clientes' && metodo === 'GET') {
     return { status: 200, body: [{ id: 7, nombre: 'Juan Pérez', telefono: null }] }
   }
+  if (url === REINCIDENTES) return { status: 200, body: { umbral: 3, dias: 90, reincidentes } }
   if (url === '/api/clientes') return { status: 201, body: { id: 99, nombre: 'Nuevo' } }
   return { status: 201, body: { id: 55 } }
 }
@@ -56,6 +62,7 @@ let siguienteRespuesta:
 
 beforeEach(() => {
   llamadas = []
+  reincidentes = []
   siguienteRespuesta = null
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
     llamadas.push({
@@ -191,5 +198,67 @@ describe('alta de reserva desde la grilla', () => {
     expect(aviso).toHaveTextContent('No hay tarifa cargada')
     expect(aviso).toHaveTextContent(/Cargala en Tarifas/i)
     expect(onCreada).not.toHaveBeenCalled()
+  })
+})
+
+describe('ausentismo: avisa y NO bloquea', () => {
+  const DOS_CLIENTES = [
+    { id: 7, nombre: 'Juan Pérez', telefono: null },
+    { id: 8, nombre: 'Ana Gómez', telefono: null },
+  ]
+
+  beforeEach(() => {
+    reincidentes = [
+      { cliente_id: 7, ausentes: 3, ultimo_ausente_at: '2026-09-05T20:00:00-03:00' },
+    ]
+  })
+
+  it('muestra cuántas veces faltó el elegido y la fecha de la última', async () => {
+    abrir()
+    const aviso = await screen.findByRole('status')
+    expect(aviso).toHaveTextContent(
+      'Juan Pérez faltó sin avisar 3 veces en los últimos 90 días (la última, el 05-09-2026).',
+    )
+  })
+
+  it('🔴 con el aviso a la vista, se reserva igual', async () => {
+    // Decisión del humano: contar y avisar, sin bloquear. Si alguien atara el
+    // botón al aviso, este test se pone rojo.
+    const onCreada = abrir()
+    await screen.findByRole('status')
+    await userEvent.click(screen.getByRole('button', { name: 'Reservar' }))
+
+    await waitFor(() => expect(onCreada).toHaveBeenCalled())
+    expect(llamadas.find((l) => l.url === '/api/reservas')!.cuerpo).toMatchObject({
+      cliente_id: 7,
+    })
+  })
+
+  it('el aviso sigue al cliente elegido: el que no faltó no lo lleva', async () => {
+    // 🔑 El control. Un aviso que saliera para cualquiera pasaría el primer test
+    // sin decir nada sobre quién faltó.
+    siguienteRespuesta = (url, metodo) =>
+      url === '/api/clientes' && metodo === 'GET'
+        ? { status: 200, body: DOS_CLIENTES }
+        : responder(url, metodo)
+    abrir()
+    await screen.findByRole('status')
+
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: /cliente/i }), '8')
+
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('si el pedido de ausencias falla, el diálogo anda igual', async () => {
+    siguienteRespuesta = (url, metodo) =>
+      url === REINCIDENTES ? { status: 500, body: { detail: 'se cayó' } } : responder(url, metodo)
+    const onCreada = abrir()
+    await screen.findByRole('combobox', { name: /cliente/i })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reservar' }))
+
+    await waitFor(() => expect(onCreada).toHaveBeenCalled())
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 })

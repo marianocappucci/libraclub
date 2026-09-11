@@ -151,7 +151,7 @@ def cambiar_estado(
     reserva_id: int,
     datos: CambioDeEstado,
     sesion: Session = Depends(obtener_sesion),
-    _: object = Depends(require_staff),
+    usuario: dict = Depends(require_staff),
 ):
     # 🔑 **Cancelar desde el mostrador pasa por la MISMA política que el
     # portal.** Un turno pagado por internet que el encargado cancela genera la
@@ -164,6 +164,9 @@ def cambiar_estado(
             reserva_id,
             motivo=datos.motivo or "Cancelada desde el mostrador",
             pasarela=devoluciones.pasarela_de_la_instancia(),
+            # De la caja abierta de quien cancela sale la devolución de un
+            # cobro de mostrador. Ver `cancelacion._devolver_por_caja`.
+            usuario=usuario,
         )
         reserva = resultado.reserva
     else:

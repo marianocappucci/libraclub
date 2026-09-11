@@ -16,7 +16,7 @@ from sqlalchemy import select, update
 
 from app.models.avisos import Aviso
 from app.models.enums import CanalAviso, EstadoAviso, EstadoReserva, TipoAviso
-from app.models.reservas import Reserva
+from app.models.reservas import CanalDePago, EstadoPago, Reserva
 from app.servicios import avisos as servicio
 from app.servicios import pagos as servicio_pagos
 from app.servicios import reservas as servicio_reservas
@@ -262,6 +262,127 @@ def test_la_cancelacion_se_avisa_si_el_cliente_sabia_que_tenia_turno(
     cancelacion = [a for a in _avisos(sesion) if a.tipo is TipoAviso.CANCELACION]
     assert len(cancelacion) == 1
     assert "Lluvia" in (cancelacion[0].cuerpo or "")
+
+
+def _aviso_de_cancelacion(
+    sesion, cancha, jugador, *, estado_pago=None, canal=None, horas=None
+) -> str:
+    """El cuerpo del mail de cancelación de un turno ya avisado.
+
+    Con `estado_pago`, el turno se paga por el portal y al pago se le pone ese
+    estado **a mano** antes de cancelar. Acá no se prueba la política —eso es
+    `test_cancelacion.py`— sino que el mail diga **lo que quedó guardado**: el
+    cron corre en otro proceso, minutos después, y la base es lo único que tiene.
+    """
+    if horas is not None:
+        cancha.sucursal.horas_de_cancelacion = horas
+        sesion.commit()
+    pago = None
+    if estado_pago is None:
+        reserva = _reserva(sesion, cancha, jugador)
+    else:
+        reserva = _reserva(sesion, cancha, jugador, estado=EstadoReserva.PROVISORIA)
+        pago = servicio_pagos.crear_pago(sesion, reserva, Decimal("5000.00"))
+        sesion.commit()
+        servicio_pagos.aplicar_pago_aprobado(
+            sesion, pago, payment_id="123", estado_mp="approved"
+        )
+        sesion.commit()
+    momento = CUANDO - timedelta(hours=10)
+    _creada(sesion, reserva, momento - timedelta(minutes=5))
+    transporte = TransporteFalso()
+    servicio.despachar(sesion, transporte, momento)
+    sesion.commit()
+
+    if pago is not None:
+        pago.estado = estado_pago
+        if canal is not None:
+            pago.canal = canal
+    servicio_reservas.cambiar_estado(
+        sesion, reserva.id, EstadoReserva.CANCELADA, motivo="Lluvia"
+    )
+    sesion.commit()
+    servicio.despachar(sesion, transporte, momento + timedelta(minutes=10))
+    sesion.commit()
+
+    cuerpos = [c for _d, a, c in transporte.enviados if a.startswith("Turno cancelado")]
+    assert len(cuerpos) == 1, transporte.enviados
+    return cuerpos[0]
+
+
+def test_la_cancelacion_dice_que_se_devolvio_la_sena(sesion, cancha, jugador, tarifa_base):
+    cuerpo = _aviso_de_cancelacion(sesion, cancha, jugador, estado_pago=EstadoPago.DEVUELTO)
+
+    assert "Te devolvimos la seña" in cuerpo
+    assert "unos días" in cuerpo
+
+
+def test_la_sena_devuelta_por_caja_no_dice_que_llega_a_la_cuenta(
+    sesion, cancha, jugador, tarifa_base
+):
+    """Salió del cajón en efectivo: «puede tardar en verse en tu cuenta» sería
+    mentira, porque no pasa por ninguna cuenta."""
+    cuerpo = _aviso_de_cancelacion(
+        sesion, cancha, jugador, estado_pago=EstadoPago.DEVUELTO, canal=CanalDePago.MOSTRADOR
+    )
+
+    assert "en efectivo" in cuerpo
+    assert "cuenta" not in cuerpo
+
+
+def test_la_devolucion_pendiente_se_avisa_sin_contar_por_que(
+    sesion, cancha, jugador, tarifa_base
+):
+    """🔴 Le corresponde y se le dice; el motivo interno —credenciales, caja
+    cerrada— es del complejo y no va en un mail."""
+    cuerpo = _aviso_de_cancelacion(
+        sesion, cancha, jugador, estado_pago=EstadoPago.DEVOLUCION_PENDIENTE
+    )
+
+    assert "corresponde la devolución de la seña" in cuerpo
+    assert "MercadoPago" not in cuerpo
+    assert "caja" not in cuerpo
+
+
+def test_cancelada_tarde_dice_por_que_no_se_devuelve(sesion, cancha, jugador, tarifa_base):
+    """El pago siguió `aprobado` con la política cargada: se canceló tarde.
+
+    El momento sale del `updated_at` de la cancelación —hoy, días después de
+    `CUANDO`—, así que el turno ya había pasado: tarde sin discusión.
+    """
+    cuerpo = _aviso_de_cancelacion(
+        sesion, cancha, jugador, estado_pago=EstadoPago.APROBADO, horas=24
+    )
+
+    assert "menos de 24 horas" in cuerpo
+    assert "no se devuelve" in cuerpo
+
+
+def test_sin_politica_la_sena_no_se_devuelve_a_secas(sesion, cancha, jugador, tarifa_base):
+    cuerpo = _aviso_de_cancelacion(sesion, cancha, jugador, estado_pago=EstadoPago.APROBADO)
+
+    assert "La seña no se devuelve." in cuerpo
+    assert "horas" not in cuerpo
+
+
+def test_sin_sena_el_aviso_no_habla_de_sena(sesion, cancha, jugador, tarifa_base):
+    """🔑 El control de los cinco de arriba.
+
+    `tarifa_base` le pone seña del 50 % a la reserva, así que el turno **tiene**
+    `sena` cargada — pero nadie la pagó. El mail no puede decir que se devolvió
+    ni que no se devuelve una plata que nunca entró.
+    """
+    cuerpo = _aviso_de_cancelacion(sesion, cancha, jugador)
+
+    assert "Lluvia" in cuerpo, "el control: es el mail de la cancelación"
+    assert "seña" not in cuerpo.lower()
+
+
+def test_un_pago_rechazado_no_es_una_sena(sesion, cancha, jugador, tarifa_base):
+    """Un pago que MercadoPago rechazó es plata que nunca entró."""
+    cuerpo = _aviso_de_cancelacion(sesion, cancha, jugador, estado_pago=EstadoPago.RECHAZADO)
+
+    assert "seña" not in cuerpo.lower()
 
 
 def test_la_provisoria_vencida_no_avisa_nada(sesion, cancha, jugador, tarifa_base):

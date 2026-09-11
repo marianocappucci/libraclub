@@ -12,6 +12,8 @@ import { AvisoDeError, columnaDeAcciones, filaInactiva } from '@/components/list
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
+import { useReincidentes } from '@/lib/ausentismo'
+import { fecha } from '@/lib/fechas'
 
 export function Clientes() {
   const { user } = useAuth()
@@ -20,6 +22,9 @@ export function Clientes() {
   const [editando, setEditando] = useState<Cliente | null>(null)
   const [abierto, setAbierto] = useState(false)
   const [verInactivos, setVerInactivos] = useState(false)
+  // Quién viene faltando sin avisar. Es un aviso y nada más: no lo da de baja
+  // ni le impide reservar. Ver `lib/ausentismo.ts`.
+  const { porCliente } = useReincidentes()
 
   // 🔑 Clientes es el ÚNICO maestro que un encargado puede escribir. El backend
   // lo gatea con `require_staff` y no con `require_admin`: si pidiera admin, no
@@ -66,6 +71,13 @@ export function Clientes() {
             {!row.original.activo && (
               <span className="ml-2 text-xs text-muted-foreground">(de baja)</span>
             )}
+            {porCliente.has(row.original.id) && (
+              <span className="ml-2 text-xs font-normal text-amber-700">
+                {`${porCliente.get(row.original.id)!.ausentes} ausencias · última ${fecha(
+                  porCliente.get(row.original.id)!.ultimo_ausente_at,
+                )}`}
+              </span>
+            )}
           </span>
         ),
       },
@@ -93,7 +105,10 @@ export function Clientes() {
         nombreDe: (c) => c.nombre,
       }),
     ]
-  }, [puedeEscribir, borrar])
+    // `porCliente` en las dependencias: los reincidentes llegan DESPUÉS que la
+    // lista, y sin él la columna quedaría armada con el mapa vacío del primer
+    // render.
+  }, [puedeEscribir, borrar, porCliente])
 
   // 🔑 Se distingue por qué está vacía. Un listado vacío sin explicación se lee
   // como un error.
