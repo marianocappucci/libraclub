@@ -239,6 +239,51 @@ def registrar_egreso(usuario: dict, monto: Decimal, motivo: str, detalle: str,
     return db_turnos.get_resumen_turno_caja(turno_abierto(usuario)["id"])
 
 
+# ── La devolución de una seña de mostrador ─────────────────────────────────
+
+#: Con qué arranca la referencia del egreso que devuelve una seña cobrada en el
+#: mostrador: `devolucion-<referencia del pago>`. La misma forma que la clave de
+#: idempotencia de la devolución por MercadoPago, y por el mismo motivo.
+#:
+#: 🔑 **La referencia ES la idempotencia.** `create_caja_movimiento` no duplica
+#: un movimiento con la misma referencia y sin factura: un reintento después de
+#: un commit perdido encuentra el egreso que ya estaba en vez de sacar la plata
+#: dos veces. Por eso es del pago —única— y no del intento.
+PREFIJO_DEVOLUCION = "devolucion-"
+
+#: El motivo con que queda la devolución en el arqueo.
+#:
+#: ⚠️ **No está en `MOTIVOS_DE_EGRESO`, a propósito.** Esa lista es la del
+#: egreso a mano de la pantalla de Caja, y ofrecer ahí «Devolución de seña»
+#: permitiría sacar la plata sin tocar el pago: el jugador con su plata, el pago
+#: todavía `aprobado`, y la deuda viva en la lista de pendientes. Una devolución
+#: de seña sale sólo por `registrar_devolucion`, que la ata al pago.
+MOTIVO_DEVOLUCION_DE_SENA = "Devolución de seña"
+
+#: Por qué medio sale: **efectivo**, aunque el cobro haya sido por QR. Un egreso
+#: `mercadopago` bajaría el bucket que se concilia contra lo que MercadoPago
+#: deposita — ver `MEDIOS_DE_EGRESO`, que es por qué no se puede.
+MEDIO_DE_DEVOLUCION = "efectivo"
+assert MEDIO_DE_DEVOLUCION in MEDIOS_DE_EGRESO, MEDIO_DE_DEVOLUCION
+
+
+def registrar_devolucion(usuario: dict, monto: Decimal, detalle: str, referencia: str) -> int:
+    """La devolución de una seña de mostrador, como egreso del turno abierto.
+
+    Devuelve el id del movimiento. Levanta `SinTurnoAbierto` si quien la hace no
+    tiene caja abierta: sin turno, el egreso quedaría fuera de todo arqueo. La
+    política —si corresponde devolver— la decide `servicios/cancelacion.py`;
+    acá sólo se escribe.
+
+    Pasa por `registrar_movimiento`, la única escritura de este módulo: así
+    hereda el `caja_id` y el `turno_id` del turno abierto igual que un cobro.
+    """
+    return registrar_movimiento(
+        usuario, "egreso", monto, f"{MOTIVO_DEVOLUCION_DE_SENA} — {detalle}",
+        MEDIO_DE_DEVOLUCION, referencia=referencia,
+    )
+
+
 def anular_movimiento(usuario: dict, movimiento_id: int) -> dict:
     """Borra un movimiento **del turno abierto de quien lo pide**.
 

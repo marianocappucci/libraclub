@@ -225,11 +225,13 @@ def test_sin_politica_cargada_no_se_devuelve_nada(sesion, cancha, cliente, vendi
 def test_el_cobro_de_mostrador_no_se_devuelve_por_api(
     sesion, cancha, cliente, vendible, con_politica
 ):
-    """🔴 Ese pago ya entró a la caja del turno.
+    """🔴 Ese pago vuelve por la caja, nunca por MercadoPago.
 
     Devolverlo por API dejaría el arqueo descuadrado: la plata saldría por un
-    lado que la caja no ve. Y el resultado lo **dice**, en vez de quedarse
-    callado como si no hubiera habido seña.
+    lado que la caja no ve. Acá el QR se acreditó con la caja cerrada —el
+    ingreso todavía no entró, `caja_movimiento_id` vacío— así que no hay de
+    dónde sacarla: queda pendiente y lo **dice**. El camino feliz, con la caja
+    abierta y las dos bases, está en `test_devolucion_por_caja.py`.
     """
     reserva, pago = _reserva_pagada(
         sesion, cancha, cliente, en_horas=48, canal=CanalDePago.MOSTRADOR
@@ -239,10 +241,68 @@ def test_el_cobro_de_mostrador_no_se_devuelve_por_api(
     resultado = servicio.cancelar(sesion, reserva.id, motivo="X", pasarela=pasarela)
     sesion.commit()
 
+    assert pasarela.llamadas == [], "ni se le pidió a MercadoPago"
+    assert resultado.devolucion is EstadoPago.DEVOLUCION_PENDIENTE
+    assert pago.estado is EstadoPago.DEVOLUCION_PENDIENTE
+    assert "no entró a la caja" in (pago.detalle_devolucion or "")
+
+
+def test_el_cobro_de_mostrador_cancelado_desde_el_portal_queda_pendiente(
+    sesion, cancha, cliente, vendible, con_politica
+):
+    """🔴 El jugador cancela desde el portal: no tiene caja, y no se inventa una.
+
+    Le corresponde la devolución —canceló a tiempo— pero no hay de qué turno de
+    caja sacarla. Queda anotada con el motivo, igual que MercadoPago sin
+    credenciales, y la completa el reintento de un admin con su caja abierta.
+    """
+    reserva, pago = _reserva_pagada(
+        sesion, cancha, cliente, en_horas=48, canal=CanalDePago.MOSTRADOR
+    )
+    # El ingreso sí entró a la caja; el número no se lee, sólo que exista.
+    pago.caja_movimiento_id = 999
+    sesion.commit()
+
+    resultado = servicio.cancelar(
+        sesion, reserva.id, motivo="X", pasarela=PasarelaFalsa(), usuario=None
+    )
+    sesion.commit()
+
+    assert resultado.reserva.estado is EstadoReserva.CANCELADA
+    assert pago.estado is EstadoPago.DEVOLUCION_PENDIENTE
+    assert pago.detalle_devolucion == servicio.SIN_CAJA_ABIERTA
+    assert pago.devuelto_at is None
+    assert servicio.pendientes(sesion) == [pago]
+    # Al jugador no se le cuenta cómo está la caja del complejo.
+    assert "caja" not in resultado.para_el_jugador
+    assert "corresponde la devolución" in resultado.para_el_jugador
+
+
+def test_el_cobro_de_mostrador_tarde_no_sale_de_la_caja(
+    sesion, cancha, cliente, vendible, con_politica
+):
+    """🔑 La política va ANTES que el canal.
+
+    Hasta el 2026-09-11 el cobro de mostrador se desviaba primero y la política
+    ni se miraba — daba igual, porque tampoco se devolvía. Ahora que se devuelve
+    tiene que ganárselo como cualquiera: cancelado tarde, la seña se queda y la
+    caja ni se toca.
+    """
+    reserva, pago = _reserva_pagada(
+        sesion, cancha, cliente, en_horas=3, canal=CanalDePago.MOSTRADOR
+    )
+    pago.caja_movimiento_id = 999
+    sesion.commit()
+
+    resultado = servicio.cancelar(
+        sesion, reserva.id, motivo="X", pasarela=PasarelaFalsa(),
+        usuario={"id": 1, "username": "encargado"},
+    )
+    sesion.commit()
+
     assert resultado.devolucion is None
     assert pago.estado is EstadoPago.APROBADO
-    assert pasarela.llamadas == []
-    assert "caja" in resultado.detalle
+    assert "24 horas" in resultado.detalle
 
 
 def test_sin_sena_pagada_no_hay_nada_que_devolver(

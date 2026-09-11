@@ -5,10 +5,13 @@
  * que no tenerlo: la deuda existe, no se paga, y la única forma de enterarse es
  * que el jugador llame.
  *
- * Se llega acá por dos caminos, y los dos son normales: la instancia todavía no
- * tiene cargadas las credenciales de Mercado Pago, o MercadoPago rechazó la
- * devolución. El motivo de cada una se muestra en la fila — sin eso, la
- * respuesta a «¿por qué sigue pendiente?» es mirar los logs del contenedor.
+ * Se llega acá por tres caminos, y los tres son normales: la instancia todavía
+ * no tiene cargadas las credenciales de Mercado Pago, MercadoPago rechazó la
+ * devolución, o la seña se cobró en el mostrador y se canceló sin un turno de
+ * caja abierto —esa vuelve como egreso de la caja, y el reintento la saca de la
+ * caja abierta de quien lo aprieta—. El motivo de cada una se muestra en la
+ * fila — sin eso, la respuesta a «¿por qué sigue pendiente?» es mirar los logs
+ * del contenedor.
  *
  * **Ver es de staff; reintentar es de admin.** El encargado tiene que poder
  * contestarle al jugador que llama sin poder mover plata hacia afuera.

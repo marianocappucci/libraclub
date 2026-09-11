@@ -8,6 +8,8 @@ import { fecha, hora, pesos } from '@/lib/fechas'
 import { Input } from '@/components/ui/input'
 import { buttonVariants } from '@/components/ui/button'
 import { AvisoDeError } from '@/components/listado'
+import { AvisoDeAusentismo } from '@/components/AvisoDeAusentismo'
+import { useReincidentes } from '@/lib/ausentismo'
 
 const ORIGENES = [
   { valor: 'mostrador', texto: 'Mostrador' },
@@ -47,6 +49,10 @@ export function DialogoDeReserva({
   const [observaciones, setObservaciones] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [enviando, setEnviando] = useState(false)
+  // 🔑 Se piden cada vez que se abre el diálogo, no una vez por sesión: un
+  // ausente marcado hace un rato en la agenda ya tiene que aparecer acá.
+  const { porCliente, dias } = useReincidentes(abierto)
+  const elegido = lista.find((c) => String(c.id) === clienteId)
 
   useEffect(() => {
     if (!abierto) return
@@ -200,6 +206,14 @@ export function DialogoDeReserva({
                   ))}
                 </select>
               </label>
+              {/* 🔴 Avisa y nada más: el botón «Reservar» no mira esto. El
+                  encargado decide si le pide la seña entera, lo llama el día
+                  antes o le toma el turno igual. */}
+              <AvisoDeAusentismo
+                nombre={elegido?.nombre}
+                ausencia={elegido ? porCliente.get(elegido.id) : undefined}
+                dias={dias}
+              />
               <button
                 type="button"
                 className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"

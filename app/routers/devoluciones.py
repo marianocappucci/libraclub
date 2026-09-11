@@ -60,9 +60,13 @@ def pendientes(
 def reintentar(
     pago_id: int,
     sesion: Session = Depends(obtener_sesion),
-    _: object = Depends(require_admin),
+    usuario: dict = Depends(require_admin),
 ):
-    """Vuelve a pedirle la devolución a MercadoPago.
+    """Vuelve a intentar la devolución: por MercadoPago o por la caja.
+
+    Por dónde lo decide el canal del pago (ver `cancelacion._devolver`). Una
+    seña cobrada en el mostrador sale como egreso de la caja abierta **de quien
+    reintenta**: si no tiene una abierta, sigue pendiente y lo dice.
 
     Es de **admin** y no de staff: mover plata hacia afuera es del dueño. Ver la
     lista sí es de staff — el encargado tiene que poder contestarle al jugador
@@ -70,7 +74,8 @@ def reintentar(
     """
     try:
         resultado = servicio.reintentar(
-            sesion, pago_id, pasarela=pasarelas.pasarela_de_la_instancia()
+            sesion, pago_id, pasarela=pasarelas.pasarela_de_la_instancia(),
+            usuario=usuario,
         )
     except servicio_reservas.ReservaInvalida as exc:
         raise HTTPException(404, str(exc)) from exc

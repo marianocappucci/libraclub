@@ -492,11 +492,34 @@ una migración que dejara 24 le prendería la devolución de plata a todas las
 instancias que ya existen sin que nadie lo decida. Una migración no es el lugar
 donde se toman decisiones de negocio.
 
-**4. Sólo se devuelve el pago del portal.** Un cobro de mostrador ya entró a la
-caja del turno (`PagoDeReserva.caja_movimiento_id`): devolverlo por API dejaría
-el arqueo descuadrado, con la plata saliendo por un lado que la caja no ve. Esa
-devolución se hace desde la caja, y el resultado **lo dice** en vez de quedarse
-callado como si no hubiera habido seña.
+**4. El pago del portal vuelve por MercadoPago; el de mostrador, por la caja.**
+Un cobro de mostrador ya entró a la caja del turno
+(`PagoDeReserva.caja_movimiento_id`): devolverlo por API dejaría el arqueo
+descuadrado, con la plata saliendo por un lado que la caja no ve.
+
+*Reescrita el 2026-09-11.* Hasta esa fecha esta decisión decía que esa devolución
+«se hace desde la caja» y el código **lo decía sin hacerlo**: el pago seguía
+`aprobado`, la caja no se movía, y la plata que se le devolvía al jugador salía
+del cajón como un faltante sin explicación. Ahora, cuando la política dice que
+corresponde, es un **egreso en efectivo del turno de caja abierto** de quien
+cancela, con la referencia `devolucion-<referencia del pago>`, y el pago pasa a
+`DEVUELTO`. Nada se borra: el ingreso del cobro sigue vivo y el arqueo ve los dos.
+
+Sin turno abierto —o si cancela el jugador desde el portal, que no tiene caja— no
+se inventa nada: queda `DEVOLUCION_PENDIENTE` con el motivo, **el mismo criterio
+que MercadoPago sin credenciales**, y el reintento de admin la saca de **su** caja
+abierta.
+
+> 🔑 **El egreso y el estado del pago viven en dos bases.** El movimiento se
+> escribe en la de LibraCore, que commitea sola; el `DEVUELTO`, en la del
+> dominio, al final del request. Si ese segundo commit se pierde, el reintento
+> no saca la plata dos veces: `create_caja_movimiento` es idempotente por
+> `(referencia, factura_id)` y la referencia es del pago, no del intento — el
+> mismo papel que cumple la `X-Idempotency-Key` del otro lado.
+>
+> **En efectivo y no por el medio del cobro**, que fue el QR: un egreso
+> `mercadopago` bajaría el bucket que se concilia contra lo que MercadoPago
+> deposita. Ver `MEDIOS_DE_EGRESO` en `servicios/caja.py`.
 
 ### Lo que sostiene que no se devuelva dos veces
 
@@ -520,3 +543,39 @@ un pago sea una operación genérica de MercadoPago: LibraClub es el primer prod
 de la familia que devuelve plata, y la regla del repo es que algo sube al motor
 cuando es la tercera copia y no la segunda. No toca nada del dominio —recibe un
 `payment_id`, devuelve un `refund_id`— justamente para que mudarlo sea copiarlo.
+
+## ADR-017 — El ausentismo se cuenta y se avisa; no se bloquea
+
+**Fecha:** 2026-09-11 · **Estado:** aceptada
+
+`AUSENTE` se marcaba desde el primer día y **nadie lo contaba**: el que faltó
+tres veces en el mes reservaba igual que el que viene todos los martes, y el
+encargado se enteraba cuando la cancha quedaba vacía otra vez. Es el último punto
+de la Fase A.
+
+### Las tres decisiones
+
+**1. Contar y avisar, sin bloquear.** Decisión del humano. Ni el mostrador ni el
+portal le impiden reservar a nadie: el mostrador ve el aviso y decide él —pedirle
+la seña entera, llamarlo el día antes, o tomarle el turno igual porque sabe por
+qué faltó—. Un bloqueo automático se equivoca en todos esos casos, y el cliente
+que se lo come se va a otro complejo.
+
+**2. La regla vive en un solo lugar: 3 ausencias en 90 días**, dos constantes de
+`app/servicios/ausentismo.py`. La API devuelve el reincidente **ya resuelto**,
+junto con el umbral y la ventana para que la pantalla los pueda decir. La
+pantalla no sabe que son «3 en 90»: si lo supiera, el día que el número cambie
+habría dos lugares que actualizar.
+
+**3. La ventana se mide sobre `comienza_at`.** Importa a qué turno faltó, no
+cuándo lo marcó el encargado. Y tiene cota de arriba: un turno futuro marcado
+`ausente` por error no cuenta como algo que ya pasó.
+
+### Por qué un endpoint aparte y no un campo del cliente
+
+`GET /api/clientes/ausentismo/reincidentes` trae sólo a los que pasaron el
+umbral, que son pocos. Sumar el conteo a cada fila del listado obligaría a la
+fábrica genérica de los cinco maestros (`construir_abm`) a saber qué es una
+reserva. Y va con **dos segmentos** después de `/clientes` porque
+`GET /api/clientes/{item_id}` matchea cualquier segmento único — mismo criterio
+que `/api/reservas/series/listado`.

@@ -48,6 +48,7 @@ from app.auth import UserRepository, construir_session_auth, require_admin
 from app.config import Config
 from app.models.maestros import Sucursal
 from app.routers import admin, disponibilidad, maestros, reservas, salud, torneos
+from app.routers import ausentismo as ausentismo_router
 from app.routers import auth as auth_router
 from app.routers import buffet as buffet_router
 from app.routers import caja as caja_router
@@ -258,6 +259,9 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
 
     for router in maestros.TODOS:
         app.include_router(router)
+    # Los reincidentes de ausentismo. Vive bajo `/api/clientes` pero con dos
+    # segmentos, así que no depende de ir antes o después del ABM de clientes.
+    app.include_router(ausentismo_router.router)
     app.include_router(reservas.router)
     # Los torneos. Sin `dependencies`: definir y sortear son de admin —cambian
     # lo que el complejo se comprometió a jugar— e inscribir, programar y cargar
