@@ -7,6 +7,29 @@ versionado [SemVer](https://semver.org/lang/es/).
 
 ### Agregado
 
+- **Ausentismo: el mostrador ve quién viene faltando sin avisar.** Un cliente con
+  **3 o más turnos en `ausente` en los últimos 90 días** aparece con un aviso al
+  elegirlo en el diálogo de reserva —cuántas veces faltó y la fecha de la
+  última— y marcado en el listado de Clientes. La regla vive en un solo lugar
+  (`app/servicios/ausentismo.py`) y la API la devuelve resuelta
+  (`GET /api/clientes/ausentismo/reincidentes`, con el umbral y la ventana).
+  > 🔴 **Avisa, no bloquea**, ni en el mostrador ni en el portal: decisión del
+  > humano. El encargado decide si le pide la seña entera o le toma el turno
+  > igual. Ver ADR-017.
+
+- **El aviso de cancelación dice qué pasó con la seña.** El mail que manda el
+  cron ahora repite lo que el portal ya le decía al jugador —se devolvió, se
+  está gestionando, o no se devuelve y por qué—, leído del estado **guardado**
+  del pago y con los textos de `servicios/cancelacion.py`, que pasaron a una
+  sola función. Si no hubo seña, el mail no dice nada de seña.
+
+- **La devolución de una seña cobrada en el mostrador es un egreso real de
+  caja.** Hasta hoy se anunciaba y no se hacía. Cuando la política dice que
+  corresponde, sale como egreso en efectivo del turno de caja abierto, atado al
+  pago por la referencia `devolucion-<referencia>`, y el pago queda `devuelto`.
+  Sin caja abierta queda como devolución pendiente, con el motivo, y el
+  reintento de admin la completa. Ver ADR-016, decisión 4.
+
 - **La copia externa en la nube del cliente, como add-on `resguardo_externo`.**
   Con el add-on prendido, el admin conecta su Google Drive o Dropbox desde
   Configuración → Datos / Backup (`/api/config/resguardo-externo/enlace`, el

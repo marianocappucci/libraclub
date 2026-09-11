@@ -49,6 +49,7 @@ from app.models.avisos import Aviso
 from app.models.enums import CanalAviso, EstadoAviso, EstadoReserva, TipoAviso
 from app.models.maestros import Cliente
 from app.models.reservas import Reserva
+from app.servicios import cancelacion as servicio_cancelacion
 from app.tiempo import ahora, formatear_fecha_hora
 
 #: Con cuánta anticipación se recuerda un turno, en horas. Dos avisos: uno el
@@ -108,6 +109,14 @@ class Candidato:
     tipo: TipoAviso
     horas_antes: int | None
     previo: Aviso | None
+    #: Qué pasó con la seña, contado para el cliente. Sólo en las cancelaciones,
+    #: y `None` si no hubo seña.
+    #:
+    #: 🔑 Se resuelve al armar el candidato —que ya tiene la sesión— y no en
+    #: `redactar`, para que `redactar` siga siendo una función pura que no toca
+    #: la base. El texto sale de `servicios/cancelacion.py`: es el mismo que el
+    #: portal le muestra al jugador al cancelar, no una segunda redacción.
+    sena: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,6 +270,7 @@ def pendientes(
             TipoAviso.CANCELACION,
             None,
             _previo(sesion, r.id, TipoAviso.CANCELACION, canal, None),
+            sena=servicio_cancelacion.sena_para_el_aviso(sesion, r),
         )
         for r in cancelaciones
     ]
@@ -321,10 +331,17 @@ def redactar(candidato: Candidato) -> tuple[str, str]:
 
     asunto = f"Turno cancelado: {donde}, {cuando}"
     motivo = f"\nMotivo: {reserva.motivo}\n" if reserva.motivo else ""
+    # 🔑 Qué pasó con la plata, si hubo. Es lo primero que pregunta el que
+    # recibe este mail —«¿y mi seña?»—, y hasta el 2026-09-11 sólo el portal lo
+    # contestaba: el que canceló por teléfono tenía que volver a llamar. Sin
+    # seña no se dice nada: hablar de una plata que nunca entró confunde más
+    # de lo que explica.
+    sena = f"\n{candidato.sena}\n" if candidato.sena else ""
     cuerpo = (
         f"{hola}\n\n"
         f"Tu turno del {cuando} en {donde} quedó cancelado.\n"
         f"{motivo}"
+        f"{sena}"
         f"\nCualquier duda, respondé este mail."
         f"{firma}"
     )
