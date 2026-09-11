@@ -52,6 +52,7 @@ from libracore import config_manager, mp_api
 from libracore import pagos as acreditacion
 from sqlalchemy.orm import Session
 
+from app.models.maestros import Cancha
 from app.models.reservas import EstadoPago, PagoDeReserva, Reserva
 from app.servicios import buffet, caja, facturacion
 from app.servicios import pagos as servicio_pagos
@@ -355,7 +356,11 @@ async def _completar(
         return {"estado": "aprobado", "payment_id": pago.payment_id,
                 "factura_id": reserva.factura_id}
 
-    await _facturar_si_corresponde(reserva, cliente, cancha_nombre)
+    cancha = sesion.get(Cancha, reserva.cancha_id)
+    await _facturar_si_corresponde(
+        reserva, cliente, cancha_nombre,
+        punto_venta_de_la_sucursal=cancha.sucursal.punto_venta_arca if cancha else None,
+    )
 
     movimiento_id = caja.registrar_ingreso(
         usuario,
@@ -542,7 +547,10 @@ def _completar_venta(sesion: Session, pago: PagoDeReserva, usuario: dict) -> dic
     return {"estado": "aprobado", "payment_id": pago.payment_id, "factura_id": None}
 
 
-async def _facturar_si_corresponde(reserva: Reserva, cliente, cancha_nombre: str) -> None:
+async def _facturar_si_corresponde(
+    reserva: Reserva, cliente, cancha_nombre: str, *,
+    punto_venta_de_la_sucursal: int | None,
+) -> None:
     """Emite la factura del turno si la instancia tiene la automática prendida.
 
     🔴 **No propaga el error.** El cobro ya está acreditado: perderlo del arqueo
@@ -555,7 +563,10 @@ async def _facturar_si_corresponde(reserva: Reserva, cliente, cancha_nombre: str
     if not auto_facturar_prendida() or reserva.factura_id is not None:
         return
     try:
-        factura = await facturacion.facturar_reserva(reserva, cliente, cancha_nombre)
+        factura = await facturacion.facturar_reserva(
+            reserva, cliente, cancha_nombre,
+            punto_venta_de_la_sucursal=punto_venta_de_la_sucursal,
+        )
     except Exception as exc:
         logger.error("Error auto-facturando la reserva %s: %s", reserva.id, exc)
         return
