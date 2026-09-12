@@ -17,7 +17,13 @@ import { expect, test, type Page } from '@playwright/test'
 // habilita «Ingresar». Es el único test que ve el camino entero: sonda, widget,
 // worker de PBKDF2 bajo la CSP de la SPA y verificación en el servidor.
 async function tildarCaptcha(page: Page) {
-  await page.getByRole('checkbox', { name: 'No soy un robot' }).click()
+  await expect(page.getByRole('checkbox', { name: 'No soy un robot' })).toBeVisible()
+  // 🔴 Click en el LABEL y no en el `<input>`: altcha le superpone el `<svg>`
+  // del tilde, y Playwright se queda reintentando sobre el input hasta el
+  // timeout (medido en el primer CI de este PR: 30 s esperando que el
+  // checkbox quedara "visible, enabled and stable"). El label es lo que
+  // clickea el humano y está asociado al checkbox, así que lo tilda igual.
+  await page.locator('altcha-widget').getByText('No soy un robot').click()
   await expect(page.getByRole('button', { name: 'Ingresar' })).toBeEnabled({ timeout: 30_000 })
 }
 
