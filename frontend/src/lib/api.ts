@@ -1046,10 +1046,12 @@ export interface ReservaCreada {
 }
 
 export const portal = {
+  // `captcha`: la solución del desafío de `GET /auth/captcha`, el mismo que el
+  // login de staff. Sin ella el backend contesta 400 antes de mirar nada.
   registro: (cuerpo: {
-    email: string; password: string; nombre: string; telefono?: string
+    email: string; password: string; nombre: string; telefono?: string; captcha: string
   }) => api.post<Jugador>('/api/portal/registro', cuerpo),
-  login: (cuerpo: { email: string; password: string }) =>
+  login: (cuerpo: { email: string; password: string; captcha: string }) =>
     api.post<Jugador>('/api/portal/login', cuerpo),
   logout: () => api.post<void>('/api/portal/logout', {}),
   yo: () => api.get<Jugador | null>('/api/portal/yo'),
