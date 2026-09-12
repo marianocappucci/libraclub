@@ -5,6 +5,8 @@
  * mitad se va. Al entrar, la reserva sigue sola.
  */
 import { useEffect, useState } from 'react'
+import { CampoCaptcha } from 'libra-ui/CampoCaptcha'
+import { useCaptcha } from 'libra-ui/captcha'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
@@ -32,6 +34,10 @@ export function DialogoDeCuenta({
   const [telefono, setTelefono] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [enviando, setEnviando] = useState(false)
+  // 🔴 El backend exige el captcha en `/api/portal/login` y `/registro`: sin
+  // él contesta 400 aunque la clave sea buena. El desafío es el de
+  // `/auth/captcha`, el mismo `Captcha` de proceso que el login de staff.
+  const captcha = useCaptcha('/auth/captcha')
 
   useEffect(() => {
     if (abierto) setError(null)
@@ -42,11 +48,14 @@ export function DialogoDeCuenta({
     setError(null)
     setEnviando(true)
     try {
-      if (modo === 'entrar') await entrar(email, password)
-      else await registrarse({ email, password, nombre, telefono })
+      if (modo === 'entrar') await entrar(email, password, captcha.payload)
+      else await registrarse({ email, password, nombre, telefono, captcha: captcha.payload })
       onEntro()
     } catch (err) {
       setError((err as Error).message)
+      // El intento ya gastó el desafío en el servidor (sirve una sola vez):
+      // hay que resolver otro para el próximo.
+      captcha.reiniciar()
     } finally {
       setEnviando(false)
     }
@@ -105,9 +114,15 @@ export function DialogoDeCuenta({
             )}
           </label>
 
+          <CampoCaptcha captcha={captcha} />
+
           <AvisoDeError mensaje={error} />
 
-          <Button type="submit" disabled={enviando} className="w-full">
+          <Button
+            type="submit"
+            disabled={enviando || (captcha.activo && !captcha.payload)}
+            className="w-full"
+          >
             {enviando
               ? 'Un momento…'
               : modo === 'entrar'

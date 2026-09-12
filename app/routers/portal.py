@@ -24,6 +24,8 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from libraauth import auth_events
+from libraauth import session_auth as _session_auth
 from libracore import config_manager, mp_api, mp_sync
 from libracore import pagos as acreditacion
 from pydantic import BaseModel, Field, field_validator
@@ -47,8 +49,73 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/portal", tags=["portal público"])
 
 
+#: 🔑 Mismo default que `max_intentos_fallidos` de
+#: `build_json_api_auth_router` (`libraauth.session_auth`, v0.40.0). Allá NO
+#: es una constante de módulo, es el valor por defecto de un parámetro — no
+#: hay nada que importar, así que se repite el número acá. Que sea el mismo
+#: es lo que hace que el portal y el login de staff bloqueen en el mismo
+#: punto (comparten la tabla `auth_log` y cuentan por IP, no por producto).
+MAXIMO_INTENTOS_FALLIDOS = 5
+
+#: `detalle` de los eventos que anota este router en `auth_log`, para
+#: distinguirlos de los logins de staff que viven en la misma tabla.
+DETALLE_PORTAL = "portal"
+
+#: Evento propio para un alta exitosa desde el portal. No es "login": nadie
+#: probó una contraseña. `libraauth.auth_events` admite eventos que no son los
+#: tres suyos — están pensados justamente para esto (ver su docstring).
+EVENTO_REGISTRO_PORTAL = "registro_portal"
+
+
 def _jugador(request: Request, sesion: Session = Depends(obtener_sesion)) -> CuentaDeJugador:
     return exigir_jugador(request, sesion)
+
+
+def _cortar_si_bloqueado(request: Request, username: str) -> None:
+    """El MISMO bloqueo por intentos fallidos que usa el login de staff
+    (`libraauth.session_auth.build_json_api_auth_router`), sobre la MISMA
+    tabla `auth_log` y contando por IP: una IP que agotó sus intentos contra
+    `/auth/login` tampoco entra por acá, y viceversa — es una sola defensa,
+    no dos que conviven por separado.
+
+    🔴 Va ANTES que el captcha y la credencial, igual que allá: chequear la
+    credencial primero y cortar después le contestaría distinto a quien
+    acertó la clave que a quien no, y el rate limiting se volvería un oráculo.
+    """
+    if not MAXIMO_INTENTOS_FALLIDOS:
+        return
+    recientes = auth_events.contar_fallidos_seguro(request, auth_events.VENTANA_FALLIDOS_MINUTOS)
+    if recientes >= MAXIMO_INTENTOS_FALLIDOS:
+        auth_events.registrar_seguro(
+            request, auth_events.LOGIN_BLOQUEADO, username, detalle=DETALLE_PORTAL
+        )
+        raise HTTPException(
+            429,
+            "Demasiados intentos fallidos. Esperá "
+            f"{auth_events.VENTANA_FALLIDOS_MINUTOS} minutos e intentá de nuevo.",
+        )
+
+
+def _exigir_captcha(request: Request, captcha: str) -> None:
+    """Verifica el captcha ALTCHA con el MISMO `Captcha` de proceso que usa el
+    login de staff — necesario para que la lista de desafíos ya usados
+    (anti-replay) no se parta en dos, y para que `GET /auth/captcha` —que ya
+    existe— sirva de desafío también para el portal, sin un
+    `/api/portal/captcha` propio.
+
+    🔑 **`_captcha_de` es un nombre privado de `libraauth.session_auth`** —no
+    hay uno público todavía— y se resuelve por ATRIBUTO DE MÓDULO
+    (`_session_auth._captcha_de(request)`) y no con
+    `from libraauth.session_auth import _captcha_de`: la suite parchea
+    justamente `libraauth.session_auth._captcha_de` (fixture
+    `_captcha_aprobado` en `tests/conftest.py`) para que el resto de los tests
+    no tenga que resolver un desafío real en cada login. Un `from` capturaría
+    la función real en el momento del import, ANTES del parche, y esta ruta
+    dejaría de aprobar el captcha con el resto de la suite. El arreglo de
+    fondo sería que libraauth exporte una versión pública de esto.
+    """
+    if not _session_auth._captcha_de(request).verificar(captcha):
+        raise HTTPException(400, _session_auth.CAPTCHA_INVALIDO)
 
 
 #: 🔑 **`str` y no `EmailStr`, a propósito.** `EmailStr` arrastra la dependencia
@@ -69,6 +136,10 @@ class RegistroEntrada(BaseModel):
     password: str = Field(min_length=8, max_length=200)
     nombre: str = Field(min_length=1, max_length=120)
     telefono: str = Field(default="", max_length=40)
+    #: La solución del desafío ALTCHA (`GET /auth/captcha`). Default `""` y no
+    #: obligatorio: un captcha vacío es sencillamente uno que no verifica, y
+    #: el 400 que eso produce es el mismo que el de uno mal resuelto.
+    captcha: str = ""
 
     @field_validator("email")
     @classmethod
@@ -79,6 +150,8 @@ class RegistroEntrada(BaseModel):
 class LoginEntrada(BaseModel):
     email: str = Field(max_length=120)
     password: str
+    #: Ídem `RegistroEntrada.captcha`.
+    captcha: str = ""
 
 
 class JugadorSalida(BaseModel):
@@ -104,8 +177,13 @@ def _salida(cuenta: CuentaDeJugador) -> JugadorSalida:
 def registro(
     datos: RegistroEntrada,
     respuesta: Response,
+    request: Request,
     sesion: Session = Depends(obtener_sesion),
 ):
+    email = servicio._normalizar(datos.email)
+    # Antes que el captcha: una IP bloqueada no registra cuentas tampoco.
+    _cortar_si_bloqueado(request, email)
+    _exigir_captcha(request, datos.captcha)
     try:
         cuenta = servicio.registrar(
             sesion, email=datos.email, password=datos.password,
@@ -116,6 +194,7 @@ def registro(
     sesion.commit()
     sesion.refresh(cuenta)
     crear_cookie(respuesta, cuenta.id)
+    auth_events.registrar_seguro(request, EVENTO_REGISTRO_PORTAL, email, detalle=DETALLE_PORTAL)
     return _salida(cuenta)
 
 
@@ -123,16 +202,26 @@ def registro(
 def login(
     datos: LoginEntrada,
     respuesta: Response,
+    request: Request,
     sesion: Session = Depends(obtener_sesion),
 ):
+    email = servicio._normalizar(datos.email)
+    # 🔴 El orden es bloqueo → captcha → credencial, igual que el login de
+    # staff (ver docstrings de `_cortar_si_bloqueado` y `_exigir_captcha`).
+    _cortar_si_bloqueado(request, email)
+    _exigir_captcha(request, datos.captcha)
     try:
         cuenta = servicio.autenticar(sesion, email=datos.email, password=datos.password)
     except servicio.CredencialesInvalidas as e:
         # 🔑 Un solo mensaje para los dos casos. Distinguir "no existe" de
         # "contraseña equivocada" convierte el login en un verificador de quién
         # es cliente del complejo.
+        auth_events.registrar_seguro(
+            request, auth_events.LOGIN_FALLIDO, email, detalle=DETALLE_PORTAL
+        )
         raise HTTPException(401, str(e)) from e
     crear_cookie(respuesta, cuenta.id)
+    auth_events.registrar_seguro(request, auth_events.LOGIN, email, detalle=DETALLE_PORTAL)
     return _salida(cuenta)
 
 

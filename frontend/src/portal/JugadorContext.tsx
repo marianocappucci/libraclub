@@ -14,9 +14,9 @@ import type { Jugador } from '@/lib/api'
 interface Contexto {
   jugador: Jugador | null
   cargando: boolean
-  entrar: (email: string, password: string) => Promise<void>
+  entrar: (email: string, password: string, captcha: string) => Promise<void>
   registrarse: (datos: {
-    email: string; password: string; nombre: string; telefono?: string
+    email: string; password: string; nombre: string; telefono?: string; captcha: string
   }) => Promise<void>
   salir: () => Promise<void>
 }
@@ -37,12 +37,14 @@ export function JugadorProvider({ children }: { children: React.ReactNode }) {
       .finally(() => setCargando(false))
   }, [])
 
-  const entrar = useCallback(async (email: string, password: string) => {
-    setJugador(await portal.login({ email, password }))
+  const entrar = useCallback(async (email: string, password: string, captcha: string) => {
+    setJugador(await portal.login({ email, password, captcha }))
   }, [])
 
   const registrarse = useCallback(
-    async (datos: { email: string; password: string; nombre: string; telefono?: string }) => {
+    async (datos: {
+      email: string; password: string; nombre: string; telefono?: string; captcha: string
+    }) => {
       setJugador(await portal.registro(datos))
     },
     [],
