@@ -14,7 +14,11 @@ dependencies = [
     # anda en dev local sin identidad SSH propia. Cuando la familia pase a
     # repos privados, el build reescribe la URL a `git+ssh` con la deploy key
     # de solo lectura del motor.
-    "libraauth @ git+https://github.com/marianocappucci/libraauth.git@v0.38.0",
+    #
+    # v0.38.0 -> v0.40.0 (2026-09-12): el captcha ALTCHA del login
+    # (`captcha=True`, ADR-014) y, de paso, la IP real en el bloqueo por
+    # intentos (v0.39.0). Trae `altcha` como dependencia.
+    "libraauth @ git+https://github.com/marianocappucci/libraauth.git@v0.40.0",
     # Entra en F1 sólo por `respaldo`: una instancia sin backup no se puede
     # poner en produccion. Su alcance crece en F2 (`mp_api`, `pdf_generator`)
     # y F3 (ARCA) — ver ARCHITECTURE.md.
