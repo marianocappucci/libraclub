@@ -81,10 +81,55 @@ def cuando(dia_offset: int, hora: int, minuto: int = 0) -> str:
     return f"{d.isoformat()}T{hora:02d}:{minuto:02d}:00{OFFSET}"
 
 
+def resolver_captcha():
+    """La solución del desafío ALTCHA del login, o `None` si la instancia no pide.
+
+    Desde libraauth v0.40.0 el login exige `captcha` (`captcha=True` en
+    `app/routers/auth.py`): se pide `GET /auth/captcha` y se resuelve acá.
+
+    🔴 **Que no lo pida es un caso real, no un error.** El reset nocturno corre
+    el seed de `origin/develop` contra una demo construida desde `main`: entre el
+    merge a develop y la promoción, la instancia todavía no tiene la ruta. Y ahí
+    no da 404: la atrapa el catch-all de la SPA y devuelve el `index.html` con
+    200. Por eso se mira la FORMA —`parameters` + `signature`, lo mismo que mira
+    libra-ui— y no el código.
+
+    `altcha` se importa acá adentro y sólo si hace falta: llega con libraauth,
+    así que la tiene el Python del producto y no el del sistema.
+    """
+    try:
+        codigo, desafio = pedir("GET", "/auth/captcha")
+    except ValueError:  # un 200 que no es JSON: el index.html del catch-all
+        return None
+    if codigo != 200 or not (
+        isinstance(desafio, dict)
+        and isinstance(desafio.get("parameters"), dict)
+        and isinstance(desafio.get("signature"), str)
+    ):
+        return None
+    try:
+        from altcha import Challenge, Payload, solve_challenge
+    except ImportError:
+        print(
+            "ERROR: la instancia pide captcha y este Python no tiene `altcha` "
+            "(llega con libraauth >= v0.40.0). Corré el seed con el Python del "
+            "producto: adentro del contenedor, `python3` (el de /opt/venv, como "
+            "hace scripts/reset_demo.sh), o desde el checkout, "
+            "`.venv-scripts/bin/python`."
+        )
+        sys.exit(1)
+    ch = Challenge.from_dict(desafio)
+    return Payload(ch, solve_challenge(ch)).to_base64()
+
+
 # ---- sesión ---------------------------------------------------------------
 # 🔴 Por `https://` y no por el puerto local: la cookie de sesión está marcada
 # `Secure`, así que sobre http el login devuelve 200 y **todo lo demás 401**.
-codigo, _ = pedir("POST", "/auth/login", {"username": args.usuario, "password": args.password})
+credenciales = {"username": args.usuario, "password": args.password}
+solucion = resolver_captcha()
+if solucion is not None:
+    credenciales["captcha"] = solucion
+codigo, _ = pedir("POST", "/auth/login", credenciales)
 if codigo != 200:
     print(f"login: {codigo}")
     sys.exit(1)
