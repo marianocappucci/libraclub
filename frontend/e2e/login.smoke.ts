@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 // Lo único que un unitario no puede ver: que la SPA construida, servida por la
 // app real, deje entrar y muestre una pantalla de dominio. Si el bundle quedó
@@ -10,12 +10,33 @@ import { expect, test } from '@playwright/test'
 // botón «Mostrar contraseña», y el nombre del producto es un wordmark, no un
 // heading accesible. La primera pantalla se reconoce por el sidebar de libra-ui
 // (`data-sidebar="sidebar"`) y por su título.
+//
+// 🔴 **El captcha se tilda como lo tilda el humano** (libraauth v0.40.0,
+// `captcha=True`): el widget de ALTCHA resuelve la prueba de trabajo en el
+// navegador —del orden de un segundo, más en un runner lento— y recién ahí se
+// habilita «Ingresar». Es el único test que ve el camino entero: sonda, widget,
+// worker de PBKDF2 bajo la CSP de la SPA y verificación en el servidor.
+async function tildarCaptcha(page: Page) {
+  await expect(page.getByRole('checkbox', { name: 'No soy un robot' })).toBeVisible()
+  // 🔴 Click en el LABEL y no en el `<input>`: altcha le superpone el `<svg>`
+  // del tilde, y Playwright se queda reintentando sobre el input hasta el
+  // timeout (medido en el primer CI de este PR: 30 s esperando que el
+  // checkbox quedara "visible, enabled and stable"). El label es lo que
+  // clickea el humano y está asociado al checkbox, así que lo tilda igual.
+  await page.locator('altcha-widget').getByText('No soy un robot').click()
+  await expect(page.getByRole('button', { name: 'Ingresar' })).toBeEnabled({ timeout: 30_000 })
+}
+
 test('entra por /login, acepta los Términos y ve la primera pantalla', async ({ page }) => {
   await page.goto('/login')
   await expect(page.getByRole('button', { name: 'Ingresar' })).toBeVisible()
 
   await page.locator('#username').fill(process.env.SMOKE_USER ?? 'admin')
   await page.locator('#password').fill(process.env.SMOKE_PASSWORD ?? '')
+  // Sin tildar, el botón no se habilita: es lo que deja afuera a quien no pasó
+  // el captcha, y lo que hay que ver antes de tildar.
+  await expect(page.getByRole('button', { name: 'Ingresar' })).toBeDisabled()
+  await tildarCaptcha(page)
   await page.getByRole('button', { name: 'Ingresar' }).click()
   await expect(page).toHaveURL(/\/agenda/)
 
@@ -34,10 +55,13 @@ test('entra por /login, acepta los Términos y ve la primera pantalla', async ({
 
 test('una credencial mala no entra (control)', async ({ page }) => {
   // Sin esto el test de arriba podría pasar con un login que acepte cualquier
-  // cosa; el rechazo tiene que verse en la pantalla, no sólo en la API.
+  // cosa; el rechazo tiene que verse en la pantalla, no sólo en la API. Con el
+  // captcha tildado, para que el rechazo sea el de la CONTRASEÑA y no el del
+  // captcha.
   await page.goto('/login')
   await page.locator('#username').fill('admin')
   await page.locator('#password').fill('esta-no-es')
+  await tildarCaptcha(page)
   await page.getByRole('button', { name: 'Ingresar' }).click()
   await expect(page).toHaveURL(/\/login/)
   await expect(page.locator('p.text-destructive')).toBeVisible()

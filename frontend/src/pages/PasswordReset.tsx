@@ -15,5 +15,8 @@ const branding = {
   logo: { src: LOGO, alt: 'LibraClub' },
 }
 
-export const ForgotPassword = createForgotPassword(branding)
+// El captcha va en «olvidé mi contraseña» porque el backend lo exige ahí
+// (`captcha=True`): sin él, ese endpoint manda correos a pedido de cualquiera.
+// El reset con token no lo lleva — el token ya prueba que llegó el correo.
+export const ForgotPassword = createForgotPassword({ ...branding, captchaPath: '/auth/captcha' })
 export const ResetPassword = createResetPassword(branding)

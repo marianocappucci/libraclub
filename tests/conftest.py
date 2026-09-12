@@ -11,6 +11,7 @@ import os
 from datetime import date, time
 from decimal import Decimal
 
+import libraauth.session_auth as _session_auth
 import pytest
 from alembic import command
 from alembic.config import Config as AlembicConfig
@@ -254,6 +255,59 @@ def _terminos_ya_aceptados(request):
     mp.setattr(TerminosRepository, "esta_aceptada", lambda self: True)
     yield
     mp.undo()
+
+
+# ── Captcha ALTCHA: aprobado para el resto de la suite ──────────────────────
+#
+# Desde libraauth v0.40.0 el router de `/auth` se monta con `captcha=True`: el
+# login y forgot-password exigen la solución de un desafío. La suite postea a
+# `/auth/login` en decenas de lugares —cada fixture `api`, `api_staff`, los
+# tests de usuarios, de la demo, del reset—, y resolver un desafío en cada uno
+# no prueba nada de este producto.
+#
+# 🔴 **El captcha lo prueba libraauth; acá sólo se cablea.** Lo que es de este
+# producto —que `GET /auth/captcha` exista y que un login sin captcha rebote— lo
+# fija `test_captcha_login.py`, que vuelve a poner la función real con
+# `CAPTCHA_DE_ORIGINAL`. Si alguien sacara `captcha=True` del router, ese
+# archivo es lo que se pondría rojo: el resto de la suite seguiría verde.
+
+#: La función real de libraauth, capturada al importar el conftest —antes de
+#: cualquier parche—, para que un test pueda volver a ponerla.
+CAPTCHA_DE_ORIGINAL = _session_auth._captcha_de
+
+
+class _CaptchaQueAprueba:
+    """Doble del `Captcha` de libraauth: `verificar` aprueba cualquier payload.
+
+    `emitir` delega en un `Captcha` real y barato, así `GET /auth/captcha` sigue
+    devolviendo un desafío con la forma de siempre aunque la suite no lo use.
+    """
+
+    def __init__(self) -> None:
+        from libraauth.captcha import Captcha
+
+        self._real = Captcha("clave-de-prueba", costo=1, contador_min=1, contador_rango=5)
+
+    def emitir(self) -> dict:
+        return self._real.emitir()
+
+    def verificar(self, payload: str) -> bool:
+        return True
+
+
+_CAPTCHA_DE_PRUEBA = _CaptchaQueAprueba()
+
+
+@pytest.fixture(autouse=True)
+def _captcha_aprobado(monkeypatch):
+    """Todo login y forgot-password de la suite pasa el captcha.
+
+    Se parchea la función de módulo `libraauth.session_auth._captcha_de` y no
+    `app.state.captcha`: el router la resuelve por nombre en cada request, y la
+    app se arma con `crear_app()` en decenas de lugares distintos — un parche
+    sobre una app no alcanzaría a las otras.
+    """
+    monkeypatch.setattr("libraauth.session_auth._captcha_de", lambda request: _CAPTCHA_DE_PRUEBA)
 
 
 @pytest.fixture

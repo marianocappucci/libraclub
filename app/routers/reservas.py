@@ -6,6 +6,7 @@ El router valida, delega y traduce errores a códigos. Las reglas están en
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
@@ -368,7 +369,7 @@ def cobrar_turno(
 
 
 @router.post("/{reserva_id}/facturar", response_model=FacturaSalida, status_code=201)
-async def facturar(
+def facturar(
     reserva_id: int,
     sesion: Session = Depends(obtener_sesion),
     _: object = Depends(require_admin),
@@ -388,12 +389,19 @@ async def facturar(
     # modelo del dominio: ya depende de dos bases, alcanza.
     cancha = sesion.get(Cancha, reserva.cancha_id)
     try:
-        factura = await servicio_facturacion.facturar_reserva(
+        # 🔴 `def` y `asyncio.run`, no `async def` y `await`. `facturar_reserva`
+        # es `async` sólo en los bordes —WSAA y WSFE van por `httpx`
+        # asincrónico—, pero entre medio lee y escribe las dos bases, carga
+        # `config.json` y firma el TRA con `openssl` por subproceso, todo
+        # sincrónico. Con un solo proceso de uvicorn, desde el loop eso frenaba
+        # la instancia entera. Acá corre en el hilo del threadpool que atiende
+        # este request, con un loop propio.
+        factura = asyncio.run(servicio_facturacion.facturar_reserva(
             reserva, cliente, cancha.nombre if cancha else "cancha",
             punto_venta_de_la_sucursal=(
                 cancha.sucursal.punto_venta_arca if cancha else None
             ),
-        )
+        ))
     except servicio_facturacion.FacturacionNoConfigurada as e:
         raise HTTPException(503, str(e)) from e
     except servicio_facturacion.ReservaYaFacturada as e:
@@ -439,6 +447,16 @@ def ver_factura(
 # La factura que sale sola de este cobro no rompe esa línea: el que decidió que
 # se emita fue el dueño, al prender el toggle en Configuración — el encargado no
 # elige nada.
+#
+# 🔴 **Las rutas del QR son `def` y no `async def`, a propósito.** Las
+# corrutinas de `servicios/cobro_qr.py` son `async` sólo en los bordes: lo que
+# esperan de MercadoPago va por `httpx` asincrónico, pero entre medio leen y
+# escriben la base con la `Session` sincrónica —y el poll, al acreditarse,
+# factura—. uvicorn corre con **un solo proceso**: con `await` desde el loop,
+# cada consulta frenaba la instancia entera, y el poll pega cada 3 segundos.
+# Como `def` corren en el threadpool, y la corrutina va con `asyncio.run` en un
+# loop propio de ese hilo. La firma del servicio no cambia: el arreglo va del
+# lado de quien llama.
 
 
 class QrDisponible(BaseModel):
@@ -486,7 +504,7 @@ def _reserva_y_cancha(sesion: Session, reserva_id: int) -> tuple[Reserva, str]:
 
 
 @router.post("/{reserva_id}/mp-qr", response_model=QrPuesto, status_code=201)
-async def poner_en_el_qr(
+def poner_en_el_qr(
     reserva_id: int,
     sesion: Session = Depends(obtener_sesion),
     _: object = Depends(require_staff),
@@ -498,7 +516,8 @@ async def poner_en_el_qr(
     """
     reserva, cancha_nombre = _reserva_y_cancha(sesion, reserva_id)
     try:
-        pago = await cobro_qr.poner_en_el_qr(sesion, reserva, cancha_nombre)
+        # En un loop propio de este hilo, no en el de uvicorn: ver arriba.
+        pago = asyncio.run(cobro_qr.poner_en_el_qr(sesion, reserva, cancha_nombre))
     except cobro_qr.QrNoConfigurado as exc:
         raise HTTPException(400, str(exc)) from exc
     except cobro_qr.SinPrecio as exc:
@@ -522,7 +541,7 @@ async def poner_en_el_qr(
 
 
 @router.delete("/{reserva_id}/mp-qr", status_code=204)
-async def bajar_del_qr(
+def bajar_del_qr(
     reserva_id: int,
     sesion: Session = Depends(obtener_sesion),
     _: object = Depends(require_staff),
@@ -532,12 +551,13 @@ async def bajar_del_qr(
     🔴 **Sin esto, el próximo que escanee paga el turno anterior.** Idempotente:
     sin orden pendiente no hace nada.
     """
-    await cobro_qr.bajar_del_qr(sesion, reserva_id)
+    # En un loop propio de este hilo, no en el de uvicorn: ver arriba.
+    asyncio.run(cobro_qr.bajar_del_qr(sesion, reserva_id))
     sesion.commit()
 
 
 @router.get("/{reserva_id}/mp-status", response_model=QrEstado)
-async def estado_del_qr(
+def estado_del_qr(
     reserva_id: int,
     sesion: Session = Depends(obtener_sesion),
     usuario: dict = Depends(require_staff),
@@ -551,9 +571,10 @@ async def estado_del_qr(
     reserva, cancha_nombre = _reserva_y_cancha(sesion, reserva_id)
     cliente = sesion.get(Cliente, reserva.cliente_id) if reserva.cliente_id else None
     try:
-        estado = await cobro_qr.estado_del_cobro(
+        # En un loop propio de este hilo, no en el de uvicorn: ver arriba.
+        estado = asyncio.run(cobro_qr.estado_del_cobro(
             sesion, reserva, cliente, cancha_nombre, usuario
-        )
+        ))
     except cobro_qr.QrNoConfigurado as exc:
         raise HTTPException(400, str(exc)) from exc
     except SinTurnoAbierto as exc:
@@ -922,7 +943,7 @@ def construir_router_de_simulacion_qr(entorno: str) -> APIRouter | None:
         return {"disponible": True}
 
     @simulador.post("/{reserva_id}/mp-qr/simular")
-    async def simular_cobro_qr(
+    def simular_cobro_qr(
         reserva_id: int,
         sesion: Session = Depends(obtener_sesion),
         usuario: dict = Depends(require_staff),
@@ -952,9 +973,13 @@ def construir_router_de_simulacion_qr(entorno: str) -> APIRouter | None:
             sesion, pago, payment_id=f"simulado-{pago.id}", estado_mp="approved"
         )
         try:
-            resultado = await cobro_qr._completar(
+            # 🔴 Mismo criterio que las rutas del QR de arriba, aunque esto sea
+            # sólo de dev y demo: `_completar` escribe las dos bases y puede
+            # facturar, y en esas instancias uvicorn también corre con un solo
+            # proceso. `def`, y la corrutina en un loop propio de este hilo.
+            resultado = asyncio.run(cobro_qr._completar(
                 sesion, pago, reserva, cliente, cancha_nombre, usuario
-            )
+            ))
         except servicio_caja.SinTurnoAbierto as exc:
             # 🔑 Mismo 409 que el cobro real: sin caja abierta la plata quedaría
             # fuera del arqueo, y el simulador no es excusa para saltearlo.

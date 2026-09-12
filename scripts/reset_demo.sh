@@ -354,6 +354,13 @@ fi
 # Por la API y desde adentro del contenedor: la contrasena sale de su propio
 # entorno y nunca pasa por la linea de comandos del host, donde quedaria en el
 # `ps` y en el log del cron.
+#
+# 🔑 El `python3` de abajo es el de ADENTRO del contenedor: `/opt/venv/bin` va
+# primero en el PATH de la imagen, así que es el mismo entorno que la app. Desde
+# libraauth v0.40.0 el seed resuelve el captcha ALTCHA del login y necesita
+# `altcha`, que llega con libraauth a ese venv. NO cambiarlo por
+# `$REPO/.venv-scripts/bin/python`: esa ruta es del host y en el contenedor no
+# existe.
 docker cp "$SEED_LOCAL" "$CONTENEDOR:/tmp/seed.py"
 docker exec -i "$CONTENEDOR" sh -c "
   python3 /tmp/seed.py \

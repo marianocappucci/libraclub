@@ -41,4 +41,10 @@ def construir_router() -> APIRouter:
         # los otros seis productos de la familia lo tienen así desde julio.
         incluir_password_reset=True,
         incluir_demo=True,
+        # `GET /auth/captcha` y el campo `captcha` obligatorio en el login y en
+        # forgot-password: el desafío ALTCHA, emitido y verificado acá mismo.
+        # **Siempre**, no recién después de N fallos — decisión del humano del
+        # 2026-09-11 (ADR-014 de libraauth). Va junto con el bloqueo por IP,
+        # no en su lugar: la IP no frena a quien reparte los intentos.
+        captcha=True,
     )
