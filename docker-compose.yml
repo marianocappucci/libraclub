@@ -63,7 +63,7 @@ services:
       # Al asignar uno nuevo, mirar lo que **está escuchando de verdad**
       # (`ss -ltn`) y no la lista de puertos que publica Docker: hay servicios
       # del VPS que escuchan sin ser contenedores.
-      - "8099:8000"
+      - "127.0.0.1:8099:8000"
     volumes:
       # El bind mount es para el `--reload` del código Python. Taparía el build
       # del frontend si viviera dentro de /app: por eso el Dockerfile lo hornea
