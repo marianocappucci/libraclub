@@ -41,6 +41,13 @@ function json(cuerpo: unknown, status = 200) {
   })
 }
 
+//: Lo que devuelve `GET /api/caja/medios-pago` de este producto — la fuente de
+//: `mediosDeCobro`, ver `FacturaDetalle.tsx`.
+const MEDIOS_PAGO = [
+  { valor: 'efectivo', etiqueta: 'Efectivo' },
+  { valor: 'transferencia', etiqueta: 'Transferencia' },
+]
+
 beforeEach(() => {
   // Las dos rutas del motor **no existen en este producto**: contestan el HTML
   // del catch-all, que es justamente el escenario que rompía la pantalla entera
@@ -51,6 +58,10 @@ beforeEach(() => {
       return Promise.resolve(new Response('<!doctype html>', {
         status: 200, headers: { 'content-type': 'text/html' },
       }))
+    }
+    // Los medios de ESTE producto, que es lo que arma `mediosDeCobro`.
+    if (u.includes('/api/caja/medios-pago')) {
+      return Promise.resolve(json(MEDIOS_PAGO))
     }
     return Promise.resolve(json(DETALLE))
   }))
@@ -88,6 +99,23 @@ describe('el detalle de comprobante de este producto', () => {
     // que buscarlos por texto encuentra dos y falla por el selector, no por el
     // render. Lo que se quiere afirmar es «la pantalla llegó a dibujarse».
     expect(await screen.findByRole('button', { name: /Enviar por email/ }))
+      .toBeInTheDocument()
+  })
+
+  it('🔑 ofrece «Registrar cobro» con pendiente > 0: el backend ya tiene su hook', async () => {
+    // Hasta el hook `_cobrar_del_turno` esto estaba apagado con
+    // `muestraCobros={false}` — ver el comentario de cabecera del shim. Con el
+    // hook puesto, el bloque de cobro tiene que aparecer sobre la factura
+    // `DETALLE` de este archivo, que trae `pendiente: 14000` y CAE emitido.
+    //
+    // De dónde salen los MEDIOS del selector (`/api/caja/medios-pago`,
+    // mapeado a `{id, label}`) lo prueba `FacturaDetalle.medios.test.tsx` y no
+    // acá: `useMediosDePago` cachea a nivel de módulo, así que una vez que
+    // OTRO test de este archivo ya montó la pantalla, comprobar acá que
+    // `fetch` fue llamado depende de qué test corrió antes — no de si el shim
+    // pide bien el vocabulario.
+    montar()
+    expect(await screen.findByRole('button', { name: /Registrar cobro/ }))
       .toBeInTheDocument()
   })
 })

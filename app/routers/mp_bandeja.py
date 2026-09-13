@@ -18,8 +18,10 @@ tienen que entrar a la bandeja**: ya están resueltos, y mostrarlos ahí sería
 pedirle a alguien que concilie dos veces el mismo cobro.
 
 Lo que sí entra es todo lo demás: una transferencia que le hicieron al complejo,
-un pago suelto, un cobro que no salió de un turno. Hoy eso **se pierde** — el
-webhook lo mira, no reconoce la referencia y contesta 200 sin registrar nada.
+un pago suelto, un cobro que no salió de un turno. Desde el 2026-08-27 eso
+**no se pierde**: el webhook del producto (`app/routers/portal.py`) lo manda a
+esta bandeja con `mp_sync.ingerir` en cuanto no reconoce la referencia, en vez
+de contestar 200 sin registrar nada.
 
 > ⚠️ **El prefijo `lc-` tiene que seguir coincidiendo con
 > `servicios/pagos.nueva_referencia`.** Si esa función cambiara de formato, acá
