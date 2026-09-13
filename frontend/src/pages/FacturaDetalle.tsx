@@ -6,26 +6,35 @@
 // `createAuthContext`, así que el `useAuth` de libra-ui apunta a otro contexto y
 // devolvería siempre vacío. Entra como prop.
 //
-// 🔴 **`muestraCobros={false}`**, y no es cosmético. Los medios del selector
-// salen de `/api/cajas` y `/api/ventas/medios-pago`, que este producto **no
-// expone** — su caja es otra cosa, con otra forma—. Sin apagarlo, la pantalla
-// diría «Pendiente de cobro» sobre algo que puede estar cobrado, ofrecería un
-// botón, y el diálogo abriría con el selector **vacío**. Es la misma decisión
-// que ya se tomó para el listado y para la columna de cobrado.
+// 🔑 **`muestraCobros` prendido desde que el backend tiene su propio hook de
+// cobro** (`_cobrar_del_turno` en `app/routers/facturas.py`): la plata entra
+// por la caja del **turno abierto**, y `POST /api/facturas/{id}/cobrar` queda
+// atado a la factura igual que cualquier otro cobro de este producto. Antes
+// estaba apagado porque el hook no existía —el default del motor escribía el
+// movimiento sin `turno_id`, fuera de todo arqueo— y porque el selector no
+// tenía de dónde sacar los medios: `/api/cajas` exige `sucursal_id` y
+// `/api/ventas/medios-pago` no existe en este producto, así que los dos
+// pedidos que hace el paquete fallan y el selector abriría vacío. Se
+// completa con `mediosDeCobro`, más abajo.
 //
-// Lo que sí queda: el comprobante, su CAE, el PDF, reintentar la autorización,
-// mandarlo por mail, emitir la nota de crédito o de débito, y borrarlo mientras
-// no tenga CAE.
+// Lo que sí queda igual: el comprobante, su CAE, el PDF, reintentar la
+// autorización, mandarlo por mail, emitir la nota de crédito o de débito, y
+// borrarlo mientras no tenga CAE.
 import { FacturaDetalle as FacturaDetalleCompartida } from 'libra-ui/FacturaDetalle'
 
 import { useAuth } from '@/context/AuthContext'
+import { useMediosDePago } from '@/lib/medios-pago'
 
 export function FacturaDetalle() {
   const { user } = useAuth()
+  const { medios } = useMediosDePago()
   return (
     <FacturaDetalleCompartida
       esAdmin={user?.role === 'admin'}
-      muestraCobros={false}
+      // Los medios de ESTE producto —`GET /api/caja/medios-pago`—, en la forma
+      // que pide el paquete. Sin esto el selector de cobro abriría vacío: ver
+      // el comentario de arriba.
+      mediosDeCobro={medios.map((m) => ({ id: m.valor, label: m.etiqueta }))}
       // 🔴 **Acá el PDF lo sirve la API, no un router aparte.** El default del
       // kit es `/facturas/{id}/pdf`, que es donde lo tienen Contalibra y
       // Restolibra con su router Jinja2 viejo. Este producto no lo tiene, así
@@ -36,7 +45,7 @@ export function FacturaDetalle() {
       // Este producto **no imprime ticket**: el botón llevaba al mismo callejón.
       // `null` lo saca en vez de dejarlo apuntando a ninguna parte.
       urlDelTicket={null}
-      // Ídem el recibo del cobro, que además necesita `muestraCobros`.
+      // Este producto tampoco emite recibo de cobro: no hay ruta que servir.
       urlDelRecibo={null}
     />
   )
