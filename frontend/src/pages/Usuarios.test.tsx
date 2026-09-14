@@ -2,8 +2,9 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
- * Lo único propio de esta pantalla es el `basePath`, así que es lo único que
- * este test fija. La pantalla en sí es la de `libra-ui` y la prueba el kit.
+ * Lo único propio de esta pantalla es el `basePath` -- y, desde la adopción
+ * del router de usuarios de `libraauth` (ADR-018), `permitirEliminar` y
+ * `usuarioActualId`. La pantalla en sí es la de `libra-ui` y la prueba el kit.
  *
  * Vale además como el **canario del kit**: si `libra-ui` deja de renderizar
  * acá —por el runtime de JSX de los `.tsx` que viven en `node_modules`, por una
@@ -26,12 +27,17 @@ vi.mock('libra-ui/api-client', async (original) => {
   }
 })
 
+vi.mock('@/context/AuthContext', () => ({
+  useAuth: () => ({ user: { id: '1', username: 'admin', name: 'Admin', role: 'admin' }, loading: false }),
+}))
+
 const { Usuarios } = await import('./Usuarios')
 
 beforeEach(() => {
   get.mockReset()
   get.mockResolvedValue([
     { id: '1', username: 'admin', name: 'Administrador', role: 'admin', active: true, email: '' },
+    { id: '2', username: 'ana', name: 'Ana Encargada', role: 'staff', active: true, email: '' },
   ])
 })
 
@@ -48,5 +54,18 @@ describe('pantalla de usuarios', () => {
   it('renderiza el componente compartido con lo que devuelve la API', async () => {
     render(<Usuarios />)
     expect(await screen.findByText('Administrador')).toBeInTheDocument()
+  })
+
+  it('el botón «Eliminar» aparece en otro usuario, pero no en la fila propia', async () => {
+    render(<Usuarios />)
+    await screen.findByText('Ana Encargada')
+
+    // El backend ya trae el router de `libraauth` con las guardas del único
+    // admin (`DELETE` con `204`), así que `permitirEliminar` va en `true` --
+    // sin eso el botón no aparece en ninguna fila.
+    expect(screen.getByLabelText('Eliminar Ana Encargada')).toBeInTheDocument()
+    // Y no en la propia: `usuarioActualId` es el `id` del usuario logueado
+    // (mockeado como '1' arriba), y ese usuario es «Administrador».
+    expect(screen.queryByLabelText('Eliminar Administrador')).not.toBeInTheDocument()
   })
 })
