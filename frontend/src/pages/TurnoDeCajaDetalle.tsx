@@ -17,16 +17,18 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Wallet } from 'lucide-react'
+import { ArrowLeft, Printer, Wallet } from 'lucide-react'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 import { BadgeEstado } from 'libra-ui/badge-estado'
 
-import { caja } from '@/lib/api'
+import { caja, cierreDiario } from '@/lib/api'
 import type { ResumenDeCaja, TurnoDeCaja } from '@/lib/api'
 import { useMediosDePago } from '@/lib/medios-pago'
 import { fechaHora, hora, pesos } from '@/lib/fechas'
+import { abrirTicket } from '@/lib/tickets'
 import { AvisoDeError } from '@/components/listado'
+import { Button } from '@/components/ui/button'
 import { DiferenciaDeArqueo } from '@/pages/TurnosDeCaja'
 
 export function TurnoDeCajaDetalle() {
@@ -136,7 +138,15 @@ export function TurnoDeCajaDetalle() {
             && turno.monto_declarado_cierre !== null
             && turno.monto_esperado_cierre !== null && (
             <section className="rounded-lg border bg-card p-4">
-              <h2 className="mb-3 font-medium">Resultado del cierre</h2>
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h2 className="font-medium">Resultado del cierre</h2>
+                <Button
+                  size="sm" variant="outline"
+                  onClick={() => abrirTicket(cierreDiario.urlDelTicketDeTurno(turno.id))}
+                >
+                  <Printer className="size-4" /> Imprimir ticket
+                </Button>
+              </div>
               <dl className="grid gap-1.5 text-sm">
                 <Dato titulo="Efectivo esperado" valor={pesos(turno.monto_esperado_cierre)} />
                 <Dato titulo="Efectivo declarado" valor={pesos(turno.monto_declarado_cierre)} />

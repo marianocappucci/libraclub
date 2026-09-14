@@ -23,12 +23,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
 import {
-  CalendarCheck, ChartColumn, CupSoda, History, Receipt, Users, Wallet,
+  CalendarCheck, ChartColumn, CupSoda, History, Printer, Receipt, Users, Wallet,
 } from 'lucide-react'
 
 import {
-  agenda, buffet, caja, cajas as apiCajas, canchas as apiCanchas, cobroDelTurno,
-  cobroQr, turnosPorCobrar,
+  agenda, buffet, caja, cajas as apiCajas, canchas as apiCanchas, cierreDiario,
+  cobroDelTurno, cobroQr, turnosPorCobrar,
 } from '@/lib/api'
 import { useMediosDePago } from '@/lib/medios-pago'
 import type {
@@ -36,6 +36,7 @@ import type {
   TurnoDeCaja, TurnoPorCobrar,
 } from '@/lib/api'
 import { diaISO, diasDeDiferencia, fecha, hora, pesos } from '@/lib/fechas'
+import { abrirTicket } from '@/lib/tickets'
 import { AvisoDeError } from '@/components/listado'
 // 🔑 Los dos, y no es redundancia: el mismo carrito se dibuja **inline** en la
 // pestaña «Venta suelta» —que es el punto de venta del buffet— y **en una
@@ -240,7 +241,19 @@ function Arqueo({ cierre }: { cierre: Cierre }) {
   const d = cierre.diferencia_de_caja
   return (
     <div className="max-w-sm space-y-1 rounded-lg border bg-card p-4 text-sm">
-      <div className="font-medium">Cierre del turno anterior</div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-medium">Cierre del turno anterior</span>
+        {/* El mensaje de éxito del cierre ofrece imprimirlo en el momento: es
+            cuando el cajero tiene el ticket que necesita, no sólo desde el
+            historial. `cierre.id` es el id del turno — misma ruta que usa el
+            detalle del turno cerrado. */}
+        <Button
+          size="sm" variant="outline"
+          onClick={() => abrirTicket(cierreDiario.urlDelTicketDeTurno(cierre.id))}
+        >
+          <Printer className="size-4" /> Imprimir
+        </Button>
+      </div>
       <div className="flex justify-between">
         <span className="text-muted-foreground">Esperado</span>
         <span>{pesos(String(cierre.monto_esperado_cierre ?? 0))}</span>

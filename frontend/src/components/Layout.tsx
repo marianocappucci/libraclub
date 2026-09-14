@@ -13,7 +13,7 @@
 import { Outlet } from 'react-router-dom'
 import { createLayout } from 'libra-ui/Layout'
 import {
-  CalendarDays, Clock, CreditCard, CupSoda, LayoutGrid, MapPin, NotebookText, Receipt, Repeat, ScrollText, Settings, Tags, Trophy, Undo2, UserCog, Users, Wallet,
+  CalendarDays, ClipboardCheck, Clock, CreditCard, CupSoda, LayoutGrid, MapPin, NotebookText, Receipt, Repeat, ScrollText, Settings, Tags, Trophy, Undo2, UserCog, Users, Wallet,
 } from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
@@ -88,6 +88,10 @@ const Cascaron = createLayout<Usuario>({
         // cuando configura el complejo.
         { to: '/torneos', label: 'Torneos', icon: Trophy },
         { to: '/caja', label: 'Caja', icon: Wallet },
+        // Junto a la Caja: es el acto que la cierra para todo el día, no una
+        // pantalla de configuración. Ícono propio y no `Wallet` de nuevo — dos
+        // ítems del mismo menú no comparten dibujo.
+        { to: '/cierre-diario', label: 'Cierre diario', icon: ClipboardCheck },
         // La cobranza va con la caja y no en Maestros: se mira el mismo día que
         // se cobra, y el pago a cuenta entra por el turno abierto.
         { to: '/cuenta-corriente', label: 'Cuenta corriente', icon: NotebookText },

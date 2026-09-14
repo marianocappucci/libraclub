@@ -249,6 +249,20 @@ beforeEach(() => {
         { valor: 'transferencia', etiqueta: 'Transferencia' },
       ]))
     }
+    if (u.includes('/turnos/') && u.endsWith('/cerrar') && init?.method === 'POST') {
+      // Después de cerrar, `recargar()` vuelve a pedir `/turnos/actual`: sin
+      // este flip seguiría viendo el mismo turno abierto y la pantalla no
+      // llegaría nunca a `Apertura` — que es donde vive el arqueo del cierre
+      // anterior con el botón de imprimir.
+      estado.hayTurno = false
+      return Promise.resolve(json({
+        id: 3, usuario_id: 1, caja_id: 5, caja_nombre: 'Mostrador',
+        apertura: hace(0), cierre: new Date().toISOString(), monto_inicial: 1000,
+        monto_declarado_cierre: 6000, monto_esperado_cierre: 6000,
+        estado: 'cerrado', notas: '',
+        diferencia_de_caja: 0,
+      }))
+    }
     if (u.includes('/api/caja/turnos/actual')) {
       if (!estado.hayTurno) return Promise.resolve(json(null))
       return Promise.resolve(json({
@@ -398,6 +412,39 @@ describe('un turno de caja es de UNA jornada', () => {
     montar()
     expect(await screen.findAllByText(/hace un día/i)).toHaveLength(2)
     expect(screen.queryByText(/1 días/)).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * El mensaje de éxito del cierre ofrece imprimir el ticket del turno, ahí
+ * mismo — no sólo desde el historial. Pedido del humano (2026-09-13): «cierre
+ * diario con comprobante impreso», que incluye el ticket de cada cierre de
+ * turno.
+ */
+describe('al cerrar la caja, el mensaje de éxito ofrece imprimir', () => {
+  it('🔴 muestra el botón «Imprimir» junto al arqueo', async () => {
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: /Cerrar caja/ }))
+    await user.type(await screen.findByLabelText('Efectivo contado'), '6000')
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Cerrar caja/ }))
+
+    expect(await screen.findByText('Cierre del turno anterior')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Imprimir/ })).toBeInTheDocument()
+  })
+
+  it('🔑 abre la ruta del ticket de ESE turno', async () => {
+    const abrir = vi.fn()
+    vi.stubGlobal('open', abrir)
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: /Cerrar caja/ }))
+    await user.type(await screen.findByLabelText('Efectivo contado'), '6000')
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Cerrar caja/ }))
+
+    await user.click(await screen.findByRole('button', { name: /Imprimir/ }))
+    // El turno que se cerró es el #3 — ver el stub de `POST .../cerrar` arriba.
+    expect(abrir).toHaveBeenCalledWith('/api/cierre-diario/turno/3/ticket', '_blank', 'noopener')
   })
 })
 

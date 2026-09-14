@@ -708,6 +708,85 @@ export const caja = {
   ),
 }
 
+/** Ingresos/egresos/neto de un medio de pago, dentro del cierre diario. */
+export interface MedioDeCierre {
+  medio_pago: string
+  ingresos: number
+  egresos: number
+  neto: number
+}
+
+/** Un turno tal como lo trae el preview del cierre diario — la misma forma
+ *  para los abiertos (que bloquean el cierre) y los ya cerrados del día. Los
+ *  cerrados traen además `diferencia` y `medios`; los abiertos no, porque
+ *  todavía no hay arqueo. */
+export interface TurnoDelCierre {
+  id: number
+  usuario_id: number
+  usuario_nombre: string
+  caja_id: number | null
+  caja_nombre: string
+  apertura: string
+  cierre: string | null
+  monto_inicial: number
+  monto_esperado_cierre: number | null
+  monto_declarado_cierre: number | null
+  estado: string
+  notas: string
+  diferencia?: number
+  medios?: MedioDeCierre[]
+}
+
+export interface PreviewDeCierreDiario {
+  fecha: string
+  sucursal_id: number | null
+  /** Si hay alguno, el cierre está bloqueado — ver `puede_cerrar`. */
+  turnos_abiertos: TurnoDelCierre[]
+  turnos: TurnoDelCierre[]
+  medios: MedioDeCierre[]
+  monto_esperado_total: number
+  monto_declarado_total: number
+  diferencia_total: number
+  puede_cerrar: boolean
+  ya_cerrado: boolean
+}
+
+/** La cabecera de un cierre ya hecho — es lo que trae el listado y lo que
+ *  devuelve `cerrar()`. */
+export interface CierreDiario {
+  id: number
+  sucursal_id: number | null
+  numero: number
+  fecha: string
+  usuario_id: number
+  /** Lo agrega este producto — el motor no lo resuelve en el listado. Ver
+   *  `app/servicios/cierre_diario.py`. */
+  cerrado_por_nombre: string
+  monto_esperado_total: number
+  monto_declarado_total: number
+  diferencia_total: number
+  notas: string
+  created_at: string
+}
+
+export const cierreDiario = {
+  preview: (sucursalId: number, fecha: string) =>
+    api.get<PreviewDeCierreDiario>(
+      `/api/cierre-diario/preview?sucursal_id=${sucursalId}&fecha=${fecha}`,
+    ),
+  cerrar: (sucursalId: number, fecha: string) =>
+    api.post<CierreDiario>('/api/cierre-diario/cerrar', { sucursal_id: sucursalId, fecha }),
+  listar: (sucursalId: number) =>
+    api.get<CierreDiario[]>(`/api/cierre-diario?sucursal_id=${sucursalId}`),
+  /** El PDF del cierre. Es una URL, no un `fetch` — mismo criterio que
+   *  `facturacion.urlDelPdf`: la abre `abrirTicket()` en una pestaña nueva y la
+   *  cookie de sesión viaja sola por ser el mismo origen. */
+  urlDelTicket: (cierreId: number) => `/api/cierre-diario/${cierreId}/ticket`,
+  /** El PDF del arqueo de UN turno — la foto si ya entró a un cierre diario, o
+   *  calculado en vivo si todavía no. 409 si el turno sigue abierto. */
+  urlDelTicketDeTurno: (turnoId: number) => `/api/cierre-diario/turno/${turnoId}/ticket`,
+}
+
 /** Lo que entró y salió por un medio de pago. Los `_ops` son la cantidad de
  *  movimientos, no de plata. */
 export interface TotalesDeMedio {

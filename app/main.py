@@ -31,6 +31,7 @@ from libraauth.session_auth import (
 from libraauth.smtp_settings import SmtpSettingsRepository
 from libraauth.terminos import TerminosRepository, build_terminos_router
 from libracore.arca_router import build_arca_router
+from libracore.caja_router import build_cierre_diario_router
 from libracore.config_router import (
     build_backup_router,
     build_empresa_admin_router,
@@ -44,7 +45,7 @@ from libracore.smtp_router import build_smtp_probe_router
 
 from app import db
 from app.addons import require_addon
-from app.auth import UserRepository, construir_session_auth, require_admin
+from app.auth import UserRepository, construir_session_auth, require_admin, require_staff
 from app.config import Config
 from app.models.maestros import Sucursal
 from app.routers import admin, disponibilidad, maestros, reservas, salud, torneos
@@ -53,6 +54,7 @@ from app.routers import auth as auth_router
 from app.routers import buffet as buffet_router
 from app.routers import caja as caja_router
 from app.routers import cajas as cajas_router
+from app.routers import cierre_diario as cierre_diario_router
 from app.routers import cuenta_corriente as cuenta_corriente_router
 from app.routers import devoluciones as devoluciones_router
 from app.routers import facturas as facturas_router
@@ -65,6 +67,7 @@ from app.routers import resumen as resumen_router
 from app.routers import usuarios as usuarios_router
 from app.routers.facturacion import exigir_base
 from app.servicios import caja as servicio_caja
+from app.servicios import cierre_diario as servicio_cierre_diario
 from app.servicios import facturacion
 from app.servicios import facturacion as servicio_facturacion
 from app.smtp import smtp_config
@@ -409,6 +412,33 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # rol — el listado lo lee el mostrador para elegir dónde abrir el turno;
     # el alta, la edición y la baja son de admin.
     app.include_router(cajas_router.router)
+
+    # El cierre diario por sucursal (F1 del motor, ADR-011): vista previa,
+    # cerrar, listar y los dos tickets de 80 mm. `require_staff` en las dos
+    # puntas: en `usuario_actual` porque cualquiera de las dos únicas
+    # credenciales de este producto (admin, staff) puede consultar el cierre —
+    # es la misma población que ya lee la caja—, y en `autorizar_cierre` porque
+    # el pedido del humano (2026-09-13) es que "lo puede hacer el admin o un
+    # cajero", y en LibraClub el cajero es el rol `staff`.
+    #
+    # `resolver_sucursal_nombre` es lo que le permite al motor mostrar el
+    # nombre de la sede sin conocer la tabla `Sucursal`, que vive del lado del
+    # dominio. `exigir_base` porque el cierre diario vive en la base de
+    # LibraCore: sin `LIBRACLUB_LIBRACORE_DATABASE_URL` esta instancia todavía
+    # no tiene dónde guardarlo.
+    #
+    # 🔴 `cierre_diario_router.router` va ANTES: sirve el MISMO `GET ""` con
+    # `cerrado_por_nombre` agregado (el motor no lo resuelve — ver su
+    # docstring), y Starlette matchea rutas en orden de registro.
+    app.include_router(cierre_diario_router.router)
+    app.include_router(
+        build_cierre_diario_router(
+            usuario_actual=require_staff,
+            resolver_sucursal_nombre=servicio_cierre_diario.resolver_sucursal_nombre,
+            autorizar_cierre=Depends(require_staff),
+        ),
+        dependencies=[Depends(exigir_base)],
+    )
 
     # Las devoluciones de seña que quedaron pendientes. El listado es de staff
     # —el encargado tiene que poder contestarle al jugador que llama— y el
