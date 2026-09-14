@@ -1,9 +1,16 @@
-"""El router de usuarios, y el camino por el que entra el backoffice de la suite.
+"""El router de usuarios, ahora sobre `libraauth.usuarios.build_users_router()`
+(ADR-018, v0.43.0), y el camino por el que entra el backoffice de la suite.
 
-Lo que más importa acá **no** es el ABM: es el token de servicio. Es el único
-camino por el que `admin.libraclub.com.ar` administra esta instancia, no lo
-ejercita ninguna otra parte del producto, y si se rompe el síntoma aparece del
-otro lado —una pestaña que contesta 403— sin nada que apunte a este archivo.
+Lo que más importa acá **no** es el ABM -- el ciclo completo lo prueba
+`verificar_contrato_de_usuarios`, compartido con el resto de la familia -- sino
+el token de servicio y la credencial del panel. Es el único camino por el que
+`admin.libraclub.com.ar` administra esta instancia, no lo ejercita ninguna otra
+parte del producto, y si se rompe el síntoma aparece del otro lado —una
+pestaña que contesta 403— sin nada que apunte a este archivo.
+
+🔴 **La contraseña mínima subió de "no vacía" a 6 caracteres**, también en el
+alta. Las contraseñas de prueba de este archivo tienen 6 caracteres o más a
+propósito (antes muchas usaban `"x"`).
 """
 
 from __future__ import annotations
@@ -13,7 +20,9 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 from libraauth.models import Base as AuthBase
+from libraauth.testing import verificar_contrato_de_usuarios
 
+from app import auditoria
 from app.config import Config
 from app.main import crear_app
 
@@ -67,6 +76,11 @@ def panel(app_con_token):
     return cliente
 
 
+def test_contrato_de_usuarios(api):
+    """El ciclo que ejerce el backoffice de la suite, con la sesión de admin."""
+    verificar_contrato_de_usuarios(api, "/api/usuarios", role="staff")
+
+
 def test_el_panel_lista_usuarios_sin_tener_sesion(panel):
     """🔑 El camino que usa `admin.libraclub.com.ar`, y el único que lo usa."""
     respuesta = panel.get("/api/usuarios")
@@ -79,13 +93,21 @@ def test_el_panel_da_de_alta_y_el_usuario_puede_entrar(panel, app_con_token):
 
     Es la diferencia entre "se escribió una fila" y "se creó un usuario" — un
     hash mal armado devuelve 201 igual.
+
+    🔴 **`role` ahora es obligatorio en el cuerpo.** El modelo público de
+    `libraauth` (`UsuarioAlta.role: str`, sin default) reemplazó al `Rol =
+    "staff"` propio de este producto -- un alta sin `role` daba de alta un
+    `staff` antes de esta adopción y ahora devuelve 422. Riesgo a verificar
+    antes de desplegar: si `admin.libraclub.com.ar` manda un alta sin `role`
+    confiando en ese default, deja de funcionar.
     """
     alta = panel.post(
         "/api/usuarios",
-        json={"username": "encargado", "name": "Encargado", "password": "abrime"},
+        json={"username": "encargado", "name": "Encargado", "password": "abrime",
+              "role": "staff"},
     )
     assert alta.status_code == 201, alta.text
-    assert alta.json()["role"] == "staff", "el default tiene que ser staff, no admin"
+    assert alta.json()["role"] == "staff"
 
     otro = TestClient(app_con_token, base_url="https://testserver")
     assert otro.post(
@@ -147,7 +169,7 @@ def test_un_admin_no_se_puede_dejar_afuera_a_si_mismo(api):
     # los tres 409 de arriba pasarían igual con el endpoint roto entero.
     otro = api.post(
         "/api/usuarios",
-        json={"username": "otro", "name": "Otro", "password": "x", "role": "admin"},
+        json={"username": "otro", "name": "Otro", "password": "clave1", "role": "admin"},
     ).json()
     assert api.put(
         f"/api/usuarios/{otro['id']}", json={**cuerpo, "active": False}
@@ -165,7 +187,8 @@ def test_editar_sin_tocar_el_correo_no_lo_borra(api):
         json={
             "username": "conmail",
             "name": "Con Mail",
-            "password": "x",
+            "password": "clave1",
+            "role": "staff",
             "email": "alguien@complejo.com",
         },
     ).json()
@@ -179,21 +202,41 @@ def test_editar_sin_tocar_el_correo_no_lo_borra(api):
 
 def test_la_clave_vacia_se_rechaza(api):
     creado = api.post(
-        "/api/usuarios", json={"username": "z", "name": "Z", "password": "x"}
+        "/api/usuarios",
+        json={"username": "z", "name": "Z", "password": "clave1", "role": "staff"},
     ).json()
     assert api.put(
         f"/api/usuarios/{creado['id']}/password", json={"password": "   "}
     ).status_code == 422
     # Control: una clave de verdad sí entra, y sirve para loguearse.
     assert api.put(
-        f"/api/usuarios/{creado['id']}/password", json={"password": "nueva"}
+        f"/api/usuarios/{creado['id']}/password", json={"password": "nueva1"}
     ).status_code == 204
 
 
+def test_la_clave_corta_no_se_acepta_ni_en_el_alta_ni_en_el_reset(api):
+    """🔑 Nuevo con esta adopción: antes el alta de este producto no exigía
+    largo mínimo. Ahora sí, en los ocho productos de la familia."""
+    corta = api.post(
+        "/api/usuarios",
+        json={"username": "cortita", "name": "Cortita", "password": "abc12", "role": "staff"},
+    )
+    assert corta.status_code == 422, corta.text
+
+    creado = api.post(
+        "/api/usuarios",
+        json={"username": "normal", "name": "Normal", "password": "clave1", "role": "staff"},
+    ).json()
+    reset_corto = api.put(f"/api/usuarios/{creado['id']}/password", json={"password": "abc12"})
+    assert reset_corto.status_code == 422, reset_corto.text
+
+
 def test_username_repetido_da_409(api):
-    api.post("/api/usuarios", json={"username": "dup", "name": "D", "password": "x"})
+    api.post("/api/usuarios",
+             json={"username": "dup", "name": "D", "password": "clave1", "role": "staff"})
     segundo = api.post(
-        "/api/usuarios", json={"username": "dup", "name": "D2", "password": "x"}
+        "/api/usuarios",
+        json={"username": "dup", "name": "D2", "password": "clave1", "role": "staff"},
     )
     assert segundo.status_code == 409
 
@@ -377,3 +420,45 @@ def test_Y_UN_ADMIN_SIGUE_SIN_PODER_BORRARSE_A_SI_MISMO(api):
     yo = api.get("/auth/me").json()
     r = api.delete(f"/api/usuarios/{yo['id']}")
     assert r.status_code == 409, r.text
+
+
+# -- La auditoría sobrevive a la adopción de la factory ----------------------
+#
+# `app/auth.py` envuelve TODOS los gates con `_que_recuerde_al_usuario(...)`,
+# que llama a `auditoria.recordar_usuario(request, usuario)` -- es lo único que
+# deja el id del usuario en `request.state` para que
+# `app/auditoria.py::_completar_auditoria` (un listener de `before_flush`)
+# complete `created_by`/`updated_by` en cualquier fila `Auditable` que se
+# escriba en la misma request.
+#
+# El router de usuarios de `libraauth` recibe el guard COMO PARÁMETRO
+# (`admin_guard=`): si `app/routers/usuarios.py` le pasara el guard SIN
+# envolver de `libraauth.session_auth` en vez del de `app.auth`, el router
+# seguiría funcionando -- autentica igual -- pero dejaría de auditar. Este test
+# no mide `created_by` de una fila (el modelo `Usuario` de `libraauth` no es
+# `Auditable`: usa su propio `Base`, no el del dominio de este producto), mide
+# el cableado del que depende TODO lo demás que sí lo es.
+
+
+def test_las_escrituras_via_el_router_de_usuarios_quedan_atribuidas(api, monkeypatch):
+    """🔑 Mutación: cambiar el `admin_guard=` de `app/routers/usuarios.py` al
+    guard sin envolver de `libraauth.session_auth`
+    (`json_api_require_admin_o_servicio_o_panel`, importado directo en vez de
+    vía `app.auth`) deja este test en rojo -- `recordar_usuario` deja de
+    llamarse aunque el 200 de abajo siga igual. Verificado a mano: con ese
+    cambio, `llamadas` queda vacía y el segundo `assert` explota.
+    """
+    llamadas: list[dict | None] = []
+    original = auditoria.recordar_usuario
+
+    def _espia(request, usuario):
+        llamadas.append(usuario)
+        return original(request, usuario)
+
+    monkeypatch.setattr(auditoria, "recordar_usuario", _espia)
+
+    yo = api.get("/auth/me").json()
+    assert api.get("/api/usuarios").status_code == 200
+    assert llamadas, "el guard del router de usuarios no llamó a recordar_usuario"
+    assert llamadas[-1] is not None
+    assert str(llamadas[-1]["id"]) == str(yo["id"])
