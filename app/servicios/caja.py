@@ -25,6 +25,7 @@ from decimal import Decimal
 
 from libracore import medios_pago
 from libracore.db import caja as db_caja
+from libracore.db import cierre_diario as db_cierre_diario
 from libracore.db import core as libracore_core
 from libracore.db import reportes as db_reportes
 from libracore.db import turnos as db_turnos
@@ -75,6 +76,17 @@ class MovimientoAjeno(ValueError):
 class SinCajaEnLaSucursal(RuntimeError):
     """La sucursal no tiene ninguna caja dada de alta, así que no hay dónde
     abrir el turno. Se resuelve dando de alta una, no inventando la caja."""
+
+
+class DiaCerradoError(RuntimeError):
+    """La sucursal de esa caja ya cerró el día operativo: no se puede abrir un
+    turno con apertura en él.
+
+    Envuelve `libracore.db.cierre_diario.DiaCerradoError` — la misma clase de
+    error que las otras de este módulo (`TurnoYaAbierto`, `SinTurnoAbierto`):
+    el router traduce excepciones DE ESTE módulo a HTTP, no las del motor
+    directamente, para no acoplar `app/routers/caja.py` a `libracore.db`.
+    """
 
 
 def espejar_usuario(usuario: dict) -> int:
@@ -133,7 +145,10 @@ def abrir_turno(usuario: dict, monto_inicial: Decimal, notas: str = "",
     usuario_id = espejar_usuario(usuario)
     if db_turnos.get_turno_activo(usuario_id) is not None:
         raise TurnoYaAbierto("Ya tenés una caja abierta.")
-    tid = db_turnos.create_turno(usuario_id, float(monto_inicial), notas, caja_id=caja_id)
+    try:
+        tid = db_turnos.create_turno(usuario_id, float(monto_inicial), notas, caja_id=caja_id)
+    except db_cierre_diario.DiaCerradoError as e:
+        raise DiaCerradoError(str(e)) from e
     return db_turnos.get_turno(tid)
 
 

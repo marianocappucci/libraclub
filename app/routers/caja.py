@@ -129,6 +129,11 @@ def abrir(
         ))
     except servicio.TurnoYaAbierto as e:
         raise HTTPException(409, str(e)) from e
+    except servicio.DiaCerradoError as e:
+        # 🔴 Sin este mapeo, un `DiaCerradoError` del motor llegaba sin capturar
+        # y FastAPI lo convertía en un 500 genérico: el mostrador vería "algo
+        # falló" en vez del motivo real (el día ya está cerrado en esta sede).
+        raise HTTPException(409, str(e)) from e
 
 
 @router.get("/medios-pago")

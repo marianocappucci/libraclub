@@ -121,6 +121,15 @@ describe('lo que muestra', () => {
     expect(screen.getByText(/faltó/)).toBeInTheDocument()
   })
 
+  it('🔴 ofrece imprimir el ticket de ESE turno', async () => {
+    const abrir = vi.fn()
+    vi.stubGlobal('open', abrir)
+    montar()
+    const boton = await screen.findByRole('button', { name: /Imprimir ticket/ })
+    boton.click()
+    expect(abrir).toHaveBeenCalledWith('/api/cierre-diario/turno/12/ticket', '_blank', 'noopener')
+  })
+
   it('sobre un turno ABIERTO no promete un cierre que todavía no pasó', async () => {
     /* Una tarjeta de «resultado del cierre» con guiones invita a pensar que el
      * cierre falló. El control positivo va al lado: la pantalla SÍ renderizó,
@@ -135,6 +144,8 @@ describe('lo que muestra', () => {
     montar()
     expect(await screen.findByText('Abierto')).toBeInTheDocument()
     expect(screen.queryByText('Resultado del cierre')).toBeNull()
+    // Sin arqueo no hay nada que imprimir todavía — el motor daría 409.
+    expect(screen.queryByRole('button', { name: /Imprimir ticket/ })).toBeNull()
   })
 
   it('un turno sin movimientos lo dice, en vez de una tabla vacía', async () => {

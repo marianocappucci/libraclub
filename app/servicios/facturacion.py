@@ -30,6 +30,7 @@ from libracommerce.db.schema import init_schema as init_commerce_schema
 from libracore import arca_facturacion, config_manager
 from libracore.db import arca_config as db_arca_config
 from libracore.db import caja as db_caja
+from libracore.db import cierre_diario as db_cierre_diario
 from libracore.db import core as libracore_core
 from libracore.db import facturas as db_facturas
 from libracore.db.schema import init_core_schema
@@ -144,6 +145,18 @@ def configurar(database_url: str | None) -> bool:
         # que la cancha. Separarlas obligaría a una transacción distribuida para
         # que una venta descuente stock y entre al turno a la vez.
         init_commerce_schema(conexion)
+        # 🔴 **`cierres_diarios` no viene con `init_core_schema()`** — esa función
+        # está congelada desde la `0001` (ver su propio docstring en LibraCore) y
+        # las tablas del cierre diario son DDL de la `0009`. En el DEPLOY real
+        # esa migración la corre `libracore-migrar upgrade --prefijo libraclub`
+        # (ver `docker-compose.yml` y `scripts/panel_admin.py`), que también migra
+        # a esta misma base — así que acá sería idempotente y de sobra.
+        # Pero acá adentro es lo único que lo garantiza: `configurar()` es lo que
+        # arma la base de LibraCore para la SUITE (no corre Alembic contra una
+        # segunda base), y sin esta línea `cierres_diarios` no existiría en
+        # ningún test. `crear_tablas()` es `CREATE TABLE IF NOT EXISTS`,
+        # documentada para este mismo uso — ver su docstring.
+        db_cierre_diario.crear_tablas(conexion)
         conexion.commit()
     finally:
         conexion.close()

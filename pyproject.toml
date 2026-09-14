@@ -36,7 +36,15 @@ dependencies = [
     #
     # 🔑 Lo pidió **este mismo producto**: la revisión `0008` del cobro con QR
     # llegó a `main` sin nadie en el camino de deploy que la aplicara.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.97.0",
+    #
+    # v1.97.0 -> v1.98.0 (2026-09-13): cierre diario por sucursal (Fase 1, el
+    # motor — ADR-011): `db.cierre_diario`, `arqueo_de_turno()`,
+    # `caja_router.build_cierre_diario_router()` y el ticket térmico de 80 mm
+    # del cierre y del turno. Trae la migración `0009_cierre_diario`, que este
+    # producto corre igual que la `0008` de arriba — ver el `command:` del
+    # compose y `scripts/panel_admin.py`. `create_turno()` ahora rechaza abrir
+    # un turno si la sucursal de la caja ya cerró el día.
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.98.1",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
@@ -54,6 +62,9 @@ dev = [
     "pytest-cov>=6.0",
     "httpx>=0.27",
     "ruff>=0.8",
+    # Para leer el texto de los PDF del cierre diario en los tests (mismo
+    # paquete que usa la propia suite de LibraCore para sus tickets).
+    "pypdf>=5.0",
 ]
 
 [build-system]

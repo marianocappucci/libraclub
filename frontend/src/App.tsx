@@ -3,6 +3,7 @@ import { Layout } from '@/components/Layout'
 import { Agenda } from '@/pages/Agenda'
 import { Buffet } from '@/pages/Buffet'
 import { Caja } from '@/pages/Caja'
+import { CierreDiario } from '@/pages/CierreDiario'
 import { MovimientosDeCaja } from '@/pages/MovimientosDeCaja'
 import { TurnosDeCaja } from '@/pages/TurnosDeCaja'
 import { TurnoDeCajaDetalle } from '@/pages/TurnoDeCajaDetalle'
@@ -120,6 +121,7 @@ function Backoffice() {
           <Route path="/caja/turnos" element={<TurnosDeCaja />} />
           <Route path="/caja/turnos/:id" element={<TurnoDeCajaDetalle />} />
           <Route path="/caja/por-medio" element={<CajaPorMedio />} />
+          <Route path="/cierre-diario" element={<CierreDiario />} />
           <Route path="/cajas" element={<Cajas />} />
           <Route path="/buffet" element={<Buffet />} />
           <Route path="/cuenta-corriente" element={<CuentaCorriente />} />
