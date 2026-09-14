@@ -54,7 +54,6 @@ from app.routers import auth as auth_router
 from app.routers import buffet as buffet_router
 from app.routers import caja as caja_router
 from app.routers import cajas as cajas_router
-from app.routers import cierre_diario as cierre_diario_router
 from app.routers import cuenta_corriente as cuenta_corriente_router
 from app.routers import devoluciones as devoluciones_router
 from app.routers import facturas as facturas_router
@@ -425,12 +424,8 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # nombre de la sede sin conocer la tabla `Sucursal`, que vive del lado del
     # dominio. `exigir_base` porque el cierre diario vive en la base de
     # LibraCore: sin `LIBRACLUB_LIBRACORE_DATABASE_URL` esta instancia todavía
-    # no tiene dónde guardarlo.
-    #
-    # 🔴 `cierre_diario_router.router` va ANTES: sirve el MISMO `GET ""` con
-    # `cerrado_por_nombre` agregado (el motor no lo resuelve — ver su
-    # docstring), y Starlette matchea rutas en orden de registro.
-    app.include_router(cierre_diario_router.router)
+    # no tiene dónde guardarlo. El listado trae `cerrado_por_nombre` desde
+    # libracore v1.98.1: no hace falta ningún endpoint propio encima.
     app.include_router(
         build_cierre_diario_router(
             usuario_actual=require_staff,

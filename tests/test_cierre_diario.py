@@ -184,11 +184,11 @@ def test_un_staff_puede_cerrar_el_dia(api, engine, base_de_libracore, sucursal):
 
 
 def test_el_listado_trae_QUIEN_CERRO(api, sucursal):
-    """🔴 `libracore.db.cierre_diario.listar_cierres()` no hace ningún JOIN:
-    trae la cabecera pelada, con `usuario_id` y no un nombre. Sin
-    `app/routers/cierre_diario.py` —que se registra ANTES que el del motor y
-    sirve el mismo `GET ""` con `cerrado_por_nombre` resuelto— el listado
-    mostraría un id crudo en la columna que más importa."""
+    """El listado muestra quién cerró: `cerrado_por_nombre` lo trae el motor
+    (`listar_cierres`, libracore v1.98.1). Antes de esa versión venía sin
+    nombre, y LibraClub lo agregaba con un endpoint propio que tapaba al del
+    motor en la misma ruta; este test es el que asegura que sacarlo no dejó
+    un id crudo en la columna que más importa."""
     _abrir_y_cerrar_turno(api, sucursal)
     api.post("/api/cierre-diario/cerrar", json={"sucursal_id": sucursal.id})
 
@@ -196,7 +196,7 @@ def test_el_listado_trae_QUIEN_CERRO(api, sucursal):
     assert r.status_code == 200, r.text
     listado = r.json()
     assert len(listado) == 1
-    # 🔑 Si el JOIN fallara, el fallback de `listar_con_nombre` deja escrito
+    # 🔑 Si el JOIN no encontrara al usuario, el motor deja escrito
     # "usuario #<id>" — el negativo de que la resolución de verdad ocurrió.
     assert not listado[0]["cerrado_por_nombre"].startswith("usuario #"), listado[0]
 
