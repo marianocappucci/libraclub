@@ -140,6 +140,32 @@ def test_el_producto_declara_planes_con_sus_modulos():
     assert set(plans.MODULO_LABELS) == set(plans.MODULOS)
 
 
+def test_el_backoffice_puede_listar_los_planes():
+    """🔴 `GET /api/planes` del backoffice llama a `plans.modulos_de_plan`.
+
+    Faltaba, y la ruta daba 500: la pantalla de la instancia quedaba en blanco
+    (2026-09-15). Se prueba por el camino del motor, `planes_info()`, y no sólo
+    la función suelta — lo que importa es el contrato que el motor espera.
+    """
+    from libracore.admin import services
+
+    import plans
+
+    for p in plans.PLANES:
+        assert plans.modulos_de_plan(p) == set(plans.PLAN_MODULOS[p])
+    assert plans.modulos_de_plan("inexistente") == set()
+
+    # `planes_info()` exige `configure()`; acá sólo interesa lo que le pide a
+    # `plans`, así que se saltea esa guarda.
+    original = services._require_configured
+    services._require_configured = lambda: None
+    try:
+        info = services.planes_info()
+    finally:
+        services._require_configured = original
+    assert [i["key"] for i in info] == plans.PLANES
+
+
 def _bloque_del_servicio_de_dev() -> str:
     """El bloque del servicio `*-dev` del compose del repo, como texto.
 
