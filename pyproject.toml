@@ -22,7 +22,7 @@ dependencies = [
     # el router de usuarios único de la familia -- ver `app/routers/usuarios.py`.
     # Trae también la sesión por inactividad de 8h con renovación deslizante
     # (ADR-017).
-    "libraauth @ git+https://github.com/marianocappucci/libraauth.git@v0.43.1",
+    "libraauth[migrations] @ git+https://github.com/marianocappucci/libraauth.git@v0.43.1",
     # Entra en F1 sólo por `respaldo`: una instancia sin backup no se puede
     # poner en produccion. Su alcance crece en F2 (`mp_api`, `pdf_generator`)
     # y F3 (ARCA) — ver ARCHITECTURE.md.
