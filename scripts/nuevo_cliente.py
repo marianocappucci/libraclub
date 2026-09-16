@@ -102,8 +102,6 @@ configure(
     # que la revisión `0002` le agrega a `clients`.
     migraciones=(
         ("libracore-migrar", "upgrade", "--prefijo", "libraclub"),
-        # libraauth: sus seis tablas viven en la base del dominio (medido 2026-09-16), por eso --base dominio.
-        ("libraauth-migrar", "upgrade", "--prefijo", "libraclub", "--base", "dominio"),
         ("alembic", "upgrade", "head"),
     ),
     # `health_path` **no se pasa**: desde hoy este producto sirve `/health`
