@@ -44,16 +44,16 @@ dependencies = [
     # producto corre igual que la `0008` de arriba — ver el `command:` del
     # compose y `scripts/panel_admin.py`. `create_turno()` ahora rechaza abrir
     # un turno si la sucursal de la caja ya cerró el día.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.101.0",
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.102.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
-    "libragenda @ git+https://github.com/marianocappucci/libragenda.git@v0.10.0",
+    "libragenda @ git+https://github.com/marianocappucci/libragenda.git@v0.11.0",
     # El buffet (F4): catalogo, stock y ventas. Se consume el motor entero
     # —dominio, casos de uso y repositorio SQLite/PostgreSQL— y no solo el
     # dominio como en LibraGenda: aca no hay una persistencia propia que valga
     # la pena escribir, y VentaLibra ya probo ese camino.
-    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.15.0",
+    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.16.4",
 ]
 
 [project.optional-dependencies]
