@@ -112,8 +112,14 @@ jobs:
         run: |
           mkdir -p "$DATA_DIR"
           PGPASSWORD=libraclub-ci psql -h localhost -U libraclub -d libraclub -c 'CREATE DATABASE libraclub_core'
-          libracore-migrar upgrade --prefijo libraclub
-          alembic upgrade head
+          # Las migraciones son LAS QUE DECLARA scripts/panel_admin.py, en su orden,
+          # y no una copia: el mismo snippet que usa scripts/reset_demo.sh. Hasta el
+          # 2026-09-17 esta lista era a mano y le faltaba libraauth-migrar (y
+          # libracommerce-migrar donde se declara): el smoke pasaba por el
+          # create_all del arranque, que es justo lo que se esta retirando.
+          python -c 'import sys; sys.path.insert(0, "."); import scripts.panel_admin; from libracore.provisioning import get_config; print("\n".join(" ".join(c) for c in get_config().migraciones))' > migraciones.txt
+          test -s migraciones.txt || { echo "::error::scripts/panel_admin.py no declara migraciones"; exit 1; }
+          while IFS= read -r cmd; do echo "== $cmd"; $cmd; done < migraciones.txt
           nohup uvicorn app.asgi:app --host 127.0.0.1 --port 8000 > uvicorn.log 2>&1 &
           for i in $(seq 1 40); do
             if curl -sf http://localhost:8000/health | grep -q 'ok"'; then echo "app arriba tras $i intentos"; exit 0; fi
