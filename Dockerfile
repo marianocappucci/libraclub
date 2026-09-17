@@ -76,6 +76,13 @@ RUN uv sync --frozen --no-dev --no-editable
 
 COPY alembic.ini ./
 COPY migrations ./migrations
+# `scripts/` adentro de la imagen (2026-09-17): el motor de restore de LibraCore
+# lee las migraciones del producto DENTRO del contenedor, con
+# `import scripts.panel_admin` -> `get_config().migraciones`, para que salgan del
+# mismo commit que el codigo que corre y no del checkout del host. Sin esto da
+# `ModuleNotFoundError: scripts` y el restore aborta. Los otros productos ya lo
+# traian (`COPY . .`).
+COPY scripts ./scripts
 
 # Horneado FUERA de /app a propósito: el docker-compose de dev monta `./:/app`
 # entero para el reload de Python, y eso taparía cualquier build copiado
