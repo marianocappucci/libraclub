@@ -16,6 +16,7 @@ import os
 
 import pytest
 from fastapi.testclient import TestClient
+from libraauth.testing import crear_schema_de_auth
 from libracore.security_headers import CSP, CSP_SPA
 
 from app.config import Config
@@ -29,6 +30,9 @@ def http(engine, sesion, monkeypatch):
     # con un admin sin clave. La fixture de `test_api.py` hace lo mismo.
     monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", "admin")
     monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", "clave-de-prueba")
+    # El arranque exige la cadena de auth (libraauth v0.45) y no crea las tablas:
+    # un test anterior pudo haberlas borrado con `AuthBase.metadata.drop_all`.
+    crear_schema_de_auth(engine)
     cfg = Config(
         database_url=os.environ["DATABASE_URL"],
         entorno="test",
