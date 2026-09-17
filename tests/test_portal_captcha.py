@@ -27,6 +27,7 @@ from libraauth.captcha import Captcha
 from libraauth.models import AuthEvent
 from libraauth.models import Base as AuthBase
 from libraauth.session_auth import CAPTCHA_INVALIDO
+from libraauth.testing import crear_schema_de_auth
 from sqlalchemy import select
 
 from app.config import Config
@@ -54,7 +55,7 @@ def api(engine, sesion, monkeypatch):
     monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", "admin")
     monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", "clave-de-prueba")
     AuthBase.metadata.drop_all(engine)
-    AuthBase.metadata.create_all(engine)
+    crear_schema_de_auth(engine)
     app = crear_app(_config())
     app.state.captcha = Captcha("clave-de-prueba", costo=1, contador_min=1, contador_rango=5)
     yield TestClient(app, base_url="https://testserver")

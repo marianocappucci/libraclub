@@ -18,6 +18,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from libraauth.models import Base as AuthBase
+from libraauth.testing import crear_schema_de_auth
 
 from app.config import Config
 from app.main import crear_app
@@ -48,7 +49,7 @@ def logueado(engine, sesion, monkeypatch, base_de_libracore):
     monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
     monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
     AuthBase.metadata.drop_all(engine)
-    AuthBase.metadata.create_all(engine)
+    crear_schema_de_auth(engine)
     cfg = Config(
         database_url=os.environ["DATABASE_URL"], entorno="test", debug=False,
         directorio_de_datos="/tmp/libraclub-test-terminos",

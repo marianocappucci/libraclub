@@ -20,7 +20,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 from libraauth.models import Base as AuthBase
-from libraauth.testing import verificar_contrato_de_usuarios
+from libraauth.testing import crear_schema_de_auth, verificar_contrato_de_usuarios
 
 from app import auditoria
 from app.config import Config
@@ -49,7 +49,7 @@ def app_con_token(engine, sesion, monkeypatch):
     monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
     monkeypatch.setenv("LIBRA_SERVICE_TOKEN", TOKEN)
     AuthBase.metadata.drop_all(engine)
-    AuthBase.metadata.create_all(engine)
+    crear_schema_de_auth(engine)
     yield crear_app(_config())
     AuthBase.metadata.drop_all(engine)
 
@@ -144,7 +144,7 @@ def test_sin_la_variable_en_el_entorno_el_token_no_abre_nada(engine, sesion, mon
     monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
     monkeypatch.delenv("LIBRA_SERVICE_TOKEN", raising=False)
     AuthBase.metadata.drop_all(engine)
-    AuthBase.metadata.create_all(engine)
+    crear_schema_de_auth(engine)
     try:
         cliente = TestClient(crear_app(_config()), base_url="https://testserver")
         cliente.headers[CABECERA] = TOKEN
@@ -264,7 +264,7 @@ def app_con_panel(engine, sesion, monkeypatch):
     monkeypatch.setenv("LIBRA_PANEL_TOKEN", TOKEN_PANEL)
     monkeypatch.delenv("LIBRA_SERVICE_TOKEN", raising=False)
     AuthBase.metadata.drop_all(engine)
-    AuthBase.metadata.create_all(engine)
+    crear_schema_de_auth(engine)
     yield crear_app(_config())
     AuthBase.metadata.drop_all(engine)
 
@@ -342,7 +342,7 @@ def test_sin_la_variable_la_credencial_del_panel_no_sirve(engine, sesion, monkey
     monkeypatch.delenv("LIBRA_PANEL_TOKEN", raising=False)
     monkeypatch.delenv("LIBRA_SERVICE_TOKEN", raising=False)
     AuthBase.metadata.drop_all(engine)
-    AuthBase.metadata.create_all(engine)
+    crear_schema_de_auth(engine)
     try:
         cliente = TestClient(crear_app(_config()), base_url="https://testserver")
         r = cliente.get("/api/usuarios", headers={CABECERA_PANEL: TOKEN_PANEL})

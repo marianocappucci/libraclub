@@ -21,6 +21,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from libraauth.models import Base as AuthBase
+from libraauth.testing import crear_schema_de_auth
 
 from app.config import Config
 from app.main import crear_app
@@ -76,7 +77,7 @@ def credenciales_de_admin(engine, sesion, monkeypatch):
                 "RESGUARDO_DROPBOX_APP_KEY", "RESGUARDO_DROPBOX_APP_SECRET"):
         monkeypatch.delenv(var, raising=False)
     AuthBase.metadata.drop_all(engine)
-    AuthBase.metadata.create_all(engine)
+    crear_schema_de_auth(engine)
     yield
     AuthBase.metadata.drop_all(engine)
 
