@@ -44,7 +44,7 @@ dependencies = [
     # producto corre igual que la `0008` de arriba — ver el `command:` del
     # compose y `scripts/panel_admin.py`. `create_turno()` ahora rechaza abrir
     # un turno si la sucursal de la caja ya cerró el día.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.104.0",
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.105.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
