@@ -18,6 +18,7 @@ from datetime import date, datetime, time, timedelta
 import pytest
 from fastapi.testclient import TestClient
 from libraauth.models import Base as AuthBase
+from libraauth.testing import crear_schema_de_auth
 
 from app.config import Config
 from app.main import crear_app
@@ -47,7 +48,7 @@ def api(engine, sesion, monkeypatch):
     monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
     monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
     AuthBase.metadata.drop_all(engine)
-    AuthBase.metadata.create_all(engine)
+    crear_schema_de_auth(engine)
     yield TestClient(crear_app(_config()), base_url="https://testserver")
     AuthBase.metadata.drop_all(engine)
 
@@ -360,7 +361,7 @@ def test_el_simulador_NO_se_monta_en_produccion(engine, sesion, monkeypatch, can
     monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
     monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
     AuthBase.metadata.drop_all(engine)
-    AuthBase.metadata.create_all(engine)
+    crear_schema_de_auth(engine)
     try:
         for entorno, monta in (("dev", True), ("demo", True), ("prod", False)):
             cliente = TestClient(crear_app(_config(entorno)), base_url="https://testserver")

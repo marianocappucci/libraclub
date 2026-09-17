@@ -19,6 +19,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from libraauth.models import Base as AuthBase
+from libraauth.testing import crear_schema_de_auth
 
 from app.config import Config
 from app.main import crear_app
@@ -66,7 +67,7 @@ def anonimo(engine, sesion, monkeypatch, base_de_libracore):
     monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
     monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
     AuthBase.metadata.drop_all(engine)
-    AuthBase.metadata.create_all(engine)
+    crear_schema_de_auth(engine)
     cliente = TestClient(
         crear_app(_config(base_de_libracore)), base_url="https://testserver")
     yield cliente
@@ -78,7 +79,7 @@ def api(engine, sesion, monkeypatch, base_de_libracore):
     monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
     monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
     AuthBase.metadata.drop_all(engine)
-    AuthBase.metadata.create_all(engine)
+    crear_schema_de_auth(engine)
     cliente = TestClient(
         crear_app(_config(base_de_libracore)), base_url="https://testserver")
     assert cliente.post(

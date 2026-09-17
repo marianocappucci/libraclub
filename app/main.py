@@ -21,7 +21,7 @@ from libraauth.auditoria import (
 from libraauth.auth_events import AuthEventRepository
 from libraauth.bootstrap import ensure_default_admin, ensure_demo_user
 from libraauth.demo_codigos import DemoCodigoRepository
-from libraauth.models import Base as AuthBase
+from libraauth.migrar import exigir_schema_al_dia
 from libraauth.password_reset import PasswordResetService
 from libraauth.session_auth import (
     build_demo_codigos_router,
@@ -151,7 +151,13 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # nada cuando no está configurada — la app levanta igual.
     facturacion.configurar(config.libracore_database_url)
 
-    AuthBase.metadata.create_all(motor)
+    # 🔴 Las tablas de auth las crea la cadena de LibraAuth (`libraauth-migrar
+    # upgrade --prefijo libraclub --base dominio`, declarada en `scripts/panel_admin.py`),
+    # no el arranque. Desde libraauth v0.45 (2026-09-17) el arranque la EXIGE: si no
+    # corrió, la app no levanta y el error dice el comando. Hasta ese día acá había
+    # un `AuthBase.metadata.create_all(motor)` que tapaba cualquier camino que se
+    # olvidara de migrar.
+    exigir_schema_al_dia(motor, prefijo="libraclub", base="dominio")
     # El log de actividad cuelga de su propio `Base`, no del de `models.py`: la
     # tabla tiene que quedar en la base del DOMINIO, que es donde ocurren las
     # escrituras que audita y donde vive la transacción. En LibraClub las dos

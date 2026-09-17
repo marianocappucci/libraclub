@@ -18,6 +18,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from libraauth.models import Base as AuthBase
+from libraauth.testing import crear_schema_de_auth
 
 from app.config import Config
 from app.main import crear_app
@@ -64,7 +65,7 @@ def api(engine, sesion, monkeypatch, base_de_libracore):
     monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
     monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
     AuthBase.metadata.drop_all(engine)
-    AuthBase.metadata.create_all(engine)
+    crear_schema_de_auth(engine)
     cliente = TestClient(
         crear_app(_config(base_de_libracore)), base_url="https://testserver"
     )
@@ -172,7 +173,7 @@ def test_una_instancia_sin_base_de_libracore_lo_DICE(engine, sesion, monkeypatch
     monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
     monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
     AuthBase.metadata.drop_all(engine)
-    AuthBase.metadata.create_all(engine)
+    crear_schema_de_auth(engine)
     cliente = TestClient(crear_app(_config(None)), base_url="https://testserver")
     assert cliente.post(
         "/auth/login", json={"username": USUARIO, "password": CLAVE}
@@ -489,7 +490,7 @@ def test_sin_base_de_libracore_el_listado_lo_DICE(engine, sesion, monkeypatch):
     monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
     monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
     AuthBase.metadata.drop_all(engine)
-    AuthBase.metadata.create_all(engine)
+    crear_schema_de_auth(engine)
     cliente = TestClient(crear_app(_config(None)), base_url="https://testserver")
     assert cliente.post(
         "/auth/login", json={"username": USUARIO, "password": CLAVE}
