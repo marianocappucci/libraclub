@@ -11,7 +11,7 @@ RAIZ = Path(__file__).resolve().parent.parent
 
 
 def test_el_dockerfile_copia_scripts():
-    lineas = [l.strip() for l in (RAIZ / "Dockerfile").read_text(encoding="utf-8").splitlines()]
+    lineas = [linea.strip() for linea in (RAIZ / "Dockerfile").read_text(encoding="utf-8").splitlines()]
     assert "COPY scripts ./scripts" in lineas
 
 
@@ -19,7 +19,7 @@ def test_el_dockerignore_no_excluye_scripts():
     ignore = RAIZ / ".dockerignore"
     if not ignore.exists():
         return
-    patrones = [l.strip().rstrip("/") for l in ignore.read_text(encoding="utf-8").splitlines()]
+    patrones = [linea.strip().rstrip("/") for linea in ignore.read_text(encoding="utf-8").splitlines()]
     assert not {"scripts", "scripts/panel_admin.py", "scripts/*"} & set(patrones)
 
 
