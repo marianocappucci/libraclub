@@ -17,6 +17,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 from libraauth.models import Base as AuthBase
+from libraauth.testing import crear_schema_de_auth
 from sqlalchemy import text
 
 from app.config import Config
@@ -39,7 +40,7 @@ def api(engine, sesion, monkeypatch):
     monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
     monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
     AuthBase.metadata.drop_all(engine)
-    AuthBase.metadata.create_all(engine)
+    crear_schema_de_auth(engine)
     cliente = TestClient(crear_app(_config()), base_url="https://testserver")
     assert cliente.post(
         "/auth/login", json={"username": USUARIO, "password": CLAVE}

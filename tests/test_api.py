@@ -14,6 +14,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 from libraauth.models import Base as AuthBase
+from libraauth.testing import crear_schema_de_auth
 
 from app.config import Config
 from app.main import crear_app
@@ -45,7 +46,7 @@ def api(engine, sesion, monkeypatch):
     monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
     monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
     AuthBase.metadata.drop_all(engine)
-    AuthBase.metadata.create_all(engine)
+    crear_schema_de_auth(engine)
     cliente = TestClient(crear_app(_config()), base_url="https://testserver")
     respuesta = cliente.post(
         "/auth/login", json={"username": USUARIO, "password": CLAVE}
@@ -66,7 +67,7 @@ def api_staff(engine, sesion, monkeypatch):
     monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
     monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
     AuthBase.metadata.drop_all(engine)
-    AuthBase.metadata.create_all(engine)
+    crear_schema_de_auth(engine)
     app = crear_app(_config())
     app.state.users.create(
         username="encargado", name="Encargado", password=CLAVE, role="staff"
@@ -137,7 +138,7 @@ def test_sin_sesion_no_se_entra(engine, sesion, monkeypatch):
     cualquiera que supiera la URL.
     """
     AuthBase.metadata.drop_all(engine)
-    AuthBase.metadata.create_all(engine)
+    crear_schema_de_auth(engine)
     anonimo = TestClient(
         crear_app(_config(), sembrar_admin=False), base_url="https://testserver"
     )
