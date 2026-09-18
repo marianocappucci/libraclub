@@ -641,8 +641,8 @@ wheels = [
 
 [[package]]
 name = "libraauth"
-version = "0.45.1"
-source = { git = "https://github.com/marianocappucci/libraauth.git?rev=v0.45.1#c03fc7815a0ffcc03fd5e3b42c90d877b3e0c7f8" }
+version = "0.46.0"
+source = { git = "https://github.com/marianocappucci/libraauth.git?rev=v0.46.0#f67ce6e5dffb8bdeb08c7b854e8ce684a0f5969a" }
 dependencies = [
     { name = "altcha" },
     { name = "argon2-cffi" },
@@ -690,9 +690,9 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.14" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
-    { name = "libraauth", extras = ["migrations"], git = "https://github.com/marianocappucci/libraauth.git?rev=v0.45.1" },
+    { name = "libraauth", extras = ["migrations"], git = "https://github.com/marianocappucci/libraauth.git?rev=v0.46.0" },
     { name = "libracommerce", git = "https://github.com/marianocappucci/libracommerce.git?rev=v0.16.4" },
-    { name = "libracore", git = "https://github.com/marianocappucci/libracore.git?rev=v1.106.1" },
+    { name = "libracore", git = "https://github.com/marianocappucci/libracore.git?rev=v1.109.0" },
     { name = "libragenda", git = "https://github.com/marianocappucci/libragenda.git?rev=v0.11.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.9" },
@@ -712,8 +712,8 @@ source = { git = "https://github.com/marianocappucci/libracommerce.git?rev=v0.16
 
 [[package]]
 name = "libracore"
-version = "1.106.1"
-source = { git = "https://github.com/marianocappucci/libracore.git?rev=v1.106.1#e63413c08a01e3ad54f83be364d0fc7a7216a61c" }
+version = "1.109.0"
+source = { git = "https://github.com/marianocappucci/libracore.git?rev=v1.109.0#a8e7e8fc75862ee8f9880e0121db0695b252b66c" }
 dependencies = [
     { name = "cryptography" },
     { name = "fastapi" },

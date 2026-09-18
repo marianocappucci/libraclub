@@ -22,7 +22,7 @@ dependencies = [
     # el router de usuarios único de la familia -- ver `app/routers/usuarios.py`.
     # Trae también la sesión por inactividad de 8h con renovación deslizante
     # (ADR-017).
-    "libraauth[migrations] @ git+https://github.com/marianocappucci/libraauth.git@v0.45.1",
+    "libraauth[migrations] @ git+https://github.com/marianocappucci/libraauth.git@v0.46.0",
     # Entra en F1 sólo por `respaldo`: una instancia sin backup no se puede
     # poner en produccion. Su alcance crece en F2 (`mp_api`, `pdf_generator`)
     # y F3 (ARCA) — ver ARCHITECTURE.md.
@@ -44,7 +44,7 @@ dependencies = [
     # producto corre igual que la `0008` de arriba — ver el `command:` del
     # compose y `scripts/panel_admin.py`. `create_turno()` ahora rechaza abrir
     # un turno si la sucursal de la caja ya cerró el día.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.106.1",
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.109.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
