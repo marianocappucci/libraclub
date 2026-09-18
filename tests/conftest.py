@@ -82,6 +82,27 @@ def _secreto_de_sesion(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _sin_almacen_de_secretos_colgado():
+    """El almacen de secretos de `config_manager` no se filtra entre tests.
+
+    `crear_app()` llama a `config_manager.usar_almacen_de_secretos(...)`
+    (libracore v1.108.0), que es un global del proceso. `test_api.py` arma la
+    app y en su teardown hace `drop_all` del schema de auth —que incluye
+    `secretos_instancia`—, asi que el almacen queda apuntando a una tabla que ya
+    no existe. Los tests de servicios que llaman a `config_manager.load()` sin
+    armar la app (avisos lee de ahi el nombre del complejo) morian despues con
+    `UndefinedTable`: 16 de `test_avisos.py`, que solo pasan corriendo solos.
+
+    Antes y despues de cada test. Sin almacen, `config_manager` lee el JSON.
+    """
+    from libracore import config_manager
+
+    config_manager.usar_almacen_de_secretos(None)
+    yield
+    config_manager.usar_almacen_de_secretos(None)
+
+
+@pytest.fixture(autouse=True)
 def _sin_pools_colgados():
     """Cierra el pool que dejó `crear_app()`, si el test armó una app.
 

@@ -23,6 +23,7 @@ from libraauth.bootstrap import ensure_default_admin, ensure_demo_user
 from libraauth.demo_codigos import DemoCodigoRepository
 from libraauth.migrar import exigir_schema_al_dia
 from libraauth.password_reset import PasswordResetService
+from libraauth.secretos import SecretosRepository
 from libraauth.session_auth import (
     build_demo_codigos_router,
     build_smtp_settings_router,
@@ -30,6 +31,7 @@ from libraauth.session_auth import (
 )
 from libraauth.smtp_settings import SmtpSettingsRepository
 from libraauth.terminos import TerminosRepository, build_terminos_router
+from libracore import config_manager as _lc_config_manager
 from libracore.arca_router import build_arca_router
 from libracore.caja_router import build_cierre_diario_router
 from libracore.config_router import (
@@ -135,6 +137,37 @@ def _instancia_a_respaldar(config: Config) -> Instancia:
     )
 
 
+def migrar_secretos() -> dict:
+    """Saca de `config.json` los secretos que quedaron en claro. Idempotente.
+
+    Corre en cada `crear_app()`, así la migración de una instancia viva **es su
+    deploy**. Loguea NOMBRES de claves, nunca valores: un log con el secreto lo
+    muda del archivo a una superficie peor, porque los logs se copian y se
+    mandan.
+
+    Si cifrar falla, el `config.json` **no se toca** —la instancia sigue
+    cobrando con la credencial que tiene— y se loguea como error, que es lo
+    que después ve la sonda `auditar_secretos.py`.
+    """
+    informe = _lc_config_manager.migrar_secretos_al_almacen()
+    if informe["migradas"]:
+        _log.warning(
+            "secretos movidos de config.json al almacen cifrado: %s",
+            ", ".join(informe["migradas"]),
+        )
+    if informe["ya_estaban"]:
+        _log.warning(
+            "config.json tenia una copia vieja de %s; se vacio (el almacen manda)",
+            ", ".join(informe["ya_estaban"]),
+        )
+    if informe["fallaron"]:
+        _log.error(
+            "no se pudieron cifrar y QUEDAN EN CLARO en config.json: %s",
+            ", ".join(f"{k} ({v})" for k, v in informe["fallaron"].items()),
+        )
+    return informe
+
+
 def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> FastAPI:
     # Se resuelve acá y no adentro de `db.inicializar` porque el router de backup
     # necesita la MISMA config: la URL para el dump y el directorio de datos para
@@ -165,6 +198,30 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     AuditoriaBase.metadata.create_all(motor)
 
     usuarios = UserRepository(db.fabrica_de_sesiones())
+
+    # 🔴 Los secretos de terceros de `config.json` —el access token y la firma
+    # de webhook de MercadoPago, y la contraseña SMTP— dejan de vivir en texto
+    # plano (libracore v1.108.0 + libraauth v0.46.0, 2026-09-17). Se enchufa
+    # ACÁ, justo después de `usuarios`, porque `db.fabrica_de_sesiones()` es el
+    # MISMO session factory que ese `UserRepository`: apunta a la base
+    # DOMINIO, la que `exigir_schema_al_dia()` (arriba) ya garantizó que está
+    # en la revisión `0002` de la cadena de libraauth — la que crea
+    # `secretos_instancia`. Va DESPUÉS de esa línea a propósito: escribir en la
+    # tabla antes de saber que existe convertiría un schema viejo en un 500 en
+    # vez del error que dice el comando.
+    #
+    # LibraCore no importa libraauth: recibe el almacén. Por eso el enganche es
+    # del producto, que es el único que tiene los dos paquetes.
+    #
+    # Se re-arma en cada `crear_app()` y no una vez a nivel de módulo —como en
+    # los productos donde `_Sesion` nace al importar— porque acá el
+    # `sessionmaker` nace ADENTRO de esta función (`db.inicializar()` corrió
+    # unas líneas más arriba): un enganche a nivel de módulo apuntaría a un
+    # `_Sesion` que todavía no existe.
+    _secretos = SecretosRepository(db.fabrica_de_sesiones())
+    _lc_config_manager.usar_almacen_de_secretos(_secretos)
+    migrar_secretos()
+
     if sembrar_admin:
         # Variante **fail-closed**: sin `LIBRACLUB_ADMIN_PASSWORD` la app no
         # levanta, salvo `ENV=development`. La otra (`ensure_admin_user`) inventa
@@ -211,6 +268,10 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # devuelve 500 al primer request y no al arrancar.
     app.state.users = usuarios
     app.state.session_auth = construir_session_auth(usuarios)
+    # Para que un test pueda verificar el enganche sin pasar por
+    # `config_manager` (que devuelve el secreto en claro por diseño y daría
+    # verde igual con la implementación vieja) — ver `tests/test_secretos_config_json.py`.
+    app.state.secretos = _secretos
 
     # 🔴 **Sin esta línea se apagaban DOS cosas, no una.** `auth_events` es
     # opt-in por ausencia: sin `app.state.auth_events`, `registrar_seguro` no
