@@ -169,7 +169,7 @@ export function DialogoDeReserva({
               {' · '}
               {minutos} min
             </div>
-            <div className={total ? 'text-foreground' : 'text-amber-700'}>
+            <div className={total ? 'text-foreground' : 'text-amber-700 dark:text-amber-400'}>
               {total ? (
                 <>
                   {pesos(total)}

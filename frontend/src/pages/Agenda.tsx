@@ -289,7 +289,7 @@ function Casillero({ turno, onElegir }: { turno: Turno; onElegir: () => void }) 
         <div className="font-medium">{hora(turno.comienza_at)}</div>
         {/* Un turno sin precio se muestra igual, diciendo que falta la tarifa.
             Esconderlo dejaría invisible la franja sin precio cargado. */}
-        <div className={turno.precio ? 'text-muted-foreground' : 'text-amber-700'}>
+        <div className={turno.precio ? 'text-muted-foreground' : 'text-amber-700 dark:text-amber-400'}>
           {turno.precio ? pesos(turno.precio) : 'sin tarifa'}
         </div>
       </button>

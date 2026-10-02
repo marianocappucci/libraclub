@@ -72,7 +72,7 @@ export function Clientes() {
               <span className="ml-2 text-xs text-muted-foreground">(de baja)</span>
             )}
             {porCliente.has(row.original.id) && (
-              <span className="ml-2 text-xs font-normal text-amber-700">
+              <span className="ml-2 text-xs font-normal text-amber-700 dark:text-amber-400">
                 {`${porCliente.get(row.original.id)!.ausentes} ausencias · última ${fecha(
                   porCliente.get(row.original.id)!.ultimo_ausente_at,
                 )}`}
