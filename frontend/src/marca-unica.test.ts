@@ -45,7 +45,9 @@ describe('el verde de la marca', () => {
     // pasó a los tokens de estado de la grilla: se declararon y se sacaron el
     // mismo día porque la agenda pintaba con clases fijas. Un bloque que dice
     // «esta es la paleta» mientras nadie la usa es peor que no tenerlo.
-    expect(CSS).toMatch(/\[data-active='true'\][\s\S]{0,120}border-color:\s*var\(--marca\)/)
+    // El ítem activo del menú lo pinta la regla del kit (`libra-ui/tema.css`) con `--libra-menu-activo-borde`; el producto fija su valor por
+    // defecto en `--marca`, y es ESO lo que tiene que seguir ahí (si se hardcodeara, la marca dejaría de mandar en el menú).
+    expect(CSS).toMatch(/--libra-menu-activo-borde:\s*var\(--marca\)/)
 
     // 🔴 **Las DOS declaraciones del encabezado, no «alguna».** La primera
     // versión pedía un `var(--marca)` en los 200 caracteres siguientes a la

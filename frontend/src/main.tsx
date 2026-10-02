@@ -3,6 +3,11 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { App } from './App'
 import './index.css'
+import { cargarTema } from 'libra-ui/tema'
+
+// El tema de la suite (libra-ui ADR-007/008): aplica lo último guardado de inmediato y pide los colores a esta misma instancia. No espera
+// ni puede fallar: sin red o con un error, la app arranca con los colores de siempre.
+void cargarTema()
 
 const raiz = document.getElementById('root')
 if (!raiz) throw new Error('falta #root en index.html')
