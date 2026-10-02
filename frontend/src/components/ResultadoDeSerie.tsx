@@ -45,7 +45,7 @@ export function ResultadoDeSerie({
   return (
     <div className="space-y-2 text-sm">
       <div className="flex items-center gap-2">
-        <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-500" />
+        <CheckCircle2 className="size-4 text-exito" />
         <span>
           <strong>{creadas}</strong> {creadas === 1 ? 'turno generado' : 'turnos generados'}
         </span>

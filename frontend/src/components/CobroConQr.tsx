@@ -165,7 +165,7 @@ export function SeccionDeCobroConQr({ reservaId, estado, abierto, onCobrado }: {
   if (qr === 'cobrado') {
     return (
       <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm dark:bg-emerald-950/30">
-        <div className="font-medium text-emerald-800 dark:text-emerald-400">
+        <div className="font-medium text-exito">
           Cobrado por QR de MercadoPago
         </div>
         {disponible.auto_facturar && (
