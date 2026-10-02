@@ -1,0 +1,28 @@
+# Lo que NO tiene que entrar a ninguna imagen. Existe porque las imágenes de dev se
+# construyen desde el checkout del servidor, y ese checkout guarda datos de clientes
+# reales (`clientes/<slug>/data`: la clave de ARCA, la config, los PDF), los respaldos
+# `*_backup_*.tar.gz` y el `.env` del compose. Medido el 2026-10-02: sin esto iban
+# adentro de la imagen. Las de producción se construyen desde un clon limpio y no
+# tenían el problema.
+clientes/
+dev-data/
+data/
+data-*/
+.env
+.env.*
+!.env.example
+*.bak*
+*_backup*
+*.tar.gz
+*.dump
+facturas_pdf/
+presupuestos_pdf/
+remitos_pdf/
+config.json
+logos/
+.venv
+.venv-scripts
+__pycache__
+*.pyc
+frontend/node_modules
+frontend/dist
