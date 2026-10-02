@@ -349,7 +349,7 @@ function SeccionDeCobro({ reservaId, estado, abierto, onCobrado }: {
           es mejor que que se parta el nombre de la sección. */}
       <div className="flex flex-wrap items-center justify-between gap-x-2 text-sm">
         <span className="font-medium">Cobro del turno</span>
-        <span className={datos.pendiente > 0 ? 'text-muted-foreground' : 'text-emerald-700'}>
+        <span className={datos.pendiente > 0 ? 'text-muted-foreground' : 'text-exito'}>
           {datos.pendiente > 0
             ? `Pendiente ${pesos(String(datos.pendiente))} de ${pesos(String(datos.total))}`
             : `Cobrado ${pesos(String(datos.cobrado))}`}
