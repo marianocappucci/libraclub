@@ -164,7 +164,7 @@ export function SeccionDeCobroConQr({ reservaId, estado, abierto, onCobrado }: {
 
   if (qr === 'cobrado') {
     return (
-      <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm dark:bg-emerald-950/30">
+      <div className="rounded-md border border-emerald-300 bg-emerald-50 dark:border-emerald-900 px-3 py-2 text-sm dark:bg-emerald-950/30">
         <div className="font-medium text-exito">
           Cobrado por QR de MercadoPago
         </div>
@@ -322,7 +322,7 @@ export function SeccionDeCobroConQr({ reservaId, estado, abierto, onCobrado }: {
         <button
           type="button"
           onClick={() => { frenarPoll(); void bajar(); setQr('idle') }}
-          className="text-sm text-red-800 underline underline-offset-2"
+          className="text-sm text-red-800 dark:text-red-400 underline underline-offset-2"
         >
           Cancelar el cobro por QR
         </button>
