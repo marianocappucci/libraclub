@@ -56,7 +56,7 @@ export function DiferenciaDeArqueo({ esperado, declarado }: {
   const diferencia = Math.round((declarado - esperado) * 100) / 100
   if (diferencia > 0.01) {
     return (
-      <span className="inline-flex items-center gap-1 font-medium text-emerald-700 dark:text-emerald-400">
+      <span className="inline-flex items-center gap-1 font-medium text-exito">
         <ArrowUpCircle className="size-4" aria-hidden />
         sobró {pesos(diferencia)}
       </span>

@@ -20,7 +20,7 @@ import { DialogoDePublicar } from '@/portal/DialogoDePublicar'
 function comoSeCuenta(r: ReservaDelJugador): { texto: string; tono: string } {
   if (r.estado === 'cancelada') return { texto: 'Cancelada', tono: 'text-muted-foreground' }
   if (r.estado === 'confirmada' || r.estado === 'jugada') {
-    return { texto: 'Confirmada', tono: 'text-emerald-600 dark:text-emerald-500' }
+    return { texto: 'Confirmada', tono: 'text-exito' }
   }
   if (r.pago === 'vencido' || r.estado === 'ausente') {
     return { texto: 'Se venció sin pagar', tono: 'text-muted-foreground' }

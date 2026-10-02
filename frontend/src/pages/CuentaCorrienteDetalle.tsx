@@ -136,7 +136,7 @@ export function CuentaCorrienteDetalle() {
             className={`whitespace-nowrap text-right font-semibold ${
               row.original.tipo === 'debito'
                 ? 'text-destructive'
-                : 'text-emerald-700 dark:text-emerald-400'
+                : 'text-exito'
             }`}
           >
             {row.original.tipo === 'debito' ? '+' : '−'} {pesos(row.original.monto)}
@@ -192,7 +192,7 @@ export function CuentaCorrienteDetalle() {
         <Card>
           <CardHeader>
             <CardDescription>Total abonado</CardDescription>
-            <CardTitle className="text-xl text-emerald-700 dark:text-emerald-400">
+            <CardTitle className="text-xl text-exito">
               {pesos(totales.abonado)}
             </CardTitle>
           </CardHeader>
@@ -210,7 +210,7 @@ export function CuentaCorrienteDetalle() {
               className={
                 cuenta.saldo > 0
                   ? 'text-xl text-amber-800 dark:text-amber-400'
-                  : 'text-xl text-emerald-700 dark:text-emerald-400'
+                  : 'text-xl text-exito'
               }
             >
               {pesos(Math.abs(cuenta.saldo))}

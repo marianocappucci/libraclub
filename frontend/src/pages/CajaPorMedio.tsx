@@ -141,7 +141,7 @@ export function CajaPorMedio() {
       ) : (
         <>
           <div className="grid gap-3 sm:grid-cols-3">
-            <Tarjeta titulo="Ingresos" valor={pesos(datos!.total_ingresos)} tono="text-emerald-700 dark:text-emerald-400" />
+            <Tarjeta titulo="Ingresos" valor={pesos(datos!.total_ingresos)} tono="text-exito" />
             <Tarjeta titulo="Egresos" valor={pesos(datos!.total_egresos)} tono="text-destructive" />
             <Tarjeta
               titulo="Saldo"
@@ -178,7 +178,7 @@ export function CajaPorMedio() {
                         <td className="py-2 pr-3 text-center text-muted-foreground">
                           {vals.ingresos_ops}
                         </td>
-                        <td className="py-2 pr-3 text-right font-medium text-emerald-700 dark:text-emerald-400">
+                        <td className="py-2 pr-3 text-right font-medium text-exito">
                           {pesos(vals.ingresos)}
                         </td>
                         <td className="py-2 pr-3 text-right text-destructive">
@@ -212,7 +212,7 @@ export function CajaPorMedio() {
                     {datos!.cajas.map((c) => (
                       <tr key={c.id} className="border-b last:border-0">
                         <td className="py-2 pr-3">{c.nombre}</td>
-                        <td className="py-2 pr-3 text-right text-emerald-700 dark:text-emerald-400">
+                        <td className="py-2 pr-3 text-right text-exito">
                           {pesos(c.total_ingresos)}
                         </td>
                         <td className="py-2 pr-3 text-right text-destructive">
