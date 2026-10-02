@@ -44,10 +44,11 @@ from libracore.resguardo_enlace import build_resguardo_enlace_router
 from libracore.respaldo import Instancia
 from libracore.security_headers import CSP_SPA, SecurityHeadersMiddleware
 from libracore.smtp_router import build_smtp_probe_router
+from libracore.tema_router import build_tema_admin_router, build_tema_router
 
 from app import db
 from app.addons import require_addon
-from app.auth import UserRepository, construir_session_auth, require_admin, require_staff
+from app.auth import UserRepository, construir_session_auth, require_admin, require_admin_o_servicio, require_staff
 from app.config import Config
 from app.models.maestros import Sucursal
 from app.routers import admin, disponibilidad, maestros, reservas, salud, torneos
@@ -557,6 +558,14 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
 
     app.include_router(build_empresa_router(), dependencies=[Depends(require_admin)])
     app.include_router(build_empresa_admin_router(), dependencies=[Depends(require_admin)])
+
+    # El tema de la suite (libracore ADR-012, libra-ui ADR-007/008): los colores que el backoffice de la
+    # suite empuja a esta instancia. La lectura es PÚBLICA a propósito (el login también va con los
+    # colores de la suite y no expone nada sensible). La escritura es del admin O del token de servicio
+    # del backoffice: 🔴 con `require_admin` a secas el backoffice NO entraría (esa guarda no conoce el
+    # token).
+    app.include_router(build_tema_router())
+    app.include_router(build_tema_admin_router(), dependencies=[Depends(require_admin_o_servicio)])
 
     # `GET`/`PUT`/`DELETE /admin/smtp`. El router ya exige rol admin por dentro,
     # así que no lleva `dependencies`: quien pueda escribir ahí puede redirigir a
