@@ -25,6 +25,10 @@
    familia sale sin estilos. Mismo patrón que el resto de los productos. */
 @source "../node_modules/libra-ui";
 
+/* El tema de la suite (libra-ui, ADR-007): las variables de color que el backoffice puede cambiar y la regla del ítem activo del menú
+   lateral. Va después de Tailwind y antes de las variables del producto. */
+@import "libra-ui/tema.css";
+
 /* 🔴 **Los tests NO se escanean.** Tailwind lee el fuente como texto plano, así
    que las clases que un test usa como DATO terminan emitidas en el CSS de
    producción. Pasó el 2026-08-20 con `sin-colores-fijos.test.ts`, que lleva
@@ -451,10 +455,14 @@
   border: 1px solid transparent;
 }
 
-[data-sidebar='menu-button'][data-active='true'] {
-  background-color: var(--muted);
-  border-color: var(--marca);
-  color: var(--foreground);
+/* El ítem ACTIVO lo pinta la regla del kit (`libra-ui/tema.css`) con tres variables, y acá se fija el valor POR DEFECTO de LibraClub: el mismo
+ * tile de siempre (`--muted` con borde `--marca`). Así el tema de la suite (la pantalla «Apariencia» del backoffice, ADR-007 de libra-ui) puede
+ * cambiarlo —antes esta regla propia le ganaba a la del kit y el cambio no se veía—. El kit dibuja el borde con un `box-shadow` inset en vez de
+ * `border-color`: el mismo píxel, sin mover el ítem. Va después del `@import` del kit para ganarle a su `:root` por orden. */
+:root {
+  --libra-menu-activo-fondo: var(--muted);
+  --libra-menu-activo-borde: var(--marca);
+  --libra-menu-activo-texto: var(--foreground);
 }
 
 /* 2. El encabezado de cada cancha en la grilla de la agenda.
