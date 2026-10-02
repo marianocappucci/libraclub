@@ -22,7 +22,7 @@ export function AvisoDeAusentismo({
   return (
     <p
       role="status"
-      className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+      className="rounded-md border border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40 px-3 py-2 text-sm text-amber-900 dark:text-amber-200"
     >
       {/* Un solo nodo de texto: partida en varios, la frase no se puede leer
           entera ni con un lector de pantalla ni con un test. */}

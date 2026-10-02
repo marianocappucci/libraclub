@@ -37,4 +37,4 @@ export const MARCA = '#017b4b'
  * 🔴 El tamaño NO va acá: lo pone cada superficie (72/22 px en el login,
  * 36/15 px en la sidebar), y el interlineado va pegado al tamaño.
  */
-export const WORDMARK = 'font-montserrat font-bold text-[#2d2d2d]'
+export const WORDMARK = 'font-montserrat font-bold text-[#2d2d2d] dark:text-neutral-100'

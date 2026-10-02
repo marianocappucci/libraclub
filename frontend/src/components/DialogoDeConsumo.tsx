@@ -450,7 +450,7 @@ export function PanelDeConsumo({
               setQr('idle')
               setEnElQr(null)
             }}
-            className="text-sm text-red-800 underline underline-offset-2"
+            className="text-sm text-red-800 dark:text-red-400 underline underline-offset-2"
           >
             Cancelar el cobro por QR
           </button>

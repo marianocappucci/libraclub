@@ -259,7 +259,7 @@ export function DetalleDeReserva({
                         onClick={() => accionar(a.estado, Boolean(a.peligro))}
                         className={`rounded-md px-3 py-2 text-sm disabled:opacity-50 ${
                           a.peligro
-                            ? 'border border-red-300 text-red-800 hover:bg-red-50'
+                            ? 'border border-red-300 text-red-800 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/40'
                             : 'bg-primary text-primary-foreground'
                         }`}
                       >
