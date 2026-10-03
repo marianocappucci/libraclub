@@ -7,14 +7,17 @@ no tiene. Una suite verde sobre SQLite estaría midiendo otro producto.
 
 from __future__ import annotations
 
+import atexit
 import os
 from datetime import date, time
 from decimal import Decimal
 
 import libraauth.session_auth as _session_auth
+import psycopg
 import pytest
 from alembic import command
 from alembic.config import Config as AlembicConfig
+from libracore.testing.pg_por_worker import BasePorWorker, base_por_worker
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -23,6 +26,40 @@ from app.models.maestros import Cancha, Cliente, Sucursal
 from app.models.tarifas import Tarifa
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# ── Una base por worker de xdist ──────────────────────────────────────────────
+#
+# La suite corre en varios procesos (`pytest -n 4`, reglas/ci.md del wiki) y todos
+# hablaban con la MISMA base: el `DROP SCHEMA` del fixture `engine`, el `TRUNCATE`
+# de `sesion` y el `drop_all` de auth de cada `api` se pisaban entre workers. El
+# mecanismo (una base `<base>_<worker>`, que se borra al salir) es el de
+# `libracore.testing.pg_por_worker`; acá se pisa `DATABASE_URL` con la del worker
+# y de ahí en adelante TODO lo que la lee —`_url()`, `Config.desde_entorno()`, los
+# `os.environ["DATABASE_URL"]` de cada test— habla con SU base.
+#
+# 🔴 Y la base de LibraCore sale de esa misma variable: los tests la derivan como
+# `<base del dominio>_core` (`_url_core()`), así que **también queda una por
+# worker** sin tocarles una línea. Mira `base_de_libracore` más abajo.
+#
+# `base_por_worker` es idempotente a propósito: el proceso que lanza a los
+# workers importa este conftest también, y un test que hace
+# `from tests.test_x import ...` carga el módulo bajo dos nombres.
+_PG = base_por_worker("libraclub", os.environ.get("DATABASE_URL", ""))
+if _PG:
+    os.environ["DATABASE_URL"] = _PG.url
+
+#: La base de LibraCore de ESTE worker y su plantilla `armada`. Se la maneja con
+#: `BasePorWorker` a mano y no con `base_por_worker("...")`: ese deriva el nombre
+#: como `<original>_<worker>` (`libraclub_test_core_gw0`) y los tests —que
+#: componen `<base del dominio>_core` por su cuenta— esperan
+#: `libraclub_test_gw0_core`. Ver `base_de_libracore`.
+_CORE = BasePorWorker(_PG.url_original, f"{_PG.nombre}_core") if _PG else None
+if _CORE:
+    _marca = f"_LIBRACLUB_CORE_LISTA_{os.environ.get('PYTEST_XDIST_WORKER', 'main')}"
+    if _marca not in os.environ:
+        _CORE.soltar_todo()  # restos de una corrida interrumpida, plantilla incluida
+        atexit.register(_CORE.soltar_todo)
+        os.environ[_marca] = "1"
 
 #: Todas las tablas del dominio, en orden de borrado. `TRUNCATE ... CASCADE`
 #: entre tests en vez de recrear el schema: recrear cuesta segundos por test y
@@ -103,8 +140,8 @@ def _sin_almacen_de_secretos_colgado():
 
 
 @pytest.fixture(autouse=True)
-def _sin_pools_colgados():
-    """Cierra el pool que dejó `crear_app()`, si el test armó una app.
+def _sin_pools_colgados(monkeypatch):
+    """Cierra el pool de TODOS los engines que armó el test, no sólo del último.
 
     🔴 Cada `crear_app()` construye un engine nuevo y lo deja en el módulo `db`;
     el anterior queda con su pool abierto hasta que el recolector lo junte. Con
@@ -113,10 +150,29 @@ def _sin_pools_colgados():
     cualquiera** — el que tuvo la mala suerte de ser el que cruzó el límite, que
     no tiene nada que ver con el problema. Y como depende del recolector, el
     número exacto cambia entre corridas: un rojo que no se reproduce.
+
+    🔴 Con xdist el límite (100, el de la imagen) es de TODOS los workers juntos.
+    Antes alcanzaba con cerrar el engine que quedó en `db._engine`, y los demás se
+    iban acumulando: `test_falta_uno.py` arma **tres apps por test** (`_jugador()`
+    cada una) y dejaba ~3 conexiones colgadas por test, 55 al terminar el archivo
+    en una sola corrida; con 4 workers la suma pasa de 100 y mueren ~120 tests con
+    `too many clients already`. Por eso se anota cada engine que crea `db` y se
+    cierran todos al terminar el test.
     """
-    yield
     from app import db as _db
 
+    creados = []
+    crear = _db.create_engine
+
+    def _registrando(*args, **kwargs):
+        motor = crear(*args, **kwargs)
+        creados.append(motor)
+        return motor
+
+    monkeypatch.setattr(_db, "create_engine", _registrando)
+    yield
+    for motor in creados:
+        motor.dispose()
     if _db._engine is not None:
         _db._engine.dispose()
 
@@ -180,6 +236,59 @@ def sesion(engine) -> Session:
     fabrica = sessionmaker(bind=engine, expire_on_commit=False, future=True)
     with fabrica() as sesion:
         yield sesion
+
+
+def _construir_core_armada(url: str) -> None:
+    """Deja la base de LibraCore como la deja `crear_app()` sobre una base vacía.
+
+    Es lo que `facturacion.configurar()` hace en cada arranque: el schema de
+    LibraCore, el del buffet (LibraCommerce), las tablas del cierre diario y la
+    caja por defecto. Medido: ~0,6 s por test, el grueso de lo que cuesta armar
+    una app con facturación. Se corre una vez por worker; los tests la reciben
+    copiada con `CREATE DATABASE ... TEMPLATE`, y el `configurar()` de su propia
+    `crear_app()` es idempotente sobre ella (`CREATE TABLE IF NOT EXISTS`, y sólo
+    crea la caja por defecto si no hay).
+
+    🔴 `configurar()` deja apuntados a la plantilla `libracore.db.core` y
+    `_hay_base` —globales del proceso—: se restauran, o el primer test que lea
+    LibraCore sin armar su app hablaría con una base que se borra enseguida.
+    """
+    from libracore.db import core as libracore_core
+
+    from app.servicios import facturacion
+
+    mp = pytest.MonkeyPatch()
+    try:
+        for nombre in ("_db_path", "_database_url", "_timeout", "_extra_pragmas"):
+            mp.setattr(libracore_core, nombre, getattr(libracore_core, nombre))
+        mp.setattr(facturacion, "_hay_base", facturacion._hay_base)
+        facturacion.configurar(url.replace("postgresql+psycopg://", "postgresql://", 1))
+    finally:
+        mp.undo()
+
+
+@pytest.fixture
+def base_de_libracore():
+    """La base de LibraCore de este worker, ya armada, para un test que factura.
+
+    Parte de una copia de la plantilla `armada` (`_construir_core_armada`) en vez
+    de una base vacía que `crear_app()` tenía que llenar. La URL es la que
+    derivan los tests de la del dominio (`<base>_core`), que con xdist es la del
+    worker. Se borra al terminar, como siempre: un test que arma su app contra
+    `<base>_core` sin pedir esta fixture tiene que encontrar la base AUSENTE, no
+    los datos del test anterior.
+    """
+    if _CORE is None:
+        pytest.skip("Falta DATABASE_URL: la suite corre contra PostgreSQL real.")
+    url = os.environ["DATABASE_URL"]
+    base, _, nombre = url.rpartition("/")
+    url_core = f"{base}/{nombre}_core".replace("postgresql+psycopg://", "postgresql://")
+    assert nombre + "_core" == _CORE.nombre, (nombre, _CORE.nombre)
+    _CORE.restaurar("armada", _construir_core_armada)
+    yield url_core
+    servidor, _, nombre_core = url_core.rpartition("/")
+    with psycopg.connect(f"{servidor}/postgres", autocommit=True) as c:
+        c.execute(f'DROP DATABASE IF EXISTS "{nombre_core}" WITH (FORCE)')
 
 
 @pytest.fixture

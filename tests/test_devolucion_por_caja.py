@@ -35,24 +35,6 @@ from tests.test_cancelacion import _en
 USUARIO, CLAVE = "admin", "clave-de-prueba"
 
 
-def _url_core() -> str:
-    url = os.environ["DATABASE_URL"]
-    base, _, nombre = url.rpartition("/")
-    return f"{base}/{nombre}_core".replace("postgresql+psycopg://", "postgresql://")
-
-
-@pytest.fixture
-def base_de_libracore():
-    url = _url_core()
-    servidor, _, nombre = url.rpartition("/")
-    with psycopg.connect(f"{servidor}/postgres", autocommit=True) as c:
-        c.execute(f'DROP DATABASE IF EXISTS "{nombre}" WITH (FORCE)')
-        c.execute(f'CREATE DATABASE "{nombre}"')
-    yield url
-    with psycopg.connect(f"{servidor}/postgres", autocommit=True) as c:
-        c.execute(f'DROP DATABASE IF EXISTS "{nombre}" WITH (FORCE)')
-
-
 @pytest.fixture
 def api(engine, sesion, monkeypatch, base_de_libracore):
     monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
