@@ -45,12 +45,16 @@ dependencies = [
     # compose y `scripts/panel_admin.py`. `create_turno()` ahora rechaza abrir
     # un turno si la sucursal de la caja ya cerró el día.
     #
+    # v1.122.0 -> v1.123.0 (2026-10-03): `get_config().clientes_dir` con precedencia `configure(clientes_dir=)` >
+    # env `LIBRA_CLIENTES_DIR` > `repo_root/clientes` (el default no cambia). `scripts/nuevo_cliente.py` y
+    # `scripts/panel_admin.py` lo leen de ahi (etapa 1 de wiki/analyses/sacar-clientes-del-arbol-del-repo.md).
+    #
     # v1.118.0 -> v1.122.0 (2026-10-03): v1.122.0 es `libracore.testing.pg_por_worker`, el helper de TEST que
     # reemplaza el vaciado de la base entre tests por una base por worker de xdist restaurada desde plantillas
     # (reglas/ci.md del wiki). Subir el pin trae tambien v1.119.0 -> v1.121.0, todo de ARCA y con DOS migraciones
     # del motor (0014: FCE MiPyME y condicion de IVA del receptor; 0015: `facturas.cae_error`), que corren al
     # desplegar: ver el CHANGELOG de libracore.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.122.0",
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.123.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
