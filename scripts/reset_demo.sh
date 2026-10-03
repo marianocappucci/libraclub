@@ -221,7 +221,10 @@ log "schema de $BASE_CORE recreado, vacio"
 # Corren con la app PARADA y en un contenedor efimero, igual que
 # `cmd_actualizar`: si la app arrancara antes, su `create_all()` dejaria las
 # tablas puestas y la cadena de LibraGenda volveria a chocar.
-COMPOSE="$REPO/clientes/demo/docker-compose.yml"
+# El directorio de instancias sale de la misma precedencia que el motor
+# (`get_config().clientes_dir`): `CLIENTES_DIR` (el nombre que usan los scripts de
+# shell), `LIBRA_CLIENTES_DIR` (el que lee `libracore`) o `$REPO/clientes`.
+COMPOSE="${CLIENTES_DIR:-${LIBRA_CLIENTES_DIR:-$REPO/clientes}}/demo/docker-compose.yml"
 [ -f "$COMPOSE" ] || { log "ABORTA: no encontre $COMPOSE."; docker start "$CONTENEDOR" >/dev/null; exit 11; }
 
 CADENAS=$("$REPO/.venv-scripts/bin/python" - <<PY || true
