@@ -20,14 +20,13 @@ import pytest
 from libracore import arca_facturacion
 from libracore.db import facturas as db_facturas
 
-# 🔑 `api` y `base_de_libracore` son fixtures declaradas en ese archivo, no en
-# el conftest: importarlas es como las comparte el resto de la suite
-# (`test_torneos_api.py` hace lo mismo). Sin ellas, estos tests dan ERROR de
+# 🔑 `api` es una fixture declarada en ese archivo, no en el conftest (donde sí
+# está `base_de_libracore`): importarla es como la comparte el resto de la suite
+# (`test_torneos_api.py` hace lo mismo). Sin ella, estos tests dan ERROR de
 # fixture, no una aserción — que es lo que pasó en la primera corrida.
 from tests.test_cobro_del_turno import (  # noqa: F401  (fixtures)
     _reserva,
     api,
-    base_de_libracore,
 )
 
 

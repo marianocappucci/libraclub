@@ -14,7 +14,6 @@ puesto de verdad.
 """
 import os
 
-import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from libraauth.models import Base as AuthBase
@@ -24,24 +23,6 @@ from app.config import Config
 from app.main import crear_app
 
 USUARIO, CLAVE = "admin", "clave-de-prueba"
-
-
-def _url_core() -> str:
-    url = os.environ["DATABASE_URL"]
-    base, _, nombre = url.rpartition("/")
-    return f"{base}/{nombre}_core".replace("postgresql+psycopg://", "postgresql://")
-
-
-@pytest.fixture
-def base_de_libracore():
-    url = _url_core()
-    servidor, _, nombre = url.rpartition("/")
-    with psycopg.connect(f"{servidor}/postgres", autocommit=True) as c:
-        c.execute(f'DROP DATABASE IF EXISTS "{nombre}" WITH (FORCE)')
-        c.execute(f'CREATE DATABASE "{nombre}"')
-    yield url
-    with psycopg.connect(f"{servidor}/postgres", autocommit=True) as c:
-        c.execute(f'DROP DATABASE IF EXISTS "{nombre}" WITH (FORCE)')
 
 
 @pytest.fixture

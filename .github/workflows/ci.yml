@@ -175,7 +175,12 @@ jobs:
         # se saltea entero —por una dependencia que falta en el runner— deja el
         # job igual de verde que uno que corrió todo. Y en esta suite el módulo
         # que más importa es justamente el que necesita PostgreSQL.
-        run: pytest -q -rs --cov=app --cov-report=term-missing
+        #
+        # `-n 4` (F3, 2026-09-05; reglas/ci.md del wiki): 4 workers de xdist, que son
+        # las vCPU del runner. Cada uno tiene SU base de PostgreSQL y su plantilla de
+        # la base de LibraCore (`tests/conftest.py`, `libracore.testing.pg_por_worker`);
+        # sin eso los workers se pisarian el `DROP SCHEMA` y el `TRUNCATE`.
+        run: pytest -n 4 -q -rs --cov=app --cov-report=term-missing
 
       # 🔑 El gate de F1 tiene que haber corrido de verdad, no haberse salteado.
       # Un `pytest` verde con cero tests de concurrencia se ve idéntico a uno con
