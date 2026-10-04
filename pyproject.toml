@@ -54,7 +54,8 @@ dependencies = [
     # (reglas/ci.md del wiki). Subir el pin trae tambien v1.119.0 -> v1.121.0, todo de ARCA y con DOS migraciones
     # del motor (0014: FCE MiPyME y condicion de IVA del receptor; 0015: `facturas.cae_error`), que corren al
     # desplegar: ver el CHANGELOG de libracore.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.123.0",
+    # v1.123.0 -> v1.124.0 (2026-10-04): una factura se acredita una sola vez (`POST /api/facturas/{id}/nota-credito` da 409 si ya tiene una nota) y la guarda del CUIT del receptor (`arca_wsfe.problema_del_receptor`, que `solicitar_cae` corre antes de llamar a ARCA). Sin migracion.
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.124.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
