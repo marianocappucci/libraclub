@@ -78,6 +78,36 @@ def test_los_dos_scripts_configuran_LO_MISMO():
 
 
 @pytest.mark.parametrize("script", ["nuevo_cliente", "panel_admin"])
+def test_CLIENTES_DIR_sale_del_motor_y_no_se_recompone_en_el_script(
+    script, monkeypatch, tmp_path
+):
+    """Etapa 1 de «sacar clientes/ del árbol»: una sola fuente de verdad.
+
+    `CLIENTES_DIR` de cada script (re-exportado para quien lo busque ahí) tiene
+    que ser `get_config().clientes_dir`: sin variable, el `clientes/` de
+    siempre; con `LIBRA_CLIENTES_DIR`, ese directorio. Si el script volviera a
+    armar `REPO_ROOT / "clientes"`, el cron y el panel mirarían una carpeta
+    distinta que el backoffice apenas alguien movieran los datos.
+    """
+    from libracore.provisioning import get_config
+
+    modulo = importlib.import_module(f"scripts.{script}")
+    try:
+        monkeypatch.delenv("LIBRA_CLIENTES_DIR", raising=False)
+        importlib.reload(modulo)
+        assert modulo.CLIENTES_DIR == get_config().clientes_dir
+        assert modulo.CLIENTES_DIR == modulo.REPO_ROOT / "clientes"  # el default
+
+        monkeypatch.setenv("LIBRA_CLIENTES_DIR", str(tmp_path))
+        importlib.reload(modulo)
+        assert modulo.CLIENTES_DIR == get_config().clientes_dir
+        assert modulo.CLIENTES_DIR == tmp_path
+    finally:
+        monkeypatch.delenv("LIBRA_CLIENTES_DIR", raising=False)
+        importlib.reload(modulo)  # no deja la constante apuntando a un tmp_path
+
+
+@pytest.mark.parametrize("script", ["nuevo_cliente", "panel_admin"])
 def test_el_deploy_declara_las_migraciones_que_este_repo_tiene(script):
     """Un producto con revisiones de Alembic tiene que declararlas, y bien.
 

@@ -7,6 +7,8 @@ versionado [SemVer](https://semver.org/lang/es/).
 
 ### Cambiado
 
+- **libracore `v1.131.0`** (2026-10-05; antes `v1.127.0`). Trae la **nota de crédito parcial** con tope acumulado (v1.130.0: `{"importe": ...}` en `POST /api/facturas/{id}/nota-credito`; sin él, la total de siempre), la marca de cada nota en la cuenta corriente (v1.128.0), `build_nota_de_credito_router` (v1.129.0) y la nota total de una FCE frenada antes de ir a ARCA (v1.131.0). Cambia sólo `notas_de_credito` y `facturas_router`. Sin migración.
+
 - **libracore `v1.109.0` y libra-ui `v0.73.2`** (2026-09-17). La copia externa
   del backup sale cifrada con `rclone crypt`, o no sale —eso corre en el host y
   ya está desplegado ahí—. Lo que llega con este pin: la pantalla *Datos /

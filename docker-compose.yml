@@ -65,14 +65,10 @@ services:
       # del VPS que escuchan sin ser contenedores.
       - "127.0.0.1:8099:8000"
     volumes:
-      # El bind mount es para el `--reload` del código Python. Taparía el build
-      # del frontend si viviera dentro de /app: por eso el Dockerfile lo hornea
-      # en /opt/frontend-dist, fuera del árbol montado.
-      - ./:/app
-      # Los ZIP de backup, en un volumen propio y NO en el árbol montado de
-      # arriba: ese árbol es el checkout de git del servidor, y dejarle archivos
-      # nuevos adentro le complica el `git pull` del próximo deploy. Va después
-      # del bind mount a propósito — el montaje más específico gana.
+      # El código va **horneado en la imagen**, igual que en LibraDesk: este contenedor
+      # no monta el checkout, así que no ve `clientes/` ni el `.env`. Un cambio de código
+      # llega con `docker compose up -d --build`, que es como se despliega dev.
+      # Los ZIP de backup, en un volumen propio.
       - libraclub-datos:/app/data
     # 🔴 Las migraciones también acá, no sólo en el deploy. `cmd_actualizar`
     # las corre para las instancias de cliente y la demo, pero ESTA la levanta
@@ -88,7 +84,7 @@ services:
     # `exec` para que uvicorn quede como PID 1 y `docker stop` le llegue. Si la
     # migración falla el contenedor sale con error, que es mejor que servir
     # código nuevo sobre un esquema viejo.
-    command: sh -c "libracore-migrar upgrade --prefijo libraclub && libraauth-migrar upgrade --prefijo libraclub --base dominio && alembic upgrade head && exec uvicorn app.asgi:app --host 0.0.0.0 --port 8000 --reload"
+    command: sh -c "libracore-migrar upgrade --prefijo libraclub && libraauth-migrar upgrade --prefijo libraclub --base dominio && alembic upgrade head && exec uvicorn app.asgi:app --host 0.0.0.0 --port 8000"
     environment:
       # Las tres sin default: la app tiene que fallar al arrancar si falta
       # alguna, no levantar con un secreto de juguete en un dominio público.
@@ -149,7 +145,7 @@ services:
       - LIBRAAUTH_SMTP_FROM_EMAIL=${LIBRAAUTH_SMTP_FROM_EMAIL:-}
       - LIBRAAUTH_SMTP_FROM_NAME=${LIBRAAUTH_SMTP_FROM_NAME:-LibraClub}
       # Dónde escribe los backups. Sin esto caen en `./data` relativo al
-      # directorio de trabajo, o sea adentro del bind mount.
+      # directorio de trabajo, o sea fuera del volumen de datos.
       - DATA_DIR=/app/data
       - TZ=America/Argentina/Buenos_Aires
     networks: [stack-net, datos]
