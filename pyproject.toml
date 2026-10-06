@@ -56,7 +56,7 @@ dependencies = [
     # desplegar: ver el CHANGELOG de libracore.
     # v1.123.0 -> v1.124.0 (2026-10-04): una factura se acredita una sola vez (`POST /api/facturas/{id}/nota-credito` da 409 si ya tiene una nota) y la guarda del CUIT del receptor (`arca_wsfe.problema_del_receptor`, que `solicitar_cae` corre antes de llamar a ARCA). Sin migracion.
     # v1.124.0 -> v1.126.0 (2026-10-04): la nota de credito (`POST /api/facturas/{id}/nota-credito`) pasa a ser el nucleo `libracore.notas_de_credito`, igual para todos los productos y sin cambiar su comportamiento (el 422 por receptor invalido llega antes de numerar); la guarda del CUIT del receptor deja de bloquear las notas (ARCA autoriza la nota de credito a un CUIT que no cierra, igual que la factura), e incluye v1.125.0 (los routers de libracore rechazan booleanos en los campos numericos). Sin migracion.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.135.0",
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.136.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
