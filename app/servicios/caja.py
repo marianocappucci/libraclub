@@ -556,12 +556,21 @@ def vincular_cobros_a_factura(reserva_id: int, factura_id: int) -> int:
     mostrador, qr = _patrones_de_reserva(reserva_id)
     conexion = libracore_core.get_connection()
     try:
+        ids = [f[0] for f in conexion.execute(
+            "SELECT id FROM caja_movimientos"
+            " WHERE factura_id IS NULL AND tipo='ingreso'"
+            " AND (referencia LIKE ? OR referencia LIKE ?)",
+            (mostrador, qr),
+        ).fetchall()]
         cursor = conexion.execute(
             "UPDATE caja_movimientos SET factura_id=?"
             " WHERE factura_id IS NULL AND tipo='ingreso'"
             " AND (referencia LIKE ? OR referencia LIKE ?)",
             (factura_id, mostrador, qr),
         )
+        # Un cobro a cuenta corriente con factura es deuda: va al libro de clientes
+        # del motor, en esta transacción (ADR-027 de LibraCore).
+        db_caja.al_libro_de_clientes(conexion, ids)
         conexion.commit()
         return cursor.rowcount or 0
     finally:
