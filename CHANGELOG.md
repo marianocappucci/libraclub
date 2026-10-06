@@ -7,6 +7,7 @@ versionado [SemVer](https://semver.org/lang/es/).
 
 ### Cambiado
 
+- **libracore `v1.140.0`** (2026-10-06; antes `v1.139.0`). Suma la pre factura del motor (ADR-030): documento no fiscal con número interno, PDF y envío por correo, sobre la bandeja de comprobantes. **Con migración del motor**: `0021_pre_factura`, que agrega columnas vacías a `comprobantes_pendientes`. La bandeja de siempre no cambia.
 - **libracore `v1.139.0`** (2026-10-06; antes `v1.138.0`). La cuenta corriente de clientes se lee **sólo** del libro (ADR-029 del motor): se retiran el saldo calculado y el interruptor `LIBRACORE_CC_DESDE_EL_LIBRO`. Sin migración. Lo cargado por fuera de los escritores del motor se ve después de `libro_de_clientes.reconstruir()`.
 - **libracore `v1.138.0`** (2026-10-06; antes `v1.137.1`). Las lecturas de la cuenta corriente de clientes pueden salir del libro (ADR-028 del motor), detrás del interruptor por instancia `LIBRACORE_CC_DESDE_EL_LIBRO`, **apagado por defecto**: sin encenderlo no cambia nada. Sin migración.
 - **libracore `v1.137.1`** (2026-10-06; antes `v1.136.1`). La cuenta corriente de clientes también como libro, **en sombra** (`libracore.db.libro_de_clientes`, ADR-027 del motor): los escritores del motor asientan cada pago, débito, cobro a cuenta y venta fiada en `cc_asientos`, y el saldo se sigue leyendo calculado. **Con migración del motor**: `0020_origen_del_asiento`, que agrega una columna vacía. La `v1.137.1` no rompe una base sin `cc_asientos`. LibraClub avisa al libro cuando vincula un cobro a su factura (`servicios/caja.py`).
