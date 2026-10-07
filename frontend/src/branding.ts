@@ -1,13 +1,13 @@
-// La identidad visual de LibraClub: el logo y cómo se escribe el nombre.
+// La identidad visual de LibraClub: el verde de la marca y cómo se escribe el nombre.
 //
 // Vive en un archivo propio porque lo usan las DOS superficies que lo muestran
 // —el login y la sidebar— y son shims distintos sobre `libra-ui`. Con la
 // definición repetida en cada uno, alcanza con tocar una para que las dos
 // pantallas dejen de coincidir, que es el tipo de divergencia que nadie reporta
 // porque nunca se ven juntas. Mismo patrón que LibraDesk.
-import logoLibraClub from '@/assets/logo-libraclub.png'
-
-export const LOGO = logoLibraClub
+//
+// La marca (el trofeo sobre el cuadrado del verde) ya no está acá: sale de `libra-ui/identidad` (ADR-033), se pasa como
+// `producto="libraclub"` a `Layout` y `Login`, y el logo ilustrado `logo-libraclub.png` se retiró.
 
 /**
  * El verde de LibraClub.
