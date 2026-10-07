@@ -455,16 +455,6 @@
   border: 1px solid transparent;
 }
 
-/* El ítem ACTIVO lo pinta la regla del kit (`libra-ui/tema.css`) con tres variables, y acá se fija el valor POR DEFECTO de LibraClub: el mismo
- * tile de siempre (`--muted` con borde `--marca`). Así el tema de la suite (la pantalla «Apariencia» del backoffice, ADR-007 de libra-ui) puede
- * cambiarlo —antes esta regla propia le ganaba a la del kit y el cambio no se veía—. El kit dibuja el borde con un `box-shadow` inset en vez de
- * `border-color`: el mismo píxel, sin mover el ítem. Va después del `@import` del kit para ganarle a su `:root` por orden. */
-:root {
-  --libra-menu-activo-fondo: var(--muted);
-  --libra-menu-activo-borde: var(--marca);
-  --libra-menu-activo-texto: var(--foreground);
-}
-
 /* 2. El encabezado de cada cancha en la grilla de la agenda.
  *
  *    Un 8% del verde sobre el fondo, no el verde pleno: es una banda que separa
