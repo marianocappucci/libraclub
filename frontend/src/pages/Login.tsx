@@ -13,18 +13,14 @@
 // julio; éste y LibraCargo eran los dos que faltaban.
 import { createLogin } from 'libra-ui/Login'
 
-import { LOGO, WORDMARK } from '@/branding'
+import { WORDMARK } from '@/branding'
 
 export const Login = createLogin({
   productName: 'LibraClub',
-  // `productInitial` se sigue pasando aunque haya logo: es obligatorio en la
-  // config del kit, y es lo que se dibuja si algún día el logo no carga.
+  // `productInitial` se sigue pasando aunque haya `producto`: es obligatorio en la config del kit.
   productInitial: 'C',
-  // El logo reemplaza al box con la inicial, a 72 px: el tamaño que eligió el
-  // humano sobre las tres variantes maquetadas para LibraDesk y que llevan los
-  // ocho productos. Sin la clase, `libra-ui` lo dibuja al tamaño del box que
-  // reemplaza —40 px—, que es como estuvo esta pantalla hasta el 2026-08-21.
-  logo: { src: LOGO, alt: 'LibraClub', className: 'h-[72px] w-[72px]' },
+  // La marca (icono sobre un cuadrado del color del producto, libra-ui ADR-033), a 40 px: el tamaño que `Login` le da a `MarcaProducto`.
+  producto: 'libraclub',
   wordmarkClassName: `${WORDMARK} text-[22px]`,
   // A la agenda y no a la raíz: es la pantalla con la que se trabaja todo el
   // día, y `App.tsx` manda cualquier ruta desconocida ahí mismo.

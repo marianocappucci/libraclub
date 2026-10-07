@@ -1,21 +1,10 @@
-# De dónde salen el logo y los iconos
+# Esta carpeta ya no guarda el logo
 
-**Del kit de identidad de la familia**, no de un script de este repo:
-`Proyectos-Wiki/diseños/kit-libra-v1/dist/libraclub/`.
+La marca de LibraClub (el trofeo blanco sobre un cuadrado del verde de la marca) **no es un archivo**: la dibuja
+`libra-ui/MarcaProducto` desde el registro `libra-ui/identidad` (ADR-033 del kit), y se pasa como `producto="libraclub"` a `Layout` y `Login`.
+El `logo-libraclub.png` ilustrado del `kit-libra-v1` se retiró el 2026-10-07 (decisión del humano: el ícono plano reemplaza al logo ilustrado).
 
-Ahí están los cinco archivos ya normalizados —`logo-libraclub.png` y los cuatro
-iconos de PWA— con el mismo lenguaje visual que los otros siete productos.
-
-> 🔴 **Existió un `frontend/scripts/generar_iconos.py` que los dibujaba acá, y
-> se borró el 2026-08-21.** Lo escribí sin haber buscado si ya existían, y
-> existían: el análisis `libraclub-brecha-con-la-familia` decía *"el icono ya
-> está normalizado en `diseños/kit-libra-v1/dist/libraclub/`"*. El resultado fue
-> que LibraClub estuvo un día entero mostrando un dibujo propio —una cancha
-> vista desde arriba— en vez de su logo, en el login, en el sidebar y en el
-> icono de la aplicación instalada.
->
-> El script se borró y no se arregló: mientras exista, alguien lo corre y los
-> pisa de nuevo.
-
-Para actualizarlos: copiar los cinco archivos del `dist/` del kit. Si el kit
-cambia, cambian acá; no se regeneran.
+Los íconos de la aplicación instalada (`frontend/public/icons/*.png`) y el `frontend/public/favicon.svg` salen del favicon que genera el kit de
+landings (`libraclub_web/public/img/favicon.svg`: cuadrado redondeado del color + glifo blanco). Los PNG se rasterizan de ese SVG: `icon-192` e
+`icon-512` con esquinas transparentes, `icon-maskable-512` y `icon-apple-180` a sangre (sin esquinas) y con el glifo dentro de la zona segura.
+Cada cambio de bytes cambia el sello `?v=` de `index.html` y del manifest (`tests/test_sello_de_los_iconos.py`).

@@ -112,19 +112,20 @@ describe('cascarón de LibraClub', () => {
     expect(screen.queryByRole('link', { name: 'Log de actividad' })).not.toBeInTheDocument()
   })
 
-  it('🔴 el logo y el nombre de la sidebar llevan las clases de marca', async () => {
-    // El logo es el mismo archivo que en el login, pero las dos superficies lo
-    // dibujan a tamaños distintos y NUNCA se ven juntas: si una queda con el
-    // default de `libra-ui`, no falla nada y no lo reporta nadie.
+  it('🔴 la marca y el nombre de la sidebar llevan las clases de marca', async () => {
+    // La marca (libra-ui ADR-033) se dibuja en el login a 40 px y acá a 32, y las dos superficies NUNCA se ven juntas: si una queda sin
+    // `producto`, no falla nada y no lo reporta nadie.
     montar()
-    const logo = await screen.findByRole('img', { name: 'LibraClub' })
-    expect(logo.className).toContain('h-9')
-    // Sin el override, el logo de 36 px se sale de la barra de iconos, donde el
-    // ancho útil son 32. No se puede medir renderizando —el estado colapsado lo
-    // pone un atributo del provider y jsdom no aplica Tailwind—, así que se
-    // afirma que la regla condicional esté declarada.
-    expect(logo.className).toContain('group-data-[collapsible=icon]:h-8')
-    expect(logo.className).toContain('group-data-[collapsible=icon]:w-8')
+    const marca = await screen.findByRole('img', { name: 'LibraClub' })
+    // No es una <img> con un asset: es un cuadrado del verde de LibraClub con un icono SVG adentro.
+    expect(marca.tagName).toBe('DIV')
+    expect(marca.querySelector('svg')).not.toBeNull()
+    expect(marca).toHaveStyle({ backgroundColor: '#017b4b' })
+    // `MarcaProducto` ya viene con `h-8 w-8 shrink-0`: son los 32 px que caben en la barra de iconos con la sidebar colapsada, así que no
+    // hace falta ningún override de colapsado (el logo de 36 px sí lo necesitaba). jsdom no aplica Tailwind: se afirman las clases.
+    expect(marca.className).toContain('h-8')
+    expect(marca.className).toContain('w-8')
+    expect(marca.className).toContain('shrink-0')
 
     const nombre = screen.getByText('LibraClub')
     for (const clase of WORDMARK.split(' ')) expect(nombre.className).toContain(clase)

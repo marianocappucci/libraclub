@@ -6,8 +6,8 @@
  * pero un portal que dibuja el menú de administración es una invitación.
  */
 import { Link, NavLink, Outlet } from 'react-router-dom'
+import { MarcaProducto } from 'libra-ui/MarcaProducto'
 
-import { LOGO } from '@/branding'
 import { useJugador } from '@/portal/JugadorContext'
 import { Button } from '@/components/ui/button'
 
@@ -19,7 +19,7 @@ export function PortalLayout() {
       <header className="border-b">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 p-3">
           <Link to="/reservar" className="flex items-center gap-2">
-            <img src={LOGO} alt="LibraClub" className="size-8 max-w-none object-contain" />
+            <MarcaProducto producto="libraclub" />
             <span className="font-semibold">Reservar cancha</span>
           </Link>
 

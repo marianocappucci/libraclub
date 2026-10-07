@@ -1,6 +1,6 @@
-// La identidad de LibraClub en la pantalla que la muestra sin sesión: el logo
-// a 72 px y el nombre en Montserrat Bold #2d2d2d, como los otros siete
-// productos de la familia.
+// La identidad de LibraClub en la pantalla que la muestra sin sesión: la marca
+// (el icono sobre un cuadrado del verde) y el nombre en Montserrat Bold #2d2d2d,
+// como los otros siete productos de la familia.
 //
 // 🔴 Existe por un defecto real. LibraClub adoptó el logo del kit el
 // 2026-08-21 pero no el CABLEADO que lo acompaña: pasaba `logo` sin clase de
@@ -48,16 +48,19 @@ async function pantalla() {
 }
 
 describe('el login', () => {
-  it('🔴 el logo mide 72 px', async () => {
+  it('🔴 muestra la marca del producto (el icono sobre un cuadrado de su verde), no un logo ilustrado', async () => {
     await pantalla()
-    const logo = screen.getByRole('img', { name: 'LibraClub' })
-    // El nombre del archivo y no la ruta entera: Vite le pone un hash al asset
-    // y fijarlo haría fallar el test en cada rebuild.
-    expect(logo).toHaveAttribute('src', expect.stringContaining('logo-libraclub'))
-    expect(logo.className).toContain('h-[72px]')
-    // La contracara: sin clase propia queda el tamaño con el que libra-ui
-    // dibuja el box de la inicial, que es el defecto que este test cierra.
-    expect(logo.className).not.toContain('h-10')
+    const marca = screen.getByRole('img', { name: 'LibraClub' })
+    // La marca (libra-ui ADR-033) es un cuadrado con un icono SVG adentro: no una <img> con un asset. Si alguien vuelve a pasar `logo`, o
+    // `producto` se pierde, el elemento deja de ser un div con fondo y esto se pone rojo.
+    expect(marca.tagName).toBe('DIV')
+    expect(marca).not.toHaveAttribute('src')
+    expect(marca.querySelector('svg')).not.toBeNull()
+    // El fondo es el `color` de la identidad de LibraClub (`libra-ui/identidad`), el mismo verde que la landing y que `MARCA`.
+    expect(marca).toHaveStyle({ backgroundColor: '#017b4b' })
+    // `Login` la dibuja a 40 px (`h-10 w-10`); el default del cuadrado (32 px) tiene que haber PERDIDO el merge.
+    expect(marca.className).toContain('h-10')
+    expect(marca.className).not.toContain('h-8')
   })
 
   it('🔴 el nombre va en Montserrat Bold #2d2d2d, a 22 px', async () => {
