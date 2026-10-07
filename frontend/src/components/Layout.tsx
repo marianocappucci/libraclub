@@ -12,9 +12,8 @@
 // evitar.
 import { Outlet } from 'react-router-dom'
 import { createLayout } from 'libra-ui/Layout'
-import {
-  CalendarDays, ClipboardCheck, Clock, CreditCard, CupSoda, LayoutGrid, MapPin, NotebookText, Receipt, Repeat, ScrollText, Settings, Tags, Trophy, Undo2, UserCog, Users, Wallet,
-} from 'lucide-react'
+import { ICONOS } from 'libra-ui/iconos-identidad'
+import { CalendarClock, CupSoda, LayoutGrid, Repeat, Trophy, Undo2 } from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
 import { useSucursal } from '@/context/SucursalContext'
@@ -60,7 +59,7 @@ const Cascaron = createLayout<Usuario>({
   // el `text-[15px]` de acá. El 17 sale de 32 (la marca) menos 15 (la línea
   // del complejo): el bloque de texto mide exactamente lo que mide la marca.
   wordmarkClassName: `${WORDMARK} text-[15px]/[17px]`,
-  icon: CalendarDays,
+  icon: ICONOS.agenda,
   homeTo: '/agenda',
   navSections: [
     // Sin label: es una sola entrada, y un encabezado arriba de un único ítem
@@ -70,7 +69,7 @@ const Cascaron = createLayout<Usuario>({
     // empezar el turno y trabaja sobre la grilla. Por eso van juntas y arriba.
     {
       items: [
-        { to: '/agenda', label: 'Agenda', icon: CalendarDays },
+        { to: '/agenda', label: 'Agenda', icon: ICONOS.agenda },
         // Junto a la Agenda: una cancha fija ES agenda, y el encargado la
         // toca cuando el grupo pide o deja el turno — no cuando configura.
         { to: '/turnos-fijos', label: 'Turnos fijos', icon: Repeat },
@@ -79,26 +78,26 @@ const Cascaron = createLayout<Usuario>({
         // una cancha fija, y el encargado lo toca durante el torneo — no
         // cuando configura el complejo.
         { to: '/torneos', label: 'Torneos', icon: Trophy },
-        { to: '/caja', label: 'Caja', icon: Wallet },
+        { to: '/caja', label: 'Caja', icon: ICONOS.caja },
         // Junto a la Caja: es el acto que la cierra para todo el día, no una
         // pantalla de configuración. Ícono propio y no `Wallet` de nuevo — dos
         // ítems del mismo menú no comparten dibujo.
-        { to: '/cierre-diario', label: 'Cierre diario', icon: ClipboardCheck },
+        { to: '/cierre-diario', label: 'Cierre diario', icon: ICONOS.cierreDiario },
         // La cobranza va con la caja y no en Maestros: se mira el mismo día que
         // se cobra, y el pago a cuenta entra por el turno abierto.
-        { to: '/cuenta-corriente', label: 'Cuenta corriente', icon: NotebookText },
+        { to: '/cuenta-corriente', label: 'Cuenta corriente', icon: ICONOS.cuentaCorriente },
       ],
     },
     {
       label: 'Maestros',
       items: [
-        { to: '/clientes', label: 'Clientes', icon: Users },
+        { to: '/clientes', label: 'Clientes', icon: ICONOS.clientes },
         { to: '/canchas', label: 'Canchas', icon: LayoutGrid },
-        { to: '/tarifas', label: 'Tarifas', icon: Tags },
+        { to: '/tarifas', label: 'Tarifas', icon: ICONOS.listasDePrecio },
         // 🔑 Los mostradores son configuración, como las canchas y las tarifas:
         // se dan de alta al abrir el complejo y no se tocan más. Lo que se toca
         // todos los días es el turno, que está en Caja.
-        { to: '/cajas', label: 'Cajas', icon: Wallet },
+        { to: '/cajas', label: 'Cajas', icon: ICONOS.cajas },
         // 🔑 **El buffet es mantenimiento, no operación.** Estuvo con la Caja
         // hasta el 2026-08-28 con el argumento de que "es lo que se toca durante
         // el turno", y era falso: el consumo se carga **desde el turno**, en el
@@ -113,7 +112,9 @@ const Cascaron = createLayout<Usuario>({
         // Junto a Tarifas y no en Configuración: las dos definen qué se
         // vende y a cuánto, y se cargan en la misma sesión al abrir el
         // complejo. El horario decide qué turnos existen; la tarifa, su precio.
-        { to: '/horarios', label: 'Horario de atención', icon: Clock },
+        // `CalendarClock` y no `Clock`: `Clock` es del turno de caja en el catálogo de íconos de identidad (ADR-035) y esta familia no
+        // comparte un dibujo entre dos conceptos.
+        { to: '/horarios', label: 'Horario de atención', icon: CalendarClock },
       ],
     },
     {
@@ -134,7 +135,7 @@ const Cascaron = createLayout<Usuario>({
         // Se deja pendiente en vez de resolverlo con un `useMemo` sobre
         // `createLayout`, que remontaría el árbol entero al pasar de una
         // sucursal a dos.
-        { to: '/sucursales', label: 'Sucursales', icon: MapPin },
+        { to: '/sucursales', label: 'Sucursales', icon: ICONOS.sucursales },
         // Usuarios sí: el router entero exige admin, así que a un encargado el
         // link le daría 403. Un menú que ofrece lo que no se puede usar es peor
         // que no ofrecerlo.
@@ -146,7 +147,7 @@ const Cascaron = createLayout<Usuario>({
         // encargado el link le daría 403, y un menú que ofrece lo que no se
         // puede usar es peor que no ofrecerlo. La factura de SU turno la
         // sigue viendo desde la Agenda, que es de mostrador.
-        { to: '/facturas', label: 'Comprobantes', icon: Receipt, adminOnly: true },
+        { to: '/facturas', label: 'Comprobantes', icon: ICONOS.comprobantes, adminOnly: true },
         // Debajo de Comprobantes y no al lado de Caja: la bandeja es plata
         // que YA entró a la cuenta de MercadoPago y que hay que conciliar y
         // facturar — el mismo trabajo mensual que el registro fiscal, no el
@@ -154,20 +155,20 @@ const Cascaron = createLayout<Usuario>({
         //
         // `adminOnly` porque el router lleva `require_admin`: el mostrador
         // cobra, pero conciliar lo que entró a la cuenta es del dueño.
-        { to: '/mp-bandeja', label: 'Pagos MercadoPago', icon: CreditCard, adminOnly: true },
+        { to: '/mp-bandeja', label: 'Pagos MercadoPago', icon: ICONOS.pagosMercadoPago, adminOnly: true },
         // Ver la deuda es de staff --el encargado tiene que poder
         // contestarle al jugador que llama-- aunque reintentar sea de
         // admin. Es la excepcion al criterio de la linea de arriba, y por
         // eso va sin adminOnly.
         { to: '/devoluciones', label: 'Devoluciones', icon: Undo2 },
-        { to: '/usuarios', label: 'Usuarios', icon: UserCog, adminOnly: true },
+        { to: '/usuarios', label: 'Usuarios', icon: ICONOS.usuarios, adminOnly: true },
         // Junto a Usuarios y no en Configuración: se mira para responder
         // "quién hizo esto", que es una pregunta sobre la gente y no sobre
         // los ajustes. Mismo criterio que LibraCargo y LibraDesk.
-        { to: '/logs', label: 'Log de actividad', icon: ScrollText, adminOnly: true },
+        { to: '/logs', label: 'Log de actividad', icon: ICONOS.logDeActividad, adminOnly: true },
         // Configuración es de admin por los dos lados: el router de empresa
         // lleva `require_admin` y el de SMTP lo exige por dentro.
-        { to: '/configuracion', label: 'Configuración', icon: Settings, adminOnly: true },
+        { to: '/configuracion', label: 'Configuración', icon: ICONOS.configuracion, adminOnly: true },
       ],
     },
   ],

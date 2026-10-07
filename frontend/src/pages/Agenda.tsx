@@ -11,7 +11,7 @@ import { iconoDeDeporte } from '@/lib/deportes'
 import { AvisoDeError } from '@/components/listado'
 import { sumarDiasISO } from 'libra-ui/fechas'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
-import { CalendarDays } from 'lucide-react'
+import { ICONOS } from 'libra-ui/iconos-identidad'
 
 /** Los colores por estado. Un solo lugar, para que la leyenda y la grilla no
  *  puedan decir cosas distintas.
@@ -133,7 +133,7 @@ export function Agenda() {
        * El fondo **opaco** no es decorativo: la grilla pasa por debajo.
        */}
       <div className="sticky top-0 z-20 -mx-1 space-y-3 rounded-lg border bg-card px-3 py-3 shadow-sm">
-        <TituloPantalla icono={CalendarDays}>Agenda</TituloPantalla>
+        <TituloPantalla icono={ICONOS.agenda}>Agenda</TituloPantalla>
 
       {/* 🔴 `flex-wrap`: los botones de `buttonVariants` traen `whitespace-nowrap`
           y `shrink-0`, así que la fila NO se puede encoger. Sin envolver, en un

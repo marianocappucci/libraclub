@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-import { ArrowLeft, Ban, Wallet } from 'lucide-react'
+import { ArrowLeft, Ban } from 'lucide-react'
 
 import { caja } from '@/lib/api'
 import type { ResumenDeCaja, TurnoDeCaja } from '@/lib/api'
@@ -27,6 +27,7 @@ import { hora, pesos } from '@/lib/fechas'
 import { AvisoDeError } from '@/components/listado'
 import { Button } from '@/components/ui/button'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
+import { ICONOS } from 'libra-ui/iconos-identidad'
 
 export function MovimientosDeCaja() {
   const [turno, setTurno] = useState<TurnoDeCaja | null>(null)
@@ -57,7 +58,7 @@ export function MovimientosDeCaja() {
           subpágina de /caja, así que darle uno propio diría que es otra sección
           del menú — y no hay ninguna. */}
       <EncabezadoDePantalla
-        titulo={<TituloPantalla icono={Wallet}>Movimientos del turno</TituloPantalla>}
+        titulo={<TituloPantalla icono={ICONOS.caja}>Movimientos del turno</TituloPantalla>}
       >
         <Link
           to="/caja"

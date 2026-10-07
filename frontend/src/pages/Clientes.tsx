@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ColumnDef } from 'libra-ui/data-table'
 import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-import { Plus, Users } from 'lucide-react'
+import { Plus } from 'lucide-react'
 
 import { clientes as api } from '@/lib/api'
 import type { Cliente } from '@/lib/api'
@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 import { useReincidentes } from '@/lib/ausentismo'
 import { fecha } from '@/lib/fechas'
+import { ICONOS } from 'libra-ui/iconos-identidad'
 
 export function Clientes() {
   const { user } = useAuth()
@@ -125,7 +126,7 @@ export function Clientes() {
 
   return (
     <div className="space-y-3">
-      <EncabezadoDePantalla titulo={<TituloPantalla icono={Users}>Clientes</TituloPantalla>}>
+      <EncabezadoDePantalla titulo={<TituloPantalla icono={ICONOS.clientes}>Clientes</TituloPantalla>}>
         {puedeEscribir && (
           <Button
             onClick={() => {

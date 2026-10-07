@@ -120,7 +120,8 @@ describe('cascarón de LibraClub', () => {
     // No es una <img> con un asset: es un cuadrado del verde de LibraClub con un icono SVG adentro.
     expect(marca.tagName).toBe('DIV')
     expect(marca.querySelector('svg')).not.toBeNull()
-    expect(marca).toHaveStyle({ backgroundColor: '#017b4b' })
+    // Desde libra-ui v0.124.0 (ADR-034) el cuadrado del verde va DENTRO del SVG incrustado, ya no es el fondo del contenedor.
+    expect(marca.innerHTML.toLowerCase()).toContain('#017b4b')
     // `MarcaProducto` ya viene con `h-8 w-8 shrink-0`: son los 32 px que caben en la barra de iconos con la sidebar colapsada, así que no
     // hace falta ningún override de colapsado (el logo de 36 px sí lo necesitaba). jsdom no aplica Tailwind: se afirman las clases.
     expect(marca.className).toContain('h-8')

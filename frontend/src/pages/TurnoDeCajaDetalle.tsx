@@ -17,7 +17,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Printer, Wallet } from 'lucide-react'
+import { ArrowLeft, Printer } from 'lucide-react'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 import { BadgeEstado } from 'libra-ui/badge-estado'
@@ -30,6 +30,7 @@ import { abrirTicket } from '@/lib/tickets'
 import { AvisoDeError } from '@/components/listado'
 import { Button } from '@/components/ui/button'
 import { DiferenciaDeArqueo } from '@/pages/TurnosDeCaja'
+import { ICONOS } from 'libra-ui/iconos-identidad'
 
 export function TurnoDeCajaDetalle() {
   const { id } = useParams<{ id: string }>()
@@ -59,7 +60,7 @@ export function TurnoDeCajaDetalle() {
     <div className="space-y-4">
       <EncabezadoDePantalla
         titulo={
-          <TituloPantalla icono={Wallet}>
+          <TituloPantalla icono={ICONOS.turnosDeCaja}>
             Turno #{Number.isNaN(turnoId) ? '—' : turnoId}
           </TituloPantalla>
         }
