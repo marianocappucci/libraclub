@@ -14,9 +14,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import type { ColumnDef } from 'libra-ui/data-table'
-import {
-  ArrowDownCircle, ArrowLeft, ArrowUpCircle, CircleDollarSign, NotebookText,
-} from 'lucide-react'
+import { ArrowDownCircle, ArrowLeft, ArrowUpCircle, CircleDollarSign } from 'lucide-react'
 import { DataTable } from 'libra-ui/data-table'
 import { BadgeEstado } from 'libra-ui/badge-estado'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
@@ -36,6 +34,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { ICONOS } from 'libra-ui/iconos-identidad'
 
 type Cuenta = SaldoDeCuenta & { movimientos: MovimientoDeCuenta[] }
 
@@ -160,7 +159,7 @@ export function CuentaCorrienteDetalle() {
     <div className="space-y-4">
       <EncabezadoDePantalla
         titulo={
-          <TituloPantalla icono={NotebookText}>
+          <TituloPantalla icono={ICONOS.cuentaCorriente}>
             {cuenta.cliente}
             <BadgeDeSaldo monto={cuenta.saldo} />
           </TituloPantalla>

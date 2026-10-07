@@ -16,9 +16,17 @@ import { auditarTitulos, describirDesajustes } from 'libra-ui/auditoria-de-titul
 
 const SRC = join(process.cwd(), 'src')
 
+// Cuelgan de `/caja` pero son otro concepto del catálogo de íconos de identidad (ADR-035): el turno de caja es `Clock` y la caja por medio es
+// `Coins`, no `Wallet` (la caja). El auditor las compara con el ícono de su prefijo del menú y las marcaría; `iconos-del-catalogo.test.ts`
+// afirma que llevan el ícono del catálogo que les toca.
+const OTRO_CONCEPTO = ['/caja/turnos', '/caja/turnos/:id', '/caja/por-medio']
+
 describe('el icono del título sale del sidebar', () => {
   it('🔴 ninguna pantalla usa un icono distinto al de su entrada del menú', () => {
-    expect(describirDesajustes(auditarTitulos(SRC).distinto)).toEqual([])
+    const { distinto } = auditarTitulos(SRC, 'libraclub')
+    expect(describirDesajustes(distinto.filter((d) => !OTRO_CONCEPTO.includes(d.ruta)))).toEqual([])
+    // Y la lista de exenciones es exacta: si una deja de diferir del sidebar, hay que sacarla de acá.
+    expect(distinto.map((d) => d.ruta).sort()).toEqual([...OTRO_CONCEPTO].sort())
   })
 
   it('🔴 ninguna pantalla del menú tiene el título sin icono', () => {
@@ -31,7 +39,7 @@ describe('el icono del título sale del sidebar', () => {
     // icono al que ya había — que es exactamente lo que el humano pidió el
     // 2026-08-28. Al estrenarlo, esta línea falló y obligó a mirarlo, que era
     // para lo que estaba escrita.
-    expect(describirDesajustes(auditarTitulos(SRC).sinIcono)).toEqual([])
+    expect(describirDesajustes(auditarTitulos(SRC, 'libraclub').sinIcono)).toEqual([])
   })
 
   it('🔴 el control — el guard midió algo', () => {
@@ -39,7 +47,7 @@ describe('el icono del título sale del sidebar', () => {
     // de encontrar el Layout, el router o las pantallas: dos listas vacías
     // contra dos listas vacías. Es la forma en que este guard falló mientras se
     // escribía.
-    const { rutasDelNav, pantallas, conIcono } = auditarTitulos(SRC)
+    const { rutasDelNav, pantallas, conIcono } = auditarTitulos(SRC, 'libraclub')
     expect(rutasDelNav).toBeGreaterThanOrEqual(7)
     expect(pantallas).toBeGreaterThanOrEqual(7)
     expect(conIcono).toBeGreaterThan(0)

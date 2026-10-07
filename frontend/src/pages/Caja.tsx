@@ -54,6 +54,7 @@ import { Label } from '@/components/ui/label'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 import { useAuth } from '@/context/AuthContext'
 import { useSucursal } from '@/context/SucursalContext'
+import { ICONOS } from 'libra-ui/iconos-identidad'
 
 type Cierre = TurnoDeCaja & { diferencia_de_caja: number }
 
@@ -90,7 +91,7 @@ export function Caja() {
           de movimientos.** Ese otro vive adentro del bloque del turno abierto,
           así que sin caja abierta no se ve — y «sin caja abierta» es justo
           cuando uno quiere mirar el cierre de ayer. Acá está siempre. */}
-      <EncabezadoDePantalla titulo={<TituloPantalla icono={Wallet}>Caja</TituloPantalla>}>
+      <EncabezadoDePantalla titulo={<TituloPantalla icono={ICONOS.caja}>Caja</TituloPantalla>}>
         <Link
           to="/caja/turnos"
           className="inline-flex items-center gap-1 text-sm text-muted-foreground underline-offset-4 hover:underline"

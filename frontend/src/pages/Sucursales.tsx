@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ColumnDef } from 'libra-ui/data-table'
 import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-import { MapPin, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 
 import { sucursales as api } from '@/lib/api'
 import type { Sucursal } from '@/lib/api'
@@ -15,6 +15,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
+import { ICONOS } from 'libra-ui/iconos-identidad'
 
 export function Sucursales() {
   // 🔴 Esta pantalla pide su **propia** lista, completa, y no usa la del
@@ -117,7 +118,7 @@ export function Sucursales() {
 
   return (
     <div className="space-y-3">
-      <EncabezadoDePantalla titulo={<TituloPantalla icono={MapPin}>{titulo}</TituloPantalla>}>
+      <EncabezadoDePantalla titulo={<TituloPantalla icono={ICONOS.sucursales}>{titulo}</TituloPantalla>}>
         {puedeEscribir && (
           <Button
             onClick={() => {

@@ -17,7 +17,7 @@
  * rol, porque cualquiera que llega a esta pantalla ya pasó el gate del router.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { ClipboardCheck, Printer } from 'lucide-react'
+import { Printer } from 'lucide-react'
 import { hoyISO } from 'libra-ui/fechas'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
@@ -34,6 +34,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { DiferenciaDeArqueo } from '@/pages/TurnosDeCaja'
+import { ICONOS } from 'libra-ui/iconos-identidad'
 
 export function CierreDiario() {
   const { actual } = useSucursal()
@@ -93,7 +94,7 @@ export function CierreDiario() {
   return (
     <div className="space-y-4">
       <EncabezadoDePantalla
-        titulo={<TituloPantalla icono={ClipboardCheck}>Cierre diario</TituloPantalla>}
+        titulo={<TituloPantalla icono={ICONOS.cierreDiario}>Cierre diario</TituloPantalla>}
       />
       <AvisoDeError mensaje={error} />
 
