@@ -19,7 +19,7 @@ import {
 import { useAuth } from '@/context/AuthContext'
 import { useSucursal } from '@/context/SucursalContext'
 import { SelectorDeSucursal } from '@/components/SelectorDeSucursal'
-import { LOGO, WORDMARK } from '@/branding'
+import { WORDMARK } from '@/branding'
 
 type Usuario = { role?: string; name?: string; username?: string; sucursal?: string }
 
@@ -49,25 +49,17 @@ function useAuthConSucursal() {
 const Cascaron = createLayout<Usuario>({
   productName: 'LibraClub',
   productInitial: 'C',
-  // 🔑 El `logo` le gana a `icon`: son dos formas de llenar el mismo hueco y el
-  // logo es la más específica. Se deja `icon` igual porque es el piso si algún
-  // día se saca el logo, y porque `CalendarDays` es el mismo dibujo que la
-  // Agenda — el ítem del menú y el encabezado no se confunden porque el
-  // encabezado ahora muestra el logo.
-  //
-  // El override de colapsado NO es decorativo: con la sidebar en modo icono el
-  // ancho útil son 32px, y sin bajarlo el logo se sale de la barra.
-  logo: {
-    src: LOGO,
-    alt: 'LibraClub',
-    className: 'h-9 w-9 group-data-[collapsible=icon]:h-8 group-data-[collapsible=icon]:w-8',
-  },
-  // 🔴 El interlineado va PEGADO al tamaño (`/[21px]`) y no como un
+  // 🔑 `producto` le gana a `icon`: son dos formas de llenar el mismo hueco y la marca del producto (libra-ui ADR-033: el icono de LibraClub,
+  // un trofeo, sobre un cuadrado de su verde) es la más específica. Se deja `icon` igual porque es el piso si algún día se saca `producto`,
+  // y porque `CalendarDays` es el mismo dibujo que la Agenda.
+  // `MarcaProducto` ya viene con `h-8 w-8 shrink-0`, que es lo que cabe en la sidebar colapsada (32 px): no hace falta ningún override.
+  producto: 'libraclub',
+  // 🔴 El interlineado va PEGADO al tamaño (`/[17px]`) y no como un
   // `leading-*` aparte: en Tailwind v4 una utilidad de tamaño emite TAMBIÉN
   // su `line-height`, así que el `leading-none` de `libra-ui` pierde contra
-  // el `text-[15px]` de acá. El 21 sale de 36 (el logo) menos 15 (la línea
-  // del complejo): el bloque de texto mide exactamente lo que mide el logo.
-  wordmarkClassName: `${WORDMARK} text-[15px]/[21px]`,
+  // el `text-[15px]` de acá. El 17 sale de 32 (la marca) menos 15 (la línea
+  // del complejo): el bloque de texto mide exactamente lo que mide la marca.
+  wordmarkClassName: `${WORDMARK} text-[15px]/[17px]`,
   icon: CalendarDays,
   homeTo: '/agenda',
   navSections: [

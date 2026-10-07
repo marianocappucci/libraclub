@@ -67,3 +67,14 @@ def test_ninguna_url_de_icono_queda_sin_sello():
     sin_sello = re.findall(r"/icons/[\w.-]+\.png(?!\?v=)", texto)
 
     assert not sin_sello, f"URLs de icono sin sello: {sin_sello}"
+
+
+def test_el_index_sella_el_favicon_svg():
+    """El favicon vectorial (ADR-033 de libra-ui: el ícono plano del producto) vive
+    en la raíz de `public/`, no en `icons/`, así que los tests de arriba no lo
+    miran. Chrome lo guarda por URL igual que a los PNG: mismo sello, mismo motivo."""
+    sello = hashlib.sha256((PUBLICO / "favicon.svg").read_bytes()).hexdigest()[:8]
+    esperado = f'href="/favicon.svg?v={sello}"'
+    assert esperado in INDEX.read_text(encoding="utf-8"), (
+        f"el sello de favicon.svg no es el de sus bytes: tiene que decir {esperado}"
+    )
