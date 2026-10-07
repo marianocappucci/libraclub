@@ -21,7 +21,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Receipt, Trash2 } from 'lucide-react'
+import { Plus, Trash2 } from 'lucide-react'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
 
@@ -33,6 +33,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { ICONOS } from 'libra-ui/iconos-identidad'
 
 type Item = { description: string; qty: string; unit_price: string }
 
@@ -147,7 +148,7 @@ export function FacturaNueva() {
 
   return (
     <div className="grid gap-4">
-      <EncabezadoDePantalla titulo={<TituloPantalla icono={Receipt}>Nueva factura</TituloPantalla>}>
+      <EncabezadoDePantalla titulo={<TituloPantalla icono={ICONOS.comprobantes}>Nueva factura</TituloPantalla>}>
         {/* El borrador abre en una pestaña: es para mirar el comprobante ANTES
             de quemarle un número a la numeración fiscal, que no se devuelve. */}
         <Button

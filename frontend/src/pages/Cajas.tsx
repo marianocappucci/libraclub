@@ -17,7 +17,7 @@ import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 import { BadgeEstado } from 'libra-ui/badge-estado'
-import { Plus, Star, Wallet } from 'lucide-react'
+import { Plus, Star } from 'lucide-react'
 
 import { cajas as api } from '@/lib/api'
 import type { CajaDeMostrador } from '@/lib/api'
@@ -32,6 +32,7 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { ICONOS } from 'libra-ui/iconos-identidad'
 
 export function Cajas() {
   const { actual } = useSucursal()
@@ -157,7 +158,7 @@ export function Cajas() {
 
   return (
     <div className="space-y-3">
-      <EncabezadoDePantalla titulo={<TituloPantalla icono={Wallet}>Cajas</TituloPantalla>}>
+      <EncabezadoDePantalla titulo={<TituloPantalla icono={ICONOS.cajas}>Cajas</TituloPantalla>}>
         {puedeEscribir && (
           <Button onClick={() => { setEditando(null); setAbierto(true) }}>
             <Plus />Nueva caja

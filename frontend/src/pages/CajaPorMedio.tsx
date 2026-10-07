@@ -15,7 +15,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Download, Wallet } from 'lucide-react'
+import { ArrowLeft, Download } from 'lucide-react'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 import { iconoDe } from 'libra-ui/medios-pago'
@@ -30,6 +30,7 @@ import { AvisoDeError } from '@/components/listado'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { ICONOS } from 'libra-ui/iconos-identidad'
 
 export function CajaPorMedio() {
   const { actual } = useSucursal()
@@ -74,7 +75,7 @@ export function CajaPorMedio() {
   return (
     <div className="space-y-4">
       <EncabezadoDePantalla
-        titulo={<TituloPantalla icono={Wallet}>Caja por medio de pago</TituloPantalla>}
+        titulo={<TituloPantalla icono={ICONOS.cajaPorMedio}>Caja por medio de pago</TituloPantalla>}
       >
         <Link
           to="/caja"

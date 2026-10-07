@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ColumnDef } from 'libra-ui/data-table'
 import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-import { Clock, Plus } from 'lucide-react'
+import { CalendarClock, Plus } from 'lucide-react'
 
 import { canchas as apiCanchas, horarios as api } from '@/lib/api'
 import type { Cancha, Franja } from '@/lib/api'
@@ -119,7 +119,7 @@ export function Horarios() {
   return (
     <div className="space-y-3">
       <EncabezadoDePantalla
-        titulo={<TituloPantalla icono={Clock}>Horario de atención</TituloPantalla>}
+        titulo={<TituloPantalla icono={CalendarClock}>Horario de atención</TituloPantalla>}
       >
         {puedeEscribir && actual !== null && (
           <Button

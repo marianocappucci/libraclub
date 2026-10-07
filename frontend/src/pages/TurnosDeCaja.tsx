@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import type { ColumnDef } from 'libra-ui/data-table'
-import { ArrowDownCircle, ArrowLeft, ArrowUpCircle, CheckCircle2, Eye, Wallet } from 'lucide-react'
+import { ArrowDownCircle, ArrowLeft, ArrowUpCircle, CheckCircle2, Eye } from 'lucide-react'
 import { DataTable, anchoColumnaAcciones, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
@@ -30,6 +30,7 @@ import type { TurnoDeCaja } from '@/lib/api'
 import { fechaHora, pesos } from '@/lib/fechas'
 import { AvisoDeError } from '@/components/listado'
 import { Button } from '@/components/ui/button'
+import { ICONOS } from 'libra-ui/iconos-identidad'
 
 /** La diferencia del arqueo, con su signo y su color.
  *
@@ -215,10 +216,12 @@ export function TurnosDeCaja() {
 
   return (
     <div className="space-y-4">
-      {/* El icono es el de la Caja: esta pantalla es una subpágina de /caja y no
-          una sección propia del menú. Mismo criterio que Movimientos. */}
+      {/* El icono es el del turno de caja del catálogo de la familia (`Clock`, ADR-035)
+          y no el de la Caja: esta pantalla cuelga de /caja, pero el concepto es
+          otro. `titulos-con-icono.test.ts` la exime del cruce con el sidebar y
+          `iconos-del-catalogo.test.ts` afirma este icono. */}
       <EncabezadoDePantalla
-        titulo={<TituloPantalla icono={Wallet}>Turnos de caja</TituloPantalla>}
+        titulo={<TituloPantalla icono={ICONOS.turnosDeCaja}>Turnos de caja</TituloPantalla>}
       >
         <Link
           to="/caja"

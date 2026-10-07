@@ -56,10 +56,12 @@ describe('el login', () => {
     expect(marca.tagName).toBe('DIV')
     expect(marca).not.toHaveAttribute('src')
     expect(marca.querySelector('svg')).not.toBeNull()
-    // El fondo es el `color` de la identidad de LibraClub (`libra-ui/identidad`), el mismo verde que la landing y que `MARCA`.
-    expect(marca).toHaveStyle({ backgroundColor: '#017b4b' })
-    // `Login` la dibuja a 40 px (`h-10 w-10`); el default del cuadrado (32 px) tiene que haber PERDIDO el merge.
-    expect(marca.className).toContain('h-10')
+    // El cuadrado es el `color` de la identidad de LibraClub (`libra-ui/identidad`), el mismo verde que la landing y que `MARCA`. Desde libra-ui
+    // v0.124.0 (ADR-034) la marca es un SVG incrustado y el cuadrado va DENTRO del dibujo: ya no es el `background-color` del contenedor.
+    expect(marca.innerHTML.toLowerCase()).toContain('#017b4b')
+    // `Login` la dibuja a 48 px (`h-12 w-12`, libra-ui v0.124.0: el dibujo tiene más detalle que un glifo); el default del cuadrado (32 px)
+    // tiene que haber PERDIDO el merge.
+    expect(marca.className).toContain('h-12')
     expect(marca.className).not.toContain('h-8')
   })
 

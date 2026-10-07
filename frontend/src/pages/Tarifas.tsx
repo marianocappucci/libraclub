@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ColumnDef } from 'libra-ui/data-table'
 import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
-import { Plus, Tags } from 'lucide-react'
+import { Plus } from 'lucide-react'
 
 import { canchas as apiCanchas, tarifas as api } from '@/lib/api'
 import type { Cancha, Tarifa } from '@/lib/api'
@@ -13,6 +13,7 @@ import { FormularioDeTarifa } from '@/components/FormularioDeTarifa'
 import { AvisoDeError, columnaDeAcciones, filaInactiva } from '@/components/listado'
 import { Button } from '@/components/ui/button'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
+import { ICONOS } from 'libra-ui/iconos-identidad'
 
 const DIAS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
 
@@ -125,7 +126,7 @@ export function Tarifas() {
 
   return (
     <div className="space-y-3">
-      <EncabezadoDePantalla titulo={<TituloPantalla icono={Tags}>Tarifas</TituloPantalla>}>
+      <EncabezadoDePantalla titulo={<TituloPantalla icono={ICONOS.listasDePrecio}>Tarifas</TituloPantalla>}>
         {puedeEscribir && actual !== null && (
           <Button
             onClick={() => {

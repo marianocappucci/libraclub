@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ColumnDef } from 'libra-ui/data-table'
-import { Eye, NotebookText } from 'lucide-react'
+import { Eye } from 'lucide-react'
 import { DataTable, anchoColumnaAcciones, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
@@ -30,6 +30,7 @@ import { AvisoDeError } from '@/components/listado'
 import { BadgeDeSaldo } from '@/components/saldo'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { ICONOS } from 'libra-ui/iconos-identidad'
 
 export function CuentaCorriente() {
   const [deudores, setDeudores] = useState<SaldoDeCuenta[]>([])
@@ -96,7 +97,7 @@ export function CuentaCorriente() {
   return (
     <div className="space-y-4">
       <EncabezadoDePantalla
-        titulo={<TituloPantalla icono={NotebookText}>Cuenta corriente</TituloPantalla>}
+        titulo={<TituloPantalla icono={ICONOS.cuentaCorriente}>Cuenta corriente</TituloPantalla>}
       />
       <AvisoDeError mensaje={error} />
 
