@@ -7,6 +7,7 @@ versionado [SemVer](https://semver.org/lang/es/).
 
 ### Cambiado
 
+- **libracore `v1.141.0`** (2026-10-06; antes `v1.140.0`). El emisor de los PDF se resuelve por documento (ADR-031 del motor): config de la instancia, después el `emisor_id` del comprobante, después lo que aporte el producto; acepta el logo como contenido (`logo_bytes`). El archivo de la factura lleva el id, así una nota de crédito no pisa a su factura. Sin migración; para quien no aporta nada, los PDF salen iguales.
 - **libracore `v1.140.0`** (2026-10-06; antes `v1.139.0`). Suma la pre factura del motor (ADR-030): documento no fiscal con número interno, PDF y envío por correo, sobre la bandeja de comprobantes. **Con migración del motor**: `0021_pre_factura`, que agrega columnas vacías a `comprobantes_pendientes`. La bandeja de siempre no cambia.
 - **libracore `v1.139.0`** (2026-10-06; antes `v1.138.0`). La cuenta corriente de clientes se lee **sólo** del libro (ADR-029 del motor): se retiran el saldo calculado y el interruptor `LIBRACORE_CC_DESDE_EL_LIBRO`. Sin migración. Lo cargado por fuera de los escritores del motor se ve después de `libro_de_clientes.reconstruir()`.
 - **libracore `v1.138.0`** (2026-10-06; antes `v1.137.1`). Las lecturas de la cuenta corriente de clientes pueden salir del libro (ADR-028 del motor), detrás del interruptor por instancia `LIBRACORE_CC_DESDE_EL_LIBRO`, **apagado por defecto**: sin encenderlo no cambia nada. Sin migración.
