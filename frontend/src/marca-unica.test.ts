@@ -3,8 +3,9 @@
 // 🔑 **No es una duplicación evitable.** `branding.ts` lo exporta como literal
 // de JavaScript —lo usa el nombre del producto al lado del logo, en el login y
 // en la sidebar— y `index.css` lo declara como token de CSS, que es lo único que
-// pueden leer las reglas del ítem activo del menú y del encabezado de cancha de
-// la agenda. No hay forma de compartir un literal entre los dos sin generar uno
+// pueden leer las reglas del encabezado de cancha de la agenda. (El ítem activo
+// del menú ya no usa este token: lo pinta `aplicarIdentidad`, ver más abajo.) No
+// hay forma de compartir un literal entre los dos sin generar uno
 // desde el otro.
 //
 // 🔴 **Y el modo de fallar es invisible.** Nadie mira el nombre del producto y
@@ -40,15 +41,20 @@ describe('el verde de la marca', () => {
     expect(tokenDeMarca('/* sin token */')).toBeNull()
   })
 
-  it('🔴 las dos reglas que usan el token siguen ahí', () => {
+  it('🔴 el color del ítem activo del menú lo pone la identidad del kit, no una variable propia', () => {
+    // Desde libra-ui 0.126.0 (ADR-036) `aplicarIdentidad('libraclub')` fija `--libra-menu-activo-fondo|borde|texto` desde el color del producto. Si
+    // el `index.css` volviera a declararlas, el defecto de LibraClub dejaría de salir de la identidad (y de lo que muestra «Apariencia»).
+    expect(CSS).not.toMatch(/--libra-menu-activo-/)
+    // Y la identidad tiene que seguir aplicándose, en el arranque, con el producto correcto.
+    const MAIN = readFileSync(join(process.cwd(), 'src', 'main.tsx'), 'utf8')
+    expect(MAIN).toMatch(/aplicarIdentidad\('libraclub'\)/)
+  })
+
+  it('🔴 la regla que usa el token sigue ahí', () => {
     // El token puede quedar declarado y sin usar, que es exactamente lo que le
     // pasó a los tokens de estado de la grilla: se declararon y se sacaron el
     // mismo día porque la agenda pintaba con clases fijas. Un bloque que dice
     // «esta es la paleta» mientras nadie la usa es peor que no tenerlo.
-    // El ítem activo del menú lo pinta la regla del kit (`libra-ui/tema.css`) con `--libra-menu-activo-borde`; el producto fija su valor por
-    // defecto en `--marca`, y es ESO lo que tiene que seguir ahí (si se hardcodeara, la marca dejaría de mandar en el menú).
-    expect(CSS).toMatch(/--libra-menu-activo-borde:\s*var\(--marca\)/)
-
     // 🔴 **Las DOS declaraciones del encabezado, no «alguna».** La primera
     // versión pedía un `var(--marca)` en los 200 caracteres siguientes a la
     // clase, y eso lo cumplía la línea del borde aunque el fondo se hubiera
