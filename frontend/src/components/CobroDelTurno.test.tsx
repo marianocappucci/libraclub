@@ -17,6 +17,7 @@
  */
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { elegirEnBuscable } from '@/test/select-buscable'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { DetalleDeReserva } from './DetalleDeReserva'
@@ -186,7 +187,7 @@ describe('lo que se cobra', () => {
     montar()
     await screen.findByText('Cobro del turno')
 
-    await user.selectOptions(screen.getByLabelText('Medio'), 'transferencia')
+    await elegirEnBuscable(user, screen.getByLabelText('Medio'), 'Transferencia')
     await user.click(screen.getByRole('button', { name: /^Cobrar$/ }))
 
     await waitFor(() => expect(cobrosPosteados()).toHaveLength(1))

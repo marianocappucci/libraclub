@@ -6,6 +6,7 @@ import { series as api } from '@/lib/api'
 import type { Cancha, Cliente, SerieCreada, SerieEntrada } from '@/lib/api'
 import { Input } from '@/components/ui/input'
 import { buttonVariants } from '@/components/ui/button'
+import { SelectBuscable } from '@/components/select-buscable'
 import { AvisoDeError } from '@/components/listado'
 import { ResultadoDeSerie } from '@/components/ResultadoDeSerie'
 import { hoyISO } from 'libra-ui/fechas'
@@ -107,35 +108,34 @@ export function FormularioDeSerie({
           </div>
         ) : (
           <form onSubmit={enviar} className="space-y-3">
-            <label className="block space-y-1">
-              <span className="text-sm font-medium">Cliente</span>
-              <select
-                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
-                value={datos.cliente_id}
-                onChange={(e) => set('cliente_id', Number(e.target.value))}
-              >
-                {clientes.map((c) => (
-                  <option key={c.id} value={c.id}>{c.nombre}</option>
-                ))}
-              </select>
-            </label>
+            <div className="block space-y-1">
+              <label htmlFor="serie-cliente" className="block text-sm font-medium">Cliente</label>
+              <SelectBuscable
+                id="serie-cliente"
+                value={String(datos.cliente_id)}
+                onChange={(v) => set('cliente_id', Number(v))}
+                opciones={clientes.map((c) => ({ value: String(c.id), label: c.nombre }))}
+                placeholder="Buscar cliente…"
+                limpiable={false}
+              />
+            </div>
 
-            <label className="block space-y-1">
-              <span className="text-sm font-medium">Cancha</span>
-              <select
-                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
-                value={datos.cancha_id}
-                onChange={(e) => set('cancha_id', Number(e.target.value))}
-              >
-                {canchas.map((c) => (
-                  <option key={c.id} value={c.id}>{c.nombre}</option>
-                ))}
-              </select>
-            </label>
+            <div className="block space-y-1">
+              <label htmlFor="serie-cancha" className="block text-sm font-medium">Cancha</label>
+              <SelectBuscable
+                id="serie-cancha"
+                value={String(datos.cancha_id)}
+                onChange={(v) => set('cancha_id', Number(v))}
+                opciones={canchas.map((c) => ({ value: String(c.id), label: c.nombre }))}
+                placeholder="Buscar cancha…"
+                limpiable={false}
+              />
+            </div>
 
             <div className="grid grid-cols-3 gap-2">
               <label className="space-y-1">
                 <span className="text-sm font-medium">Día</span>
+                {/* select-cerrado: los 7 días de la semana, de la constante DIAS */}
                 <select
                   className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
                   value={datos.dia_semana}

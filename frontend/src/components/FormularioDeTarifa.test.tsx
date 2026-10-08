@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FormularioDeTarifa } from './FormularioDeTarifa'
+import { elegirEnBuscable } from '@/test/select-buscable'
 import type { Cancha, Tarifa } from '@/lib/api'
 
 const CANCHAS: Cancha[] = [
@@ -80,6 +81,28 @@ describe('formulario de tarifa', () => {
       'dia_semana',
     )
     expect(screen.getByRole('combobox', { name: /^día$/i })).toBeInTheDocument()
+  })
+
+  it('🔑 la cancha se elige entre las de la sucursal, y «Toda la sucursal» viaja como null', async () => {
+    // El campo es un `SelectBuscable` (ADR-039): la opción «Toda la sucursal» tiene
+    // valor `''`, que la pantalla traduce a `null`; una cancha viaja con su id numérico.
+    const user = userEvent.setup()
+    const onGuardada = abrir(null)
+    await user.type(screen.getByRole('textbox', { name: /nombre/i }), 'Especial')
+    await user.type(screen.getByRole('textbox', { name: /precio/i }), '20000')
+
+    const cancha = screen.getByRole('combobox', { name: /cancha/i })
+    expect(cancha).toHaveValue('Toda la sucursal')
+
+    await user.click(screen.getByRole('button', { name: 'Guardar' }))
+    await waitFor(() => expect(onGuardada).toHaveBeenCalledTimes(1))
+    expect(llamadas.find((l) => l.metodo === 'POST')!.cuerpo).toMatchObject({ cancha_id: null })
+
+    await elegirEnBuscable(user, cancha, 'Cancha 3')
+    expect(cancha).toHaveValue('Cancha 3')
+    await user.click(screen.getByRole('button', { name: 'Guardar' }))
+    await waitFor(() => expect(onGuardada).toHaveBeenCalledTimes(2))
+    expect(llamadas.filter((l) => l.metodo === 'POST')[1].cuerpo).toMatchObject({ cancha_id: 3 })
   })
 
   it('🔑 volver a "feriados" limpia el día, que es un estado que la base rechaza', async () => {

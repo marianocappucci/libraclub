@@ -57,10 +57,10 @@ export function Torneo() {
     apiCanchas.listar().then(setCanchas).catch(() => setCanchas([]))
   }, [])
 
-  if (cargando) return <p className="p-6 text-muted-foreground">Cargando…</p>
+  if (cargando) return <p className="text-muted-foreground">Cargando…</p>
   if (!torneo) {
     return (
-      <div className="space-y-3 p-6">
+      <div className="space-y-3">
         <AvisoDeError mensaje={error ?? 'No se encontró ese torneo.'} />
         <Link to="/torneos" className="text-sm underline">Volver a torneos</Link>
       </div>

@@ -31,13 +31,14 @@ import { AvisoDeError } from '@/components/listado'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SelectBuscable } from '@/components/select-buscable'
 import { ICONOS } from 'libra-ui/iconos-identidad'
 
 export function CajaPorMedio() {
   const { actual } = useSucursal()
   const [desde, setDesde] = useState(primerDiaDelMesISO())
   const [hasta, setHasta] = useState(hoyISO())
-  const [cajaId, setCajaId] = useState('0')
+  const [cajaId, setCajaId] = useState('')
   const [datos, setDatos] = useState<ReportePorMedio | null>(null)
   const [mostradores, setMostradores] = useState<CajaDeMostrador[]>([])
   const [cargando, setCargando] = useState(true)
@@ -71,7 +72,7 @@ export function CajaPorMedio() {
 
   const saldo = (datos?.total_ingresos ?? 0) - (datos?.total_egresos ?? 0)
   const urlDelCsv =
-    `/api/caja/reportes/por-medio/export?desde=${desde}&hasta=${hasta}&caja_id=${cajaId}`
+    `/api/caja/reportes/por-medio/export?desde=${desde}&hasta=${hasta}&caja_id=${cajaId || 0}`
 
   return (
     <div className="space-y-4">
@@ -106,17 +107,17 @@ export function CajaPorMedio() {
         {mostradores.length > 1 && (
           <div className="grid gap-1.5">
             <Label htmlFor="mostrador">Mostrador</Label>
-            <select
+            <SelectBuscable
               id="mostrador"
-              className="h-9 rounded-md border bg-transparent px-3 text-sm"
+              className="w-56"
               value={cajaId}
-              onChange={(e) => setCajaId(e.target.value)}
-            >
-              <option value="0">Todos</option>
-              {mostradores.map((c) => (
-                <option key={c.id} value={String(c.id)}>{c.nombre}</option>
-              ))}
-            </select>
+              onChange={setCajaId}
+              opciones={[
+                { value: '', label: 'Todos' },
+                ...mostradores.map((c) => ({ value: String(c.id), label: c.nombre })),
+              ]}
+              placeholder="Buscar mostrador…"
+            />
           </div>
         )}
         {/* 🔑 Un `<a>` y no un `fetch`: la descarga la hace el navegador con la

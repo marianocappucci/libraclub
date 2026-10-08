@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { elegirEnBuscable } from '@/test/select-buscable'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -165,7 +166,7 @@ describe('los filtros', () => {
     ])
     montar()
     const selector = await screen.findByLabelText('Mostrador')
-    await user.selectOptions(selector, '6')
+    await elegirEnBuscable(user, selector, 'Quincho')
 
     await waitFor(() => {
       expect(porMedio).toHaveBeenLastCalledWith(expect.objectContaining({ cajaId: 6 }))

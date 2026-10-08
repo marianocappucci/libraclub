@@ -12,6 +12,7 @@ import { useAuth } from '@/context/AuthContext'
 import { fecha, hora, pesos } from '@/lib/fechas'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SelectBuscable } from '@/components/select-buscable'
 import { useMediosDePago } from '@/lib/medios-pago'
 import { AvisoDeError } from '@/components/listado'
 import { SeccionDeCobroConQr } from '@/components/CobroConQr'
@@ -388,16 +389,15 @@ function SeccionDeCobro({ reservaId, estado, abierto, onCobrado }: {
           </div>
           <div className="grid gap-1">
             <Label htmlFor="medio-cobro" className="text-xs">Medio</Label>
-            <select
+            <SelectBuscable
               id="medio-cobro"
-              className="h-8 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
+              className="w-44"
               value={medio}
-              onChange={(e) => setMedio(e.target.value)}
-            >
-              {medios.map((m) => (
-                <option key={m.valor} value={m.valor}>{m.etiqueta}</option>
-              ))}
-            </select>
+              onChange={setMedio}
+              opciones={medios.map((m) => ({ value: m.valor, label: m.etiqueta }))}
+              placeholder="Buscar medio…"
+              limpiable={false}
+            />
           </div>
           <button
             className={buttonVariants({ size: 'sm' })}

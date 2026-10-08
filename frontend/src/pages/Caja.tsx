@@ -51,6 +51,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SelectBuscable } from '@/components/select-buscable'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 import { useAuth } from '@/context/AuthContext'
 import { useSucursal } from '@/context/SucursalContext'
@@ -195,16 +196,14 @@ function Apertura({ onAbierta, onError, ultimoCierre }: {
         ) : (
           <div className="grid gap-1.5">
             <Label htmlFor="mostrador">Caja</Label>
-            <select
+            <SelectBuscable
               id="mostrador"
-              className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
               value={elegida}
-              onChange={(e) => setElegida(e.target.value)}
-            >
-              {mostradores.map((c) => (
-                <option key={c.id} value={String(c.id)}>{c.nombre}</option>
-              ))}
-            </select>
+              onChange={setElegida}
+              opciones={mostradores.map((c) => ({ value: String(c.id), label: c.nombre }))}
+              placeholder="Buscar caja…"
+              limpiable={false}
+            />
           </div>
         )}
 
@@ -928,16 +927,14 @@ function CierreDeCuenta({ turno, medios, sucursalId, onCobrado, onError }: {
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="medio-cuenta">Medio</Label>
-          <select
+          <SelectBuscable
             id="medio-cuenta"
-            className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
             value={medio}
-            onChange={(e) => setMedio(e.target.value)}
-          >
-            {medios.map((m) => (
-              <option key={m.valor} value={m.valor}>{m.etiqueta}</option>
-            ))}
-          </select>
+            onChange={setMedio}
+            opciones={medios.map((m) => ({ value: m.valor, label: m.etiqueta }))}
+            placeholder="Buscar medio…"
+            limpiable={false}
+          />
         </div>
       </div>
 
@@ -1220,16 +1217,14 @@ function CobroLibre({ medios, onCobrado, onError }: {
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="medio">Medio</Label>
-          <select
+          <SelectBuscable
             id="medio"
-            className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
             value={medio}
-            onChange={(e) => setMedio(e.target.value)}
-          >
-            {medios.map((m) => (
-              <option key={m.valor} value={m.valor}>{m.etiqueta}</option>
-            ))}
-          </select>
+            onChange={setMedio}
+            opciones={medios.map((m) => ({ value: m.valor, label: m.etiqueta }))}
+            placeholder="Buscar medio…"
+            limpiable={false}
+          />
         </div>
       </div>
       <Button
@@ -1315,14 +1310,14 @@ function Egreso({ onHecho, onError }: {
       <div className="text-sm font-medium">Egreso</div>
       <div className="grid gap-1.5">
         <Label htmlFor="motivo-egreso">Motivo</Label>
-        <select
+        <SelectBuscable
           id="motivo-egreso"
-          className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
           value={motivo}
-          onChange={(e) => setMotivo(e.target.value)}
-        >
-          {motivos.map((m) => <option key={m} value={m}>{m}</option>)}
-        </select>
+          onChange={setMotivo}
+          opciones={motivos.map((m) => ({ value: m, label: m }))}
+          placeholder="Buscar motivo…"
+          limpiable={false}
+        />
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div className="grid gap-1.5">
@@ -1336,16 +1331,14 @@ function Egreso({ onHecho, onError }: {
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="medio-egreso">Medio</Label>
-          <select
+          <SelectBuscable
             id="medio-egreso"
-            className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
             value={medio}
-            onChange={(e) => setMedio(e.target.value)}
-          >
-            {medios.map((m) => (
-              <option key={m.valor} value={m.valor}>{m.etiqueta}</option>
-            ))}
-          </select>
+            onChange={setMedio}
+            opciones={medios.map((m) => ({ value: m.valor, label: m.etiqueta }))}
+            placeholder="Buscar medio…"
+            limpiable={false}
+          />
         </div>
       </div>
       <div className="grid gap-1.5">

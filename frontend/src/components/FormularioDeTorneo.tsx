@@ -117,6 +117,7 @@ export function FormularioDeTorneo({
 
           <label className="block space-y-1">
             <span className="font-medium">Deporte</span>
+            {/* select-cerrado: los 7 deportes de la constante DEPORTES (el backend los valida igual) */}
             <select
               className="h-9 w-full rounded-md border bg-transparent px-3"
               value={datos.deporte}

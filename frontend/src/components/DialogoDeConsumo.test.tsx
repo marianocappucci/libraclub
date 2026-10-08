@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { elegirEnBuscable } from '@/test/select-buscable'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
@@ -183,7 +184,7 @@ describe('la venta suelta, que se cobra en el acto', () => {
     // Se espera a que los medios lleguen: el default se fija en un efecto,
     // y sin esperarlo el cobro saldría con el medio en blanco por carrera.
     await waitFor(() => expect(
-      screen.getByLabelText('Cobrar con')).toHaveValue('efectivo'))
+      screen.getByLabelText('Cobrar con')).toHaveValue('Efectivo'))
     // Dos gaseosas y un agua: 1200×2 + 900 = 3300.
     await userEvent.click(await screen.findByText('Gaseosa 500ml'))
     await userEvent.click(screen.getByLabelText('Agregar uno de Gaseosa 500ml'))
@@ -267,9 +268,9 @@ describe('cobrar la venta suelta con el QR de MercadoPago', () => {
   /** Elige MercadoPago y deja una gaseosa en el carrito. */
   async function elegirMercadoPago() {
     await waitFor(() => expect(
-      screen.getByLabelText('Cobrar con')).toHaveValue('efectivo'))
+      screen.getByLabelText('Cobrar con')).toHaveValue('Efectivo'))
     await userEvent.click(await screen.findByText('Gaseosa 500ml'))
-    await userEvent.selectOptions(screen.getByLabelText('Cobrar con'), 'mercadopago')
+    await elegirEnBuscable(userEvent.setup(), screen.getByLabelText('Cobrar con'), 'MercadoPago')
   }
 
   it('🔴 el botón lleva al QR y NO anota un movimiento a mano', async () => {
@@ -450,10 +451,10 @@ describe('el diálogo, que sigue existiendo para la cuenta de una cancha', () =>
     render(<MontarDialogo />)
     const dialogo = await screen.findByRole('dialog')
     await waitFor(() => expect(
-      within(dialogo).getByLabelText('Cobrar con')).toHaveValue('efectivo'))
+      within(dialogo).getByLabelText('Cobrar con')).toHaveValue('Efectivo'))
     await userEvent.click(await within(dialogo).findByText('Gaseosa 500ml'))
-    await userEvent.selectOptions(
-      within(dialogo).getByLabelText('Cobrar con'), 'mercadopago')
+    await elegirEnBuscable(
+      userEvent.setup(), within(dialogo).getByLabelText('Cobrar con'), 'MercadoPago')
     await userEvent.click(
       within(dialogo).getByRole('button', { name: /Cobrar con QR/i }))
     await within(dialogo).findByText(/Esperando el pago/i)
