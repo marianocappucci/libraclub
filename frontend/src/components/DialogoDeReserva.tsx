@@ -7,6 +7,7 @@ import type { Cancha, Cliente, Turno } from '@/lib/api'
 import { fecha, hora, pesos } from '@/lib/fechas'
 import { Input } from '@/components/ui/input'
 import { buttonVariants } from '@/components/ui/button'
+import { SelectBuscable } from '@/components/select-buscable'
 import { AvisoDeError } from '@/components/listado'
 import { AvisoDeAusentismo } from '@/components/AvisoDeAusentismo'
 import { useReincidentes } from '@/lib/ausentismo'
@@ -191,21 +192,17 @@ export function DialogoDeReserva({
               {/* El botón va FUERA del `<label>`: adentro, su texto entra en el
                   nombre accesible del select y el lector de pantalla anuncia
                   "Cliente … Cliente nuevo" como si fuera una sola cosa. */}
-              <label className="block space-y-1">
-                <span className="text-sm font-medium">Cliente</span>
-                <select
-                  className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
+              <div className="block space-y-1">
+                <label htmlFor="reserva-cliente" className="block text-sm font-medium">Cliente</label>
+                <SelectBuscable
+                  id="reserva-cliente"
                   value={clienteId}
-                  onChange={(e) => setClienteId(e.target.value)}
-                >
-                  {lista.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.nombre}
-                      {c.telefono ? ` — ${c.telefono}` : ''}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  onChange={setClienteId}
+                  opciones={lista.map((c) => ({ value: String(c.id), label: c.nombre, hint: c.telefono ?? undefined }))}
+                  placeholder="Buscar cliente…"
+                  limpiable={false}
+                />
+              </div>
               {/* 🔴 Avisa y nada más: el botón «Reservar» no mira esto. El
                   encargado decide si le pide la seña entera, lo llama el día
                   antes o le toma el turno igual. */}
@@ -255,6 +252,7 @@ export function DialogoDeReserva({
           <div className="grid grid-cols-3 gap-2">
             <label className="space-y-1">
               <span className="text-sm font-medium">Turnos</span>
+              {/* select-cerrado: la cantidad de turnos seguidos, de 1 a MAX_TURNOS (4) */}
               <select
                 className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
                 value={turnos}
@@ -269,6 +267,7 @@ export function DialogoDeReserva({
             </label>
             <label className="space-y-1">
               <span className="text-sm font-medium">Origen</span>
+              {/* select-cerrado: los orígenes son los 3 de la constante ORIGENES (mostrador, teléfono, WhatsApp) */}
               <select
                 className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
                 value={origen}
@@ -283,6 +282,7 @@ export function DialogoDeReserva({
             </label>
             <label className="space-y-1">
               <span className="text-sm font-medium">Estado</span>
+              {/* select-cerrado: los estados son los 2 de la constante ESTADOS (confirmada, pendiente de pago) */}
               <select
                 className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
                 value={estado}

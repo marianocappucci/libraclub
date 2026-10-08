@@ -6,6 +6,7 @@ import { horarios as api } from '@/lib/api'
 import type { Cancha, Franja, FranjaEntrada } from '@/lib/api'
 import { Input } from '@/components/ui/input'
 import { buttonVariants } from '@/components/ui/button'
+import { SelectBuscable } from '@/components/select-buscable'
 import { AvisoDeError } from '@/components/listado'
 
 const DIAS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
@@ -131,25 +132,24 @@ export function FormularioDeHorario({
           <DialogTitle>{franja ? 'Editar horario' : 'Nuevo horario'}</DialogTitle>
         </DialogHeader>
         <form onSubmit={enviar} className="space-y-3">
-          <label className="block space-y-1">
-            <span className="text-sm font-medium">Cancha</span>
-            <select
-              className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
-              value={datos.cancha_id ?? ''}
-              onChange={(e) => set('cancha_id', e.target.value ? Number(e.target.value) : null)}
-            >
-              <option value="">Toda la sucursal</option>
-              {canchas.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nombre}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="block space-y-1">
+            <label htmlFor="horario-cancha" className="block text-sm font-medium">Cancha</label>
+            <SelectBuscable
+              id="horario-cancha"
+              value={datos.cancha_id === null ? '' : String(datos.cancha_id)}
+              onChange={(v) => set('cancha_id', v ? Number(v) : null)}
+              opciones={[
+                { value: '', label: 'Toda la sucursal' },
+                ...canchas.map((c) => ({ value: String(c.id), label: c.nombre })),
+              ]}
+              placeholder="Buscar cancha…"
+            />
+          </div>
 
           <div className="grid grid-cols-2 gap-2">
             <label className="space-y-1">
               <span className="text-sm font-medium">Aplica</span>
+              {/* select-cerrado: el alcance de la franja son los 3 de la constante ALCANCES (todos, un día, feriados) */}
               <select
                 className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
                 value={datos.alcance_dia}
@@ -167,6 +167,7 @@ export function FormularioDeHorario({
             {datos.alcance_dia === 'dia_semana' && (
               <label className="space-y-1">
                 <span className="text-sm font-medium">Día</span>
+                {/* select-cerrado: los 7 días de la semana, de la constante DIAS */}
                 <select
                   className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
                   value={datos.dia_semana ?? 0}

@@ -19,16 +19,18 @@
  *  `<select>` del encabezado viejo (`sucursales.length > 1`).
  */
 import { MapPin } from 'lucide-react'
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
+import { SelectBuscable } from '@/components/select-buscable'
 import { useSucursal } from '@/context/SucursalContext'
 
 export function SelectorDeSucursal() {
   const { sucursales, actual, elegir } = useSucursal()
   if (sucursales.length < 2) return null
   return (
-    <div className="grid gap-2">
+    // 🔴 `onKeyDown` + `stopPropagation`: el selector vive adentro de un `DropdownMenuContent` de Radix, que lleva una búsqueda por letras
+    // (typeahead) sobre sus ítems. Sin esto, escribir «Complejo» en el campo manda el foco a «Cambiar contraseña» a la primera «C» y el campo
+    // pierde lo escrito (medido con el menú real, `SelectorDeSucursal.test.tsx`). El `Escape` y el click afuera no pasan por acá: Radix los
+    // escucha en `document`, así que el menú se cierra igual. Desde libra-ui v0.129.1 el slot `userMenu` de `libra-ui/Layout` también corta el teclado: esto queda como defensa, y es lo que hace pasar el test que monta el selector con un `DropdownMenu` pelado.
+    <div className="grid gap-2" onKeyDown={(e) => e.stopPropagation()}>
       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <MapPin className="h-3.5 w-3.5" />
         Sucursal
@@ -36,22 +38,16 @@ export function SelectorDeSucursal() {
       {/* Sin opción "todas", a diferencia de LibraDesk: `elegir` recibe un
           `number` y la agenda necesita UNA sucursal para poder dibujar la
           grilla. El contexto garantiza que `actual` sea una sucursal activa
-          existente, así que el `value` siempre matchea un `SelectItem`. */}
-      <Select
+          existente, así que el `value` siempre matchea una opción; y por lo
+          mismo no se ofrece la × que la vaciaría (`limpiable={false}`). */}
+      <SelectBuscable
+        ariaLabel="Sucursal"
         value={actual === null ? '' : String(actual)}
-        onValueChange={(v) => elegir(Number(v))}
-      >
-        <SelectTrigger className="h-8 w-full" aria-label="Sucursal">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {sucursales.map((s) => (
-            <SelectItem key={s.id} value={String(s.id)}>
-              {s.nombre}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        onChange={(v) => elegir(Number(v))}
+        opciones={sucursales.map((s) => ({ value: String(s.id), label: s.nombre }))}
+        placeholder="Buscar sucursal…"
+        limpiable={false}
+      />
     </div>
   )
 }

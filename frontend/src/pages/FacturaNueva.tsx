@@ -33,6 +33,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SelectBuscable } from '@/components/select-buscable'
 import { ICONOS } from 'libra-ui/iconos-identidad'
 
 type Item = { description: string; qty: string; unit_price: string }
@@ -181,6 +182,7 @@ export function FacturaNueva() {
           <div className="flex flex-wrap gap-4">
             <div className="grid gap-2">
               <Label>Tipo</Label>
+              {/* select-cerrado: los tipos de comprobante que el emisor puede emitir según su condición de IVA (Factura A/B/C), 3 como mucho */}
               <select
                 className="h-9 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs w-48"
                 aria-label="Tipo de comprobante"
@@ -199,6 +201,7 @@ export function FacturaNueva() {
             </div>
             <div className="grid gap-2">
               <Label>Condición de venta</Label>
+              {/* select-cerrado: las condiciones de venta del catálogo de facturación (Contado, Cuenta corriente, …), una lista corta y fija */}
               <select
                 className="h-9 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs w-52"
                 aria-label="Condición de venta"
@@ -213,17 +216,20 @@ export function FacturaNueva() {
           <div className="flex flex-wrap gap-4">
             <div className="grid gap-2">
               <Label>Cliente del complejo</Label>
-              <select
-                className="h-9 rounded-md border border-input bg-transparent px-2 text-sm shadow-xs w-64"
-                aria-label="Elegir un cliente del complejo"
-                defaultValue=""
-                onChange={(e) => elegirCliente(e.target.value)}
-              >
-                <option value="">Copiar datos de…</option>
-                {listaDeClientes.map((c) => (
-                  <option key={c.id} value={String(c.id)}>{c.nombre}</option>
-                ))}
-              </select>
+              {/* Es una acción («copiar los datos de…») y no un campo: el valor
+                  vuelve siempre a «Copiar datos de…», así se puede copiar de
+                  nuevo el mismo cliente después de editar el nombre. */}
+              <SelectBuscable
+                className="w-64"
+                ariaLabel="Elegir un cliente del complejo"
+                value=""
+                onChange={elegirCliente}
+                opciones={[
+                  { value: '', label: 'Copiar datos de…' },
+                  ...listaDeClientes.map((c) => ({ value: String(c.id), label: c.nombre })),
+                ]}
+                placeholder="Buscar cliente…"
+              />
             </div>
             <div className="grid flex-1 gap-2">
               <Label htmlFor="nombre">Se emite a nombre de</Label>

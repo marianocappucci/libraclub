@@ -13,6 +13,7 @@ import type { Cancha, PartidoDeTorneo, Torneo } from '@/lib/api'
 import { AvisoDeError } from '@/components/listado'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { SelectBuscable } from '@/components/select-buscable'
 import { diaISO, fecha, hora } from '@/lib/fechas'
 import { nombreDe } from '@/components/torneo'
 
@@ -105,15 +106,14 @@ export function DialogoDePartidoDeTorneo({
               <section className="space-y-2">
                 <h3 className="font-medium">Cancha y horario</h3>
                 <div className="grid grid-cols-3 gap-2">
-                  <select
-                    className="h-9 rounded-md border bg-transparent px-2"
-                    value={canchaId}
-                    onChange={(e) => setCanchaId(Number(e.target.value))}
-                  >
-                    {canchas.map((c) => (
-                      <option key={c.id} value={c.id}>{c.nombre}</option>
-                    ))}
-                  </select>
+                  <SelectBuscable
+                    ariaLabel="Cancha"
+                    value={String(canchaId)}
+                    onChange={(v) => setCanchaId(Number(v))}
+                    opciones={canchas.map((c) => ({ value: String(c.id), label: c.nombre }))}
+                    placeholder="Buscar cancha…"
+                    limpiable={false}
+                  />
                   <Input type="date" value={dia} onChange={(e) => setDia(e.target.value)} />
                   <Input
                     type="time"

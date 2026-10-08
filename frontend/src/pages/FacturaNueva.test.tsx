@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { elegirEnBuscable } from '@/test/select-buscable'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -71,9 +72,10 @@ describe('el cliente', () => {
     montar()
     await waitFor(() => expect(listarClientes).toHaveBeenCalled())
 
-    await userEvent.selectOptions(
+    await elegirEnBuscable(
+      userEvent.setup(),
       screen.getByLabelText('Elegir un cliente del complejo'),
-      String(CLIENTE.id),
+      CLIENTE.nombre,
     )
 
     // Los datos se copiaron al formulario…
