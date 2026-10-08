@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { elegirEnBuscable } from '@/test/select-buscable'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DialogoDeReserva } from './DialogoDeReserva'
 import type { Cancha, Turno } from '@/lib/api'
@@ -244,7 +245,7 @@ describe('ausentismo: avisa y NO bloquea', () => {
     abrir()
     await screen.findByRole('status')
 
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: /cliente/i }), '8')
+    await elegirEnBuscable(userEvent.setup(), screen.getByRole('combobox', { name: /cliente/i }), 'Ana Gómez')
 
     expect(screen.queryByRole('status')).toBeNull()
   })

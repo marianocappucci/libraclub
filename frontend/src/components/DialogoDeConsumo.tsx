@@ -38,6 +38,7 @@ import type { ProductoDeBuffet, QrDisponible, VentaConQr } from '@/lib/api'
 import { pesos } from '@/lib/fechas'
 import { AvisoDeError } from '@/components/listado'
 import { buttonVariants } from '@/components/ui/button'
+import { SelectBuscable } from '@/components/select-buscable'
 import {
   ESPERA_MAXIMA_MS, POLL_MS, crearAudio, sonarCampanita,
 } from '@/components/CobroConQr'
@@ -379,19 +380,18 @@ export function PanelDeConsumo({
       )}
 
       {esMostrador ? (
-        <label className="block space-y-1">
-          <span className="text-sm font-medium">Cobrar con</span>
-          <select
-            className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
+        <div className="block space-y-1">
+          <label htmlFor="cobrar-con" className="block text-sm font-medium">Cobrar con</label>
+          <SelectBuscable
+            id="cobrar-con"
             value={medio}
-            onChange={(e) => setMedio(e.target.value)}
+            onChange={setMedio}
+            opciones={medios.map((m) => ({ value: m.valor, label: m.etiqueta }))}
+            placeholder="Buscar medio…"
+            limpiable={false}
             disabled={qr === 'esperando'}
-          >
-            {medios.map((m) => (
-              <option key={m.valor} value={m.valor}>{m.etiqueta}</option>
-            ))}
-          </select>
-        </label>
+          />
+        </div>
       ) : (
         <p className="text-sm text-muted-foreground">
           Se carga a la cancha: se cobra y se factura junto con el turno.

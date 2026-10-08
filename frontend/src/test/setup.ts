@@ -50,3 +50,18 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
       dispatchEvent: () => false,
     }) as unknown as MediaQueryList
 }
+
+/**
+ * jsdom no implementa `Element.scrollIntoView`.
+ *
+ * `libra-ui/SelectBuscable` lo usa para mantener a la vista la opción resaltada
+ * al navegar con las flechas, y desde libra-ui v0.129.0 (ADR-039) casi todos los
+ * desplegables de datos de este producto lo son. Sin esto, abrir uno en un test
+ * explota con "scrollIntoView is not a function" — un error del entorno.
+ *
+ * 🟡 **No hace nada, y hay que saber qué NO prueba:** que la opción resaltada
+ * quede a la vista en una lista larga. Eso se mide en un navegador.
+ */
+if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {}
+}

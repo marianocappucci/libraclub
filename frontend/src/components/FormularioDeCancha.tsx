@@ -118,6 +118,7 @@ export function FormularioDeCancha({
           <div className="grid grid-cols-2 gap-2">
             <label className="space-y-1">
               <span className="text-sm font-medium">Deporte</span>
+              {/* select-cerrado: los 7 deportes de la constante DEPORTES (el backend los valida igual) */}
               <select
                 className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
                 value={datos.deporte}

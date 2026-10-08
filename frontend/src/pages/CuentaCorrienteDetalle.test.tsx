@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { elegirEnBuscable } from '@/test/select-buscable'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -148,7 +149,7 @@ describe('el cobro', () => {
     fireEvent.change(screen.getByLabelText('Fecha'), { target: { value: '2026-09-10' } })
     await userEvent.type(screen.getByLabelText('Concepto'), 'Seña del torneo')
     await userEvent.type(screen.getByLabelText(/Referencia/), 'TRF-4412')
-    await userEvent.selectOptions(screen.getByLabelText('Medio'), 'transferencia')
+    await elegirEnBuscable(userEvent.setup(), screen.getByLabelText('Medio'), 'Transferencia')
 
     await userEvent.click(screen.getByRole('button', { name: /Registrar pago/ }))
 

@@ -17,6 +17,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Caja, partirImporte } from './Caja'
+import { elegirEnBuscable, opcionesDe } from '@/test/select-buscable'
 import type { Cancha, TurnoPorCobrar } from '@/lib/api'
 
 // La pantalla linkea a `/caja/movimientos`: sin router, `<Link>` tumba el árbol
@@ -286,16 +287,16 @@ describe('abrir el turno sobre un mostrador', () => {
   beforeEach(() => { estado.hayTurno = false })
 
   it('🔑 ofrece los mostradores de la sucursal', async () => {
+    const user = userEvent.setup()
     montar()
     const selector = await screen.findByLabelText('Caja')
-    expect(within(selector).getAllByRole('option').map((o) => o.textContent))
-      .toEqual(['Mostrador', 'Buffet'])
+    expect(await opcionesDe(user, selector)).toEqual(['Mostrador', 'Buffet'])
   })
 
   it('🔴 manda la caja elegida al abrir', async () => {
     const user = userEvent.setup()
     montar()
-    await user.selectOptions(await screen.findByLabelText('Caja'), '6')
+    await elegirEnBuscable(user, await screen.findByLabelText('Caja'), 'Buffet')
     await user.click(screen.getByRole('button', { name: /Abrir caja/ }))
 
     await waitFor(() => {
@@ -321,7 +322,7 @@ describe('abrir el turno sobre un mostrador', () => {
     ]
     montar()
     const selector = await screen.findByLabelText('Caja')
-    expect((selector as HTMLSelectElement).value).toBe('6')
+    expect(selector).toHaveValue('Buffet')
   })
 
   it('y sin ninguna predeterminada, la primera — el control del de arriba', async () => {
@@ -329,7 +330,7 @@ describe('abrir el turno sobre un mostrador', () => {
     // anterior por el motivo equivocado.
     montar()
     const selector = await screen.findByLabelText('Caja')
-    expect((selector as HTMLSelectElement).value).toBe('5')
+    expect(selector).toHaveValue('Mostrador')
   })
 
   it('🔴 sin mostradores lo dice, y no deja abrir', async () => {
@@ -834,7 +835,7 @@ describe('cobrar con MercadoPago', () => {
     const user = userEvent.setup()
     montar()
     await user.click(await screen.findByRole('button', { name: /Cancha 1/ }))
-    await user.selectOptions(await screen.findByLabelText('Medio'), 'mercadopago')
+    await elegirEnBuscable(user, await screen.findByLabelText('Medio'), 'MercadoPago')
     return user
   }
 
@@ -967,7 +968,7 @@ describe('cobrar con MercadoPago', () => {
       ]
       montar()
       await user.click(await screen.findByRole('button', { name: /Cancha 1/ }))
-      await user.selectOptions(await screen.findByLabelText('Medio'), 'mercadopago')
+      await elegirEnBuscable(user, await screen.findByLabelText('Medio'), 'MercadoPago')
       await user.click(await screen.findByRole('button', { name: /Cobrar con QR/ }))
       await screen.findByText(/Pedile al cliente que lo escanee/i)
 
@@ -990,7 +991,7 @@ describe('cobrar con MercadoPago', () => {
     const user = userEvent.setup()
     montar()
     await user.click(await screen.findByRole('button', { name: /Cancha 1/ }))
-    expect(await screen.findByLabelText('Medio')).toHaveValue('efectivo')
+    expect(await screen.findByLabelText('Medio')).toHaveValue('Efectivo')
     expect(screen.queryByRole('button', { name: /Cobrar con QR/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Cobrar y cerrar la cuenta/ })).toBeEnabled()
   })
@@ -1024,7 +1025,7 @@ describe('el egreso', () => {
     montar()
     await user.click(await screen.findByRole('button', { name: /Registrar un egreso/ }))
 
-    await user.selectOptions(await screen.findByLabelText('Motivo'), 'Retiro a banco')
+    await elegirEnBuscable(user, await screen.findByLabelText('Motivo'), 'Retiro a banco')
     await user.type(screen.getByLabelText('Monto', { selector: '#monto-egreso' }), '3000')
     await user.click(screen.getByRole('button', { name: /^Registrar egreso$/ }))
 
@@ -1045,8 +1046,7 @@ describe('el egreso', () => {
     await user.click(await screen.findByRole('button', { name: /Registrar un egreso/ }))
 
     const motivos = await screen.findByLabelText('Motivo')
-    expect(within(motivos).getAllByRole('option').map((o) => o.textContent))
-      .toEqual(['Pago a proveedor', 'Retiro a banco'])
+    expect(await opcionesDe(user, motivos)).toEqual(['Pago a proveedor', 'Retiro a banco'])
     expect(llamadas.some((l) => l.ruta.endsWith('/api/caja/motivos-de-egreso'))).toBe(true)
   })
 
@@ -1061,17 +1061,14 @@ describe('el egreso', () => {
     await user.click(await screen.findByRole('button', { name: /Registrar un egreso/ }))
 
     const medios = await screen.findByLabelText('Medio')
-    await waitFor(() => expect(
-      within(medios).getAllByRole('option').map((o) => o.textContent),
-    ).toEqual(['Efectivo', 'Transferencia']))
+    await waitFor(async () => expect(await opcionesDe(user, medios)).toEqual(['Efectivo', 'Transferencia']))
 
     // 🔑 Y el control positivo, en la MISMA corrida: el selector del cobro sí
     // los trae. Sin esto, un stub que devolviera vacío para los dos endpoints
     // haría pasar el assert de arriba sin probar la distinción.
     await user.click(screen.getByRole('button', { name: /^Venta suelta$/ }))
     const cobro = await screen.findByLabelText('Cobrar con')
-    expect(within(cobro).getAllByRole('option').map((o) => o.textContent))
-      .toContain('MercadoPago')
+    expect(await opcionesDe(user, cobro)).toContain('MercadoPago')
   })
 
   it('🔑 los medios del egreso salen de SU endpoint, no de la lista del cobro',

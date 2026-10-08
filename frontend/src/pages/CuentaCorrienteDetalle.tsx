@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SelectBuscable } from '@/components/select-buscable'
 import { ICONOS } from 'libra-ui/iconos-identidad'
 
 type Cuenta = SaldoDeCuenta & { movimientos: MovimientoDeCuenta[] }
@@ -344,22 +345,18 @@ function DialogoDePago({ abierto, clienteId, nombre, saldo, onCerrar, onRegistra
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1.5">
               <Label htmlFor="medio-cc">Medio</Label>
-              {/* `<select>` nativo y no el `Select` de shadcn: es lo que usan
-                  los diez formularios de este producto. Copiar el de Contalibra
-                  acá dejaría este diálogo como el único distinto adentro de
-                  LibraClub, que es lo contrario de normalizar. */}
-              <select
+              {/* `SelectBuscable` (ADR-039 de libra-ui): los medios son datos de la
+                  instancia y todo desplegable de datos de la suite se busca
+                  escribiendo. Antes era un `<select>` nativo, como los demás
+                  formularios de este producto. */}
+              <SelectBuscable
                 id="medio-cc"
-                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
                 value={medio}
-                onChange={(e) => setMedio(e.target.value)}
-              >
-                {medios.map((m) => (
-                  <option key={m.valor} value={m.valor}>
-                    {m.etiqueta}
-                  </option>
-                ))}
-              </select>
+                onChange={setMedio}
+                opciones={medios.map((m) => ({ value: m.valor, label: m.etiqueta }))}
+                placeholder="Buscar medio…"
+                limpiable={false}
+              />
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="referencia-cc">
