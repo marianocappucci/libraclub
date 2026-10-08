@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, Download } from 'lucide-react'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
+import { TarjetaIndicador } from 'libra-ui/TarjetaIndicador'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 import { iconoDe } from 'libra-ui/medios-pago'
 import { hoyISO, primerDiaDelMesISO } from 'libra-ui/fechas'
@@ -142,12 +143,13 @@ export function CajaPorMedio() {
       ) : (
         <>
           <div className="grid gap-3 sm:grid-cols-3">
-            <Tarjeta titulo="Ingresos" valor={pesos(datos!.total_ingresos)} tono="text-exito" />
-            <Tarjeta titulo="Egresos" valor={pesos(datos!.total_egresos)} tono="text-destructive" />
-            <Tarjeta
-              titulo="Saldo"
+            <TarjetaIndicador concepto="cobros" etiqueta="Ingresos" valor={pesos(datos!.total_ingresos)} tono="exito" />
+            <TarjetaIndicador concepto="egresos" etiqueta="Egresos" valor={pesos(datos!.total_egresos)} tono="peligro" />
+            <TarjetaIndicador
+              concepto="caja"
+              etiqueta="Saldo"
               valor={pesos(saldo)}
-              tono={saldo >= 0 ? '' : 'text-destructive'}
+              tono={saldo >= 0 ? 'neutro' : 'peligro'}
             />
           </div>
 
@@ -229,15 +231,6 @@ export function CajaPorMedio() {
           )}
         </>
       )}
-    </div>
-  )
-}
-
-function Tarjeta({ titulo, valor, tono }: { titulo: string; valor: string; tono: string }) {
-  return (
-    <div className="rounded-lg border bg-card p-4">
-      <p className="text-sm text-muted-foreground">{titulo}</p>
-      <p className={`text-2xl font-medium ${tono}`}>{valor}</p>
     </div>
   )
 }
