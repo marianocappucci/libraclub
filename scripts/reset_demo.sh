@@ -34,6 +34,16 @@ RAMA_DEL_SEED="${RAMA_DEL_SEED:-origin/develop}"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
+# Pasa por `log`, linea por linea, lo que le entra por stdin: la salida de los
+# comandos del motor termina en el log del cron con el mismo formato que el resto.
+log_lineas() {
+  local linea
+  while IFS= read -r linea; do
+    [ -n "$linea" ] && log "$linea"
+  done
+  return 0
+}
+
 # --- Las guardas ----------------------------------------------------------
 # Si el nombre no es el de una demo, no se sigue. Es barato, y es lo unico que
 # separa "resetear la demo" de "borrarle la base a un cliente".
@@ -150,25 +160,23 @@ log "filas del dominio + LibraCore antes del reset: $ANTES"
 # entre ellas `demo_codigos`-- vive en la MISMA base que el dominio. O sea que
 # el `DROP SCHEMA` de abajo **se lleva los codigos emitidos**.
 #
-# En Gestiolibra/MedLibra/VentaLibra eso no pasa porque ahi esa tabla esta en
-# otra base, que el reset no toca. Sin este paso, este producto se comportaria
-# distinto del resto de la familia: un codigo emitido a un cliente potencial
-# --que el sistema declara valido por 7 dias y 10 usos-- dejaria de servir en
-# el reset de esa misma noche, sin que nadie lo haya revocado.
+# Y no es propio de este producto: el 2026-10-09 se midio en
+# /var/log/demo_reset.log que las otras seis demos tambien borraban
+# `demo_codigos` cada noche. Un codigo emitido a un cliente potencial --que el
+# sistema declara valido por 7 dias y 10 usos-- dejaria de servir en el reset de
+# esa misma noche, sin que nadie lo haya revocado.
+#
+# La logica (guardar antes del DROP, devolver despues del arranque) vive en el
+# motor, `libracore.provisioning.demo_codigos` (ADR-039), y se llama como
+# comando. Si falla NO se aborta: la demo igual tiene que quedar limpia.
 CODIGOS_DUMP=/tmp/demo-codigos-$CONTENEDOR.sql
+DEMO_CODIGOS="$REPO/.venv-scripts/bin/libracore-demo-codigos"
 rm -f "$CODIGOS_DUMP"
-if docker exec "$SIDECAR" sh -c '
-     psql -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB"        -c "SELECT 1 FROM information_schema.tables WHERE table_name = '"'"'demo_codigos'"'"'"
-   ' 2>/dev/null | grep -q 1; then
-  docker exec "$SIDECAR" sh -c '
-    pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --data-only --table=demo_codigos
-  ' > "$CODIGOS_DUMP" 2>/dev/null || true
-  VIVOS=$(docker exec "$SIDECAR" sh -c '
-    psql -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT COUNT(*) FROM demo_codigos"
-  ' 2>/dev/null || echo 0)
-  log "codigos de acceso a preservar: ${VIVOS:-0}"
+if [ -x "$DEMO_CODIGOS" ]; then
+  "$DEMO_CODIGOS" guardar --sidecar "$SIDECAR" --archivo "$CODIGOS_DUMP" 2>&1 | log_lineas \
+    || { log "OJO: no se pudieron guardar los codigos de acceso: fallo \`guardar\`."; rm -f "$CODIGOS_DUMP"; }
 else
-  log "todavia no existe demo_codigos: nada que preservar"
+  log "OJO: no se pudieron guardar los codigos de acceso: no existe $DEMO_CODIGOS"
 fi
 
 # --- 2. Base de cero ------------------------------------------------------
@@ -337,20 +345,11 @@ fi
 
 # --- 4b. Devolver los codigos de acceso -----------------------------------
 # Ver el 🔴 del paso 1b. La tabla ya existe: la crea `libraauth` al arrancar.
-if [ -s "$CODIGOS_DUMP" ]; then
-  if docker exec -i "$SIDECAR" sh -c '
-       psql -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
-     ' < "$CODIGOS_DUMP" >/dev/null 2>&1; then
-    DEVUELTOS=$(docker exec "$SIDECAR" sh -c '
-      psql -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT COUNT(*) FROM demo_codigos"
-    ' 2>/dev/null || echo 0)
-    log "codigos de acceso devueltos: ${DEVUELTOS:-0}"
-  else
-    # No aborta: la demo ya quedo usable y sin codigos se puede emitir otro.
-    # Pero se dice fuerte, porque el sintoma seria "a nadie le anda el codigo".
-    log "OJO: no se pudieron devolver los codigos de acceso. Hay que emitir uno nuevo."
-  fi
-  rm -f "$CODIGOS_DUMP"
+# Si falla no aborta: la demo ya quedo usable y se puede emitir un codigo nuevo
+# (el comando dice OJO y deja el archivo en su lugar).
+if [ -x "$DEMO_CODIGOS" ]; then
+  "$DEMO_CODIGOS" devolver --sidecar "$SIDECAR" --archivo "$CODIGOS_DUMP" 2>&1 | log_lineas \
+    || log "OJO: fallo \`devolver\`; los codigos siguen en $CODIGOS_DUMP."
 fi
 
 # --- 5. Sembrar -----------------------------------------------------------
