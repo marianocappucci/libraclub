@@ -27,7 +27,7 @@ jobs:
       TZ: America/Argentina/Buenos_Aires
     services:
       postgres:
-        image: postgres:16
+        image: public.ecr.aws/docker/library/postgres:16
         env:
           POSTGRES_DB: libraclub
           POSTGRES_USER: libraclub
