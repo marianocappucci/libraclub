@@ -10,13 +10,19 @@ import { Tabs as TabsPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
+// 🔴 `activationMode="manual"` por defecto (2026-10-09): con el automático de Radix, la pestaña que tiene el foco se reactiva
+// sola. En las pestañas atadas a la URL (Configuración del kit, Agenda, Cuenta corriente…) el «atrás» del navegador no volvía:
+// cambiaba la URL, la pestaña con foco se reactivaba y empujaba de nuevo la suya. Medido en Chromium con radix-ui 1.6.7 y
+// 1.7.0; en jsdom recién se ve con 1.7.0. Con manual, las flechas mueven el foco y Enter o Espacio activan (patrón ARIA válido).
 function Tabs({
   className,
+  activationMode = "manual",
   ...props
 }: React.ComponentProps<typeof TabsPrimitive.Root>) {
   return (
     <TabsPrimitive.Root
       data-slot="tabs"
+      activationMode={activationMode}
       className={cn("flex flex-col gap-2", className)}
       {...props}
     />
