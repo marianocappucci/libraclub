@@ -26,7 +26,7 @@ jobs:
         # detalle de tamaño: el collation viene de la imagen y `-alpine` ordena
         # por bytes, así que un `ORDER BY` sobre texto puede dar distinto. Un CI
         # verde sobre otra imagen no dice nada sobre producción.
-        image: postgres:16
+        image: public.ecr.aws/docker/library/postgres:16
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: libraclub_test
