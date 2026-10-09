@@ -64,7 +64,8 @@ dependencies = [
     # v1.146.0 -> v1.147.0 (2026-10-08): el pedido de certificado de ARCA se genera en el servidor (ADR-036 de libracore: rutas `.../pedido`; `GET .../servicios` suma `admite_pedido`). Sin migracion.
     # v1.147.0 -> v1.148.0 (2026-10-09): filtros de fecha por dia completo (`libracore.fechas`, ADR-037): una fila con hora del ultimo dia entra en reportes, listados y libros. Sin migracion.
     # v1.148.0 -> v1.149.0 (2026-10-09): en una demo (`DEMO_MODE=1`) la empresa es siempre ficticia: `config_manager.load()` pisa los datos de la empresa y `resolve_logo_path()` solo devuelve el logo de demo (ADR-038 de libracore). Fuera de una demo no cambia nada. Sin migracion.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.149.0",
+    # v1.149.0 -> v1.150.0 (2026-10-09): `libracore-demo-codigos` (ADR-039): el reset de la demo guarda y devuelve los codigos de acceso. Sin migracion.
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.150.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
