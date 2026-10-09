@@ -129,11 +129,11 @@ describe('cascarón de LibraClub', () => {
     expect(marca.className).toContain('shrink-0')
 
     const nombre = screen.getByText('LibraClub')
-    // Tipografía de marca sí; el color no: en la barra grafito (libra-ui ADR-043) el kit reemplaza el `text-[#2d2d2d]` del login por el
+    // Tipografía de marca sí; el color no: en la barra grafito (libra-ui ADR-043) el kit reemplaza el color del login por el
     // texto de la barra, que es el único que se lee ahí.
     for (const clase of WORDMARK.split(' ').filter((c) => !c.startsWith('text-[#') && !c.startsWith('dark:text-'))) expect(nombre.className).toContain(clase)
     expect(nombre.className).toContain('text-sidebar-foreground')
-    expect(nombre.className).not.toContain('text-[#2d2d2d]')
+    expect(nombre.className).not.toContain(WORDMARK.split(' ').find((c) => c.startsWith('text-[#')))
     expect(nombre.className).toContain('text-[15px]')
   })
 
