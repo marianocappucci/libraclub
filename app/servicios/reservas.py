@@ -13,7 +13,7 @@ from decimal import Decimal
 from libragenda.recurrence import RecurrenceRule, generate_occurrences
 from libragenda.scheduling import intervals_overlap
 from sqlalchemy import select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from app.models.enums import ESTADOS_QUE_OCUPAN, EstadoReserva, OrigenReserva
@@ -75,6 +75,15 @@ def _es_superposicion(exc: IntegrityError) -> bool:
     return getattr(diag, "constraint_name", None) == CONSTRAINT_SUPERPOSICION
 
 
+#: SQLSTATE `deadlock_detected`. Por código y no por el texto del mensaje, por la
+#: misma razón que `CONSTRAINT_SUPERPOSICION`: el texto se traduce con el locale.
+SQLSTATE_DEADLOCK = "40P01"
+
+
+def _es_deadlock(exc: OperationalError) -> bool:
+    return getattr(getattr(exc, "orig", None), "sqlstate", None) == SQLSTATE_DEADLOCK
+
+
 def ocupadas(
     sesion: Session, cancha_id: int, desde: datetime, hasta: datetime
 ) -> list[Reserva]:
@@ -129,19 +138,40 @@ def _guardar(sesion: Session, reserva: Reserva) -> Reserva:
     que ya se habían creado y devuelve "no se pudo crear la serie" cuando se
     podían crear doce.
     """
-    punto = sesion.begin_nested()
-    try:
-        sesion.add(reserva)
-        sesion.flush()
-    except IntegrityError as exc:
-        punto.rollback()
-        if _es_superposicion(exc):
-            raise Superpuesta(
-                "Alguien tomó esa cancha a esa hora mientras cargabas la reserva."
-            ) from exc
-        raise
-    punto.commit()
-    return reserva
+    # 🔴 **Dos `INSERT` simultáneos del mismo turno pueden dar `DeadlockDetected`
+    # y no el `IntegrityError` del constraint.** El de exclusión inserta primero
+    # la fila y el índice y recién después busca conflictos: si las dos
+    # transacciones llegaron a insertar antes de que cualquiera mirara, cada una
+    # ve la fila sin commitear de la otra y se queda esperando que termine. Es
+    # un ciclo, y a 1 s (`deadlock_timeout`) PostgreSQL mata a una con 40P01.
+    # Medido: ~13 % de las veces con dos hilos pegados. La otra sigue y gana, así
+    # que **no hay doble reserva**; lo que se rompía era el perdedor, que salía
+    # como `OperationalError` (un 500) en vez de "alguien tomó esa cancha" (409).
+    #
+    # Se reintenta **una vez** y no se traduce directo a `Superpuesta`: el
+    # deadlock no dice si la otra transacción va a commitear o a deshacer. Al
+    # reintentar, el `INSERT` espera a que la ganadora termine y entonces o
+    # choca contra el constraint (`Superpuesta`, el caso de siempre) o entra,
+    # porque el turno de verdad quedó libre.
+    for intento in (1, 2):
+        punto = sesion.begin_nested()
+        try:
+            sesion.add(reserva)
+            sesion.flush()
+        except IntegrityError as exc:
+            punto.rollback()
+            if _es_superposicion(exc):
+                raise Superpuesta(
+                    "Alguien tomó esa cancha a esa hora mientras cargabas la reserva."
+                ) from exc
+            raise
+        except OperationalError as exc:
+            punto.rollback()
+            if _es_deadlock(exc) and intento == 1:
+                continue
+            raise
+        punto.commit()
+        return reserva
 
 
 def _verificar_dentro_del_horario(
