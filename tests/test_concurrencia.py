@@ -10,13 +10,15 @@ from __future__ import annotations
 import threading
 from datetime import datetime, timedelta
 
+import psycopg
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from app.models.enums import EstadoReserva, OrigenReserva
 from app.models.reservas import Reserva
+from app.servicios import reservas as servicio
 from app.tiempo import TZ
 
 CONSTRAINT = "ex_reservas_sin_superposicion"
@@ -64,17 +66,29 @@ def _reserva(cancha_id: int, cliente_id: int, momento: datetime) -> Reserva:
 
 
 def _pelear(engine, cancha_id, cliente_id, momento) -> list[str]:
-    """Dos hilos insertando el mismo turno a la vez. Devuelve qué pasó en cada uno.
+    """Dos hilos reservando el mismo turno a la vez. Devuelve qué pasó en cada uno.
+
+    Cada hilo va por `servicio.reservas._guardar`, el camino de **producción**, y
+    no por un `session.add` pelado: lo que importa es qué recibe la persona que
+    pierde la carrera, y eso lo decide `_guardar`.
 
     La `Barrier` es lo que hace que sean **simultáneos de verdad**: sin ella, el
     primer hilo suele terminar antes de que el segundo arranque y el test mide el
     caso secuencial, que el constraint también rechaza pero que no prueba nada
     sobre concurrencia.
 
-    El segundo hilo **se bloquea** dentro del `INSERT` —PostgreSQL toma un lock
-    de exclusión— hasta que el primero commitea, y recién ahí falla. Eso es
-    exactamente lo que un chequeo read-then-write en la aplicación no puede
-    hacer: los dos leerían "está libre" y los dos escribirían.
+    Con dos `INSERT` realmente simultáneos PostgreSQL resuelve de **dos maneras
+    distintas**, según quién llegue primero a mirar el índice: o el segundo se
+    bloquea hasta que el primero commitea y recién ahí falla con el constraint, o
+    las dos filas entran antes de que nadie mire y se produce un deadlock del que
+    PostgreSQL mata a una (40P01, al cabo de `deadlock_timeout`). Las dos son
+    carreras que el constraint gana; `_guardar` tiene que devolver `Superpuesta`
+    en ambas. Eso es exactamente lo que un chequeo read-then-write en la
+    aplicación no puede hacer: los dos leerían "está libre" y los dos escribirían.
+
+    Cualquier otra excepción se anota como `error:<clase>` y no se traga: un hilo
+    que muere en silencio deja la lista con un solo elemento y el rojo no dice por
+    qué (así se escondió el deadlock durante semanas).
     """
     fabrica = sessionmaker(bind=engine, expire_on_commit=False, future=True)
     barrera = threading.Barrier(2, timeout=10)
@@ -84,19 +98,20 @@ def _pelear(engine, cancha_id, cliente_id, momento) -> list[str]:
     def intentar() -> None:
         with fabrica() as sesion:
             reserva = _reserva(cancha_id, cliente_id, momento)
-            sesion.add(reserva)
             barrera.wait()
             try:
+                servicio._guardar(sesion, reserva)
                 sesion.commit()
-            except IntegrityError as exc:
+            except servicio.Superpuesta:
                 sesion.rollback()
-                diag = getattr(getattr(exc, "orig", None), "diag", None)
-                nombre = getattr(diag, "constraint_name", None)
-                with candado:
-                    resultados.append(f"choque:{nombre}")
+                resultado = "choque"
+            except Exception as exc:  # noqa: BLE001 -- se informa, no se traga
+                sesion.rollback()
+                resultado = f"error:{type(exc).__name__}"
             else:
-                with candado:
-                    resultados.append("ok")
+                resultado = "ok"
+            with candado:
+                resultados.append(resultado)
 
     hilos = [threading.Thread(target=intentar) for _ in range(2)]
     for hilo in hilos:
@@ -114,7 +129,7 @@ def test_dos_reservas_simultaneas_solo_una_gana(engine, sesion, cancha, cliente)
     momento = datetime(2026, 9, 1, 20, 0, tzinfo=TZ)
     resultados = _pelear(engine, cancha.id, cliente.id, momento)
 
-    assert sorted(resultados) == ["choque:" + CONSTRAINT, "ok"], (
+    assert sorted(resultados) == ["choque", "ok"], (
         f"esperaba un éxito y un choque del constraint, salió {resultados}"
     )
 
@@ -124,6 +139,100 @@ def test_dos_reservas_simultaneas_solo_una_gana(engine, sesion, cancha, cliente)
         text("SELECT count(*) FROM reservas WHERE cancha_id = :c"), {"c": cancha.id}
     ).scalar_one()
     assert cuantas == 1
+
+
+def _deadlock() -> OperationalError:
+    """El error que PostgreSQL le da a la víctima de un deadlock, tal cual llega."""
+    return OperationalError(
+        "INSERT INTO reservas ...", {}, psycopg.errors.DeadlockDetected("deadlock detected")
+    )
+
+
+def _con_deadlocks(sesion, monkeypatch, cuantos: int) -> list[int]:
+    """Hace que los primeros `cuantos` `flush` de la sesión mueran por deadlock.
+
+    El deadlock entre dos `INSERT` del mismo turno es una cuestión de timing que
+    no se puede forzar desde SQL; acá se lo **inyecta** en el punto exacto donde
+    PostgreSQL lo entrega, para probar de forma determinista lo que hace
+    `_guardar` con él. Que el deadlock real ocurre lo prueba el gate de arriba.
+    """
+    llamadas: list[int] = []
+    real = sesion.flush
+
+    def flush(*args, **kwargs):
+        # `begin_nested()` también hace un `flush`, con la reserva todavía sin
+        # agregar: sólo cuenta el que lleva el `INSERT`.
+        if any(isinstance(objeto, Reserva) for objeto in sesion.new):
+            llamadas.append(1)
+            if len(llamadas) <= cuantos:
+                raise _deadlock()
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(sesion, "flush", flush)
+    return llamadas
+
+
+def test_deadlock_contra_una_reserva_ganadora_es_superpuesta(
+    engine, sesion, cancha, cliente, monkeypatch
+):
+    """La víctima del deadlock recibe "alguien tomó la cancha" (409), no un 500.
+
+    La otra transacción ya commiteó: al reintentar, el `INSERT` choca contra el
+    constraint y `_guardar` lo traduce como siempre. Sin el reintento, el
+    `OperationalError` salía crudo y la API respondía 500.
+    """
+    momento = datetime(2026, 9, 1, 20, 0, tzinfo=TZ)
+    with engine.begin() as conexion:
+        conexion.execute(
+            text(
+                "INSERT INTO reservas (cancha_id, cliente_id, estado, origen, "
+                "comienza_at, termina_at) VALUES (:c, :k, 'confirmada', "
+                "'mostrador', :a, :b)"
+            ),
+            {"c": cancha.id, "k": cliente.id, "a": momento,
+             "b": momento + timedelta(minutes=90)},
+        )
+    llamadas = _con_deadlocks(sesion, monkeypatch, 1)
+
+    with pytest.raises(servicio.Superpuesta):
+        servicio._guardar(sesion, _reserva(cancha.id, cliente.id, momento))
+
+    assert len(llamadas) == 2, "tenía que reintentar una vez después del deadlock"
+    sesion.rollback()
+    cuantas = sesion.execute(
+        text("SELECT count(*) FROM reservas WHERE cancha_id = :c"), {"c": cancha.id}
+    ).scalar_one()
+    assert cuantas == 1
+
+
+def test_deadlock_con_el_turno_libre_reintenta_y_entra(
+    sesion, cancha, cliente, monkeypatch
+):
+    """Si la otra transacción deshizo, el turno quedó libre y la reserva entra.
+
+    Es la razón de reintentar en vez de traducir el deadlock directo a
+    `Superpuesta`: el deadlock no dice quién gana, y declarar "ocupada" una
+    cancha libre sería rechazar una reserva válida.
+    """
+    momento = datetime(2026, 9, 1, 20, 0, tzinfo=TZ)
+    llamadas = _con_deadlocks(sesion, monkeypatch, 1)
+
+    reserva = servicio._guardar(sesion, _reserva(cancha.id, cliente.id, momento))
+    sesion.commit()
+
+    assert len(llamadas) == 2
+    assert reserva.id is not None
+
+
+def test_dos_deadlocks_seguidos_no_se_tragan(sesion, cancha, cliente, monkeypatch):
+    """El reintento es uno solo: un segundo deadlock se propaga, no se cicla."""
+    momento = datetime(2026, 9, 1, 20, 0, tzinfo=TZ)
+    llamadas = _con_deadlocks(sesion, monkeypatch, 2)
+
+    with pytest.raises(OperationalError):
+        servicio._guardar(sesion, _reserva(cancha.id, cliente.id, momento))
+
+    assert len(llamadas) == 2
 
 
 def test_control_positivo_sin_el_constraint_entran_las_dos(engine, sesion, cancha, cliente):
