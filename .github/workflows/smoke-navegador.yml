@@ -25,22 +25,17 @@ jobs:
     timeout-minutes: 20
     env:
       TZ: America/Argentina/Buenos_Aires
-    services:
-      postgres:
-        image: public.ecr.aws/docker/library/postgres:16
-        env:
-          POSTGRES_DB: libraclub
-          POSTGRES_USER: libraclub
-          POSTGRES_PASSWORD: libraclub-ci
-          TZ: America/Argentina/Buenos_Aires
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd="pg_isready -U libraclub -d libraclub"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
     steps:
+      # El PostgreSQL sale de la Action compartida de libra-web-kit (`postgres-ci-v1`, desde el espejo de ECR;
+      # reglas/ci.md del wiki), con los mismos datos y el mismo healthcheck que el `services:` de antes.
+      - name: PostgreSQL de la suite
+        uses: marianocappucci/libra-web-kit/.github/actions/postgres-ci@postgres-ci-v1
+        with:
+          variante: debian
+          base: libraclub
+          usuario: libraclub
+          clave: libraclub-ci
+          tz: America/Argentina/Buenos_Aires
       - uses: actions/checkout@v7
 
       # -- Dependencias privadas: la misma receta que los jobs test y frontend --
