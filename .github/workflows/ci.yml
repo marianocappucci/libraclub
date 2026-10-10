@@ -20,24 +20,22 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        # La MISMA imagen que producción (ver docker-compose.yml). No es un
-        # detalle de tamaño: el collation viene de la imagen y `-alpine` ordena
-        # por bytes, así que un `ORDER BY` sobre texto puede dar distinto. Un CI
-        # verde sobre otra imagen no dice nada sobre producción.
-        image: public.ecr.aws/docker/library/postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: libraclub_test
-        options: >-
-          --health-cmd pg_isready --health-interval 10s
-          --health-timeout 5s --health-retries 5
-        ports: ['5432:5432']
     env:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/libraclub_test
       TZ: America/Argentina/Buenos_Aires
     steps:
+      # El PostgreSQL sale de la Action compartida de libra-web-kit (`postgres-ci-v1`, desde el espejo de ECR;
+      # reglas/ci.md del wiki), con los mismos datos y el mismo healthcheck que el `services:` de antes.
+      # La MISMA imagen que producción (ver docker-compose.yml). No es un
+      # detalle de tamaño: el collation viene de la imagen y `-alpine` ordena
+      # por bytes, así que un `ORDER BY` sobre texto puede dar distinto. Un CI
+      # verde sobre otra imagen no dice nada sobre producción.
+      - name: PostgreSQL de la suite
+        uses: marianocappucci/libra-web-kit/.github/actions/postgres-ci@postgres-ci-v1
+        with:
+          variante: debian
+          base: libraclub_test
+          clave: postgres
       - uses: actions/checkout@v7
 
       # F3 (2026-09-05): un PR que solo toca frontend/ o documentacion no corre
