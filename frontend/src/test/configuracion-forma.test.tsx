@@ -124,7 +124,7 @@ describe('la Configuración de LibraClub', () => {
   })
 
   it('ARCA sube el certificado: ya no hay dónde tipear una ruta del servidor', async () => {
-    montar('/configuracion?seccion=integraciones&integracion=arca')
+    montar('/configuracion?seccion=integraciones&integracion=arca&arca=homologacion')
 
     // 🔑 Se nombra el ambiente: desde libra-ui v0.57.0 la tarjeta muestra los
     // DOS pares de credenciales, así que hay dos "Certificado (.crt)" en la
@@ -133,7 +133,9 @@ describe('la Configuración de LibraClub', () => {
     expect(await screen.findByLabelText(/Certificado.*Homologaci/))
       .toHaveAttribute('type', 'file')
     // Y el par de producción también está, que es lo que el cambio agrega.
-    expect(screen.getByLabelText(/Certificado.*Producci/)).toHaveAttribute('type', 'file')
+    // Desde libra-ui v0.135.0 (ADR-047) cada ambiente va en su pestaña: el de producción se abre por la URL.
+    montar('/configuracion?seccion=integraciones&integracion=arca&arca=produccion')
+    expect(await screen.findByLabelText(/Certificado.*Producci/)).toHaveAttribute('type', 'file')
     expect(screen.queryByLabelText(/Path del certificado/)).toBeNull()
   })
 
