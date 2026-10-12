@@ -8,6 +8,7 @@
  */
 
 import { sumarDiasISO } from 'libra-ui/fechas'
+import { formatoMoneda } from 'libra-ui/formatos'
 
 export const TZ = 'America/Argentina/Buenos_Aires'
 
@@ -129,11 +130,7 @@ export function pesos(valor: string | number | null | undefined): string {
   if (valor === null || valor === undefined || valor === '') return ''
   const numero = typeof valor === 'string' ? Number(valor) : valor
   if (Number.isNaN(numero)) return ''
-  return new Intl.NumberFormat('es-AR', {
-    style: 'currency',
-    currency: 'ARS',
-    maximumFractionDigits: 2,
-  }).format(numero)
+  return formatoMoneda(numero)
 }
 
 function aDate(valor: string | Date | null | undefined): Date | null {
