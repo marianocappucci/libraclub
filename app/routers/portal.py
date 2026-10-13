@@ -37,6 +37,7 @@ from app.db import obtener_sesion
 from app.models.maestros import Cancha, CuentaDeJugador
 from app.models.reservas import PagoDeReserva, Reserva
 from app.portal_sesion import borrar_cookie, crear_cookie, cuenta_actual, exigir_jugador
+from app.routers.auth import USADOS_DEL_CAPTCHA
 from app.routers.mp_bandeja import REFERENCIAS_PROPIAS
 from app.servicios import devoluciones
 from app.servicios import pagos as servicio_pagos
@@ -113,8 +114,12 @@ def _exigir_captcha(request: Request, captcha: str) -> None:
     la función real en el momento del import, ANTES del parche, y esta ruta
     dejaría de aprobar el captcha con el resto de la suite. El arreglo de
     fondo sería que libraauth exporte una versión pública de esto.
+
+    🔴 **Con `USADOS_DEL_CAPTCHA`** (libraauth v0.50.0, ADR-023): si a este worker le toca crear el `Captcha` del
+    proceso (el `GET /auth/captcha` pudo caer en otro), lo crea anotando en la base y no en memoria, igual que el
+    router de `/auth`.
     """
-    if not _session_auth._captcha_de(request).verificar(captcha):
+    if not _session_auth._captcha_de(request, USADOS_DEL_CAPTCHA).verificar(captcha):
         raise HTTPException(400, _session_auth.CAPTCHA_INVALIDO)
 
 

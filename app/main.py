@@ -34,11 +34,13 @@ from libraauth.terminos import TerminosRepository, build_terminos_router
 from libracore import config_manager as _lc_config_manager
 from libracore.arca_router import build_arca_router
 from libracore.caja_router import build_cierre_diario_router
+from libracore.candados import una_vez_al_arrancar
 from libracore.config_router import (
     build_backup_router,
     build_empresa_admin_router,
     build_empresa_router,
 )
+from libracore.errores import instalar_registro_de_errores
 from libracore.mp_config_router import build_mp_config_router
 from libracore.resguardo_enlace import build_resguardo_enlace_router
 from libracore.respaldo import Instancia
@@ -223,42 +225,48 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     _lc_config_manager.usar_almacen_de_secretos(_secretos)
     migrar_secretos()
 
-    if sembrar_admin:
-        # Variante **fail-closed**: sin `LIBRACLUB_ADMIN_PASSWORD` la app no
-        # levanta, salvo `ENV=development`. La otra (`ensure_admin_user`) inventa
-        # una contraseña y la imprime, y no son intercambiables.
-        ensure_default_admin(usuarios, env_prefix="LIBRACLUB")
+    # 🔴 Las siembras de abajo son «si no existe, crear», y con `uvicorn --workers N` (ADR-044 de libracore; hoy N =
+    # 1) cada worker corre este arranque: las dos preguntas «¿existe?» se contestan «no» antes de que ninguna haya
+    #   creado. `una_vez_al_arrancar` las serializa (el segundo espera al primero y ve lo que dejó), y por eso cada
+    #   una **sigue preguntando adentro**: el candado las ordena, no las saltea. `destino` es la base del dominio:
+    #   `libracore.db` puede no estar configurada (una instancia sin facturación arranca igual).
+    with una_vez_al_arrancar("libraclub-sembrar", destino=config.database_url):
+        if sembrar_admin:
+            # Variante **fail-closed**: sin `LIBRACLUB_ADMIN_PASSWORD` la app no
+            # levanta, salvo `ENV=development`. La otra (`ensure_admin_user`) inventa
+            # una contraseña y la imprime, y no son intercambiables.
+            ensure_default_admin(usuarios, env_prefix="LIBRACLUB")
 
-    # El visitante de la demo pública, **sólo si esta instancia es una demo**:
-    # se guía por `DEMO_MODE` + `DEMO_USERNAME`, las mismas dos variables que
-    # registran `POST /auth/demo`. En la instancia de un complejo devuelve None
-    # y no toca la base.
-    #
-    # 🔴 Sin esta llamada la ruta existe y no tiene a quién loguear: contesta
-    # `503 demo user not provisioned`. Cablear `incluir_demo=True` en el router
-    # no alcanza — la ruta y la siembra las conecta el producto, cada una por
-    # su lado, y ninguna de las dos delata que falta la otra.
-    ensure_demo_user(usuarios)
+        # El visitante de la demo pública, **sólo si esta instancia es una demo**:
+        # se guía por `DEMO_MODE` + `DEMO_USERNAME`, las mismas dos variables que
+        # registran `POST /auth/demo`. En la instancia de un complejo devuelve None
+        # y no toca la base.
+        #
+        # 🔴 Sin esta llamada la ruta existe y no tiene a quién loguear: contesta
+        # `503 demo user not provisioned`. Cablear `incluir_demo=True` en el router
+        # no alcanza — la ruta y la siembra las conecta el producto, cada una por
+        # su lado, y ninguna de las dos delata que falta la otra.
+        ensure_demo_user(usuarios)
 
-    # Una caja por sucursal, para las instancias que ya venían andando.
-    #
-    # 🔑 **Sin esto, subir esta versión deja al mostrador sin poder abrir el
-    # turno**: desde ahora el turno se abre SOBRE una caja, no habría ninguna
-    # para elegir, y crearla es de admin. Es idempotente — en el segundo
-    # arranque no crea nada.
-    #
-    # Va detrás de `hay_base()` porque las cajas viven en LibraCore: una
-    # instancia sin facturación configurada arranca igual, sin cajas y sin caja
-    # que abrir, exactamente como antes de este cambio.
-    if servicio_facturacion.hay_base():
-        with db.fabrica_de_sesiones()() as sesion_bootstrap:
-            sedes = [
-                (fila.id, fila.nombre)
-                for fila in sesion_bootstrap.query(Sucursal).filter_by(activa=True).all()
-            ]
-        creadas = servicio_caja.asegurar_cajas_de_todas(sedes)
-        if creadas:
-            _log.info("Se crearon %s cajas iniciales, una por sucursal", creadas)
+        # Una caja por sucursal, para las instancias que ya venían andando.
+        #
+        # 🔑 **Sin esto, subir esta versión deja al mostrador sin poder abrir el
+        # turno**: desde ahora el turno se abre SOBRE una caja, no habría ninguna
+        # para elegir, y crearla es de admin. Es idempotente — en el segundo
+        # arranque no crea nada.
+        #
+        # Va detrás de `hay_base()` porque las cajas viven en LibraCore: una
+        # instancia sin facturación configurada arranca igual, sin cajas y sin caja
+        # que abrir, exactamente como antes de este cambio.
+        if servicio_facturacion.hay_base():
+            with db.fabrica_de_sesiones()() as sesion_bootstrap:
+                sedes = [
+                    (fila.id, fila.nombre)
+                    for fila in sesion_bootstrap.query(Sucursal).filter_by(activa=True).all()
+                ]
+            creadas = servicio_caja.asegurar_cajas_de_todas(sedes)
+            if creadas:
+                _log.info("Se crearon %s cajas iniciales, una por sucursal", creadas)
 
     app = FastAPI(
         title="LibraClub",
@@ -301,6 +309,10 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # `CSP_SPA` y no la CSP por defecto: esa habilita `cdn.jsdelivr.net` para las
     # apps Jinja2, y este producto no carga nada externo. Ver libracore.
     app.add_middleware(SecurityHeadersMiddleware, csp=CSP_SPA)
+    # El registro de errores de la familia (ADR-045 de libracore): un 500 deja una línea en
+    # `DATA_DIR/errores/errores.jsonl` y responde con un `ref`; monta `POST /api/errores-cliente` para los errores del
+    # navegador. Una sola línea, **al construir la app**: Starlette no deja sumar handlers después.
+    instalar_registro_de_errores(app, "libraclub")
 
     app.include_router(salud.router)
     # `construir_router()` y no un `router` de módulo: lee `DEMO_MODE` al

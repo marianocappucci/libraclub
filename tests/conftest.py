@@ -437,7 +437,9 @@ def _captcha_aprobado(monkeypatch):
     app se arma con `crear_app()` en decenas de lugares distintos — un parche
     sobre una app no alcanzaría a las otras.
     """
-    monkeypatch.setattr("libraauth.session_auth._captcha_de", lambda request: _CAPTCHA_DE_PRUEBA)
+    # libraauth v0.50.0 (ADR-023) llama `_captcha_de(request, usados)`: el segundo argumento es el `captcha_usados=`
+    # del router, que el doble ignora.
+    monkeypatch.setattr("libraauth.session_auth._captcha_de", lambda request, usados=None: _CAPTCHA_DE_PRUEBA)
 
 
 @pytest.fixture
@@ -467,3 +469,11 @@ def abrir_caja():
         })
 
     return _abrir
+
+
+@pytest.fixture(autouse=True)
+def _errores_a_tmp(tmp_path, monkeypatch):
+    """El registro de errores (ADR-045) escribe en `DATA_DIR/errores/` o, sin `DATA_DIR`, en `./errores/`: un
+    test que provoca un 500 a propósito (la base caída en `/health`) dejaría el archivo en el repo. Cada test
+    escribe en su tmp."""
+    monkeypatch.setenv("LIBRA_ERRORES_DIR", str(tmp_path / "errores-del-registro"))

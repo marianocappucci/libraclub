@@ -82,3 +82,34 @@ def test_login_con_el_desafio_resuelto_entra(cliente):
     assert r.status_code == 200, r.text
     # Y la sesión quedó abierta: no alcanza con el 200 del login.
     assert cliente.get("/auth/me").status_code == 200
+
+
+def test_los_desafios_usados_se_anotan_en_la_base_y_no_en_la_memoria_del_proceso(engine, sesion, monkeypatch):
+    """Los usados van a `libraauth_captcha_usados` (libraauth v0.50.0, ADR-023).
+
+    Con `uvicorn --workers N` (hoy N = 1) una lista en memoria deja que un desafío resuelto sirva **una vez por
+    worker**. Acá NO se deja un `Captcha` barato en `app.state`: lo arma el router con el `captcha_usados` de este
+    producto (costo de producción, del orden de un segundo). Si alguien saca `captcha_usados=` de
+    `app/routers/auth.py`, la fila no aparece y esto da rojo.
+    """
+    from altcha import Challenge, Payload, solve_challenge
+    from sqlalchemy import text
+
+    monkeypatch.setattr("libraauth.session_auth._captcha_de", CAPTCHA_DE_ORIGINAL)
+    monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
+    monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
+    AuthBase.metadata.drop_all(engine)
+    crear_schema_de_auth(engine)
+    try:
+        c = TestClient(crear_app(_config()), base_url="https://testserver")
+        desafio = Challenge.from_dict(c.get("/auth/captcha").json())
+        solucion = Payload(desafio, solve_challenge(desafio)).to_base64()
+        cuerpo = {"username": USUARIO, "password": CLAVE, "captcha": solucion}
+
+        assert c.post("/auth/login", json=cuerpo).status_code == 200
+        assert sesion.execute(text("SELECT count(*) FROM libraauth_captcha_usados")).scalar() == 1
+        sesion.rollback()
+        assert c.post("/auth/login", json=cuerpo).status_code == 400
+    finally:
+        sesion.rollback()
+        AuthBase.metadata.drop_all(engine)

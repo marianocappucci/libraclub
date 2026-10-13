@@ -24,7 +24,21 @@ seis desde julio.
 from __future__ import annotations
 
 from fastapi import APIRouter
+from libraauth.captcha import UsadosEnBase
 from libraauth.session_auth import build_json_api_auth_router
+
+from app import db
+
+#: Dónde se anotan los desafíos del captcha ya resueltos: la tabla `libraauth_captcha_usados` (libraauth v0.50.0,
+#: ADR-023), no la memoria del proceso. Con `uvicorn --workers N` (hoy N = 1) una lista por proceso deja que un
+#: desafío resuelto sirva **una vez por worker**. Necesita la migración `0003` de la cadena de libraauth, que corre
+#: antes de uvicorn. La fábrica de sesiones se resuelve en cada uso (`lambda`): `db.inicializar()` la rearma cada vez
+#: que `crear_app()` corre.
+#:
+#: 🔑 **Es uno solo para `/auth` y para el portal** (`routers/portal.py`): el portal verifica con `_captcha_de(request,
+#: ...)` y, si le toca crear el `Captcha` del proceso, tiene que crearlo con los mismos `usados` o ese worker anota en
+#: memoria.
+USADOS_DEL_CAPTCHA = UsadosEnBase(lambda: db.fabrica_de_sesiones()())
 
 
 def construir_router() -> APIRouter:
@@ -47,4 +61,5 @@ def construir_router() -> APIRouter:
         # 2026-09-11 (ADR-014 de libraauth). Va junto con el bloqueo por IP,
         # no en su lugar: la IP no frena a quien reparte los intentos.
         captcha=True,
+        captcha_usados=USADOS_DEL_CAPTCHA,
     )
