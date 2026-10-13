@@ -84,7 +84,7 @@ services:
     # `exec` para que uvicorn quede como PID 1 y `docker stop` le llegue. Si la
     # migración falla el contenedor sale con error, que es mejor que servir
     # código nuevo sobre un esquema viejo.
-    command: sh -c "libracore-migrar upgrade --prefijo libraclub && libraauth-migrar upgrade --prefijo libraclub --base dominio && alembic upgrade head && exec uvicorn app.asgi:app --host 0.0.0.0 --port 8000"
+    command: sh -c "libracore-migrar upgrade --prefijo libraclub && libraauth-migrar upgrade --prefijo libraclub --base dominio && alembic upgrade head && exec uvicorn app.asgi:app --host 0.0.0.0 --port 8000 --workers ${WEB_CONCURRENCY:-1}"
     environment:
       # Las tres sin default: la app tiene que fallar al arrancar si falta
       # alguna, no levantar con un secreto de juguete en un dominio público.
@@ -148,6 +148,12 @@ services:
       # directorio de trabajo, o sea fuera del volumen de datos.
       - DATA_DIR=/app/data
       - TZ=America/Argentina/Buenos_Aires
+      # El registro de errores (ADR-045 de libracore): de qué instancia es cada línea de `errores/errores.jsonl` bajo `DATA_DIR`.
+      # En las instancias de cliente y demo las escribe el panel; `-dev` no pasa por el panel, así que van acá.
+      # `LIBRA_VERSION` la fija quien despliega (`LIBRA_VERSION=... docker compose up`); sin ella dice `dev`.
+      - LIBRA_ENTORNO=dev
+      - LIBRA_INSTANCIA=libraclub-dev
+      - LIBRA_VERSION=${LIBRA_VERSION:-dev}
     networks: [stack-net, datos]
 
 volumes:

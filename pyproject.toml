@@ -22,7 +22,9 @@ dependencies = [
     # el router de usuarios único de la familia -- ver `app/routers/usuarios.py`.
     # Trae también la sesión por inactividad de 8h con renovación deslizante
     # (ADR-017).
-    "libraauth[migrations] @ git+https://github.com/marianocappucci/libraauth.git@v0.48.0",
+    # v0.48.0 -> v0.49.0 (2026-10-12): `registrador_dbapi` y el formato del log en funciones puras (ADR-022). Sin migracion.
+    # v0.49.0 -> v0.50.0 (2026-10-13, ADR-023): `UsadosEnBase`, el anti-replay del captcha en la base (varios procesos). **Con migracion** (`0003_captcha_usados`): el arranque la exige (`exigir_schema_al_dia`), asi que `libraauth-migrar upgrade` corre antes de uvicorn.
+    "libraauth[migrations] @ git+https://github.com/marianocappucci/libraauth.git@v0.50.0",
     # Entra en F1 sólo por `respaldo`: una instancia sin backup no se puede
     # poner en produccion. Su alcance crece en F2 (`mp_api`, `pdf_generator`)
     # y F3 (ARCA) — ver ARCHITECTURE.md.
@@ -68,7 +70,11 @@ dependencies = [
     # v1.150.0 -> v1.151.0 (2026-10-09): un plan retirado se resuelve con `PLANES_RETIRADOS` en el alta y en el cambio de plan (`provisioning.resolver_plan`, libracore#375). Este producto no retira planes: no cambia nada. Sin migracion.
     # v1.152.0 -> v1.153.0 (2026-10-10): sucursales contratadas y abono por unidad adicional (`libracore.limites` y `libracore.abono`, ADR-041). Sin dato de sucursales contratadas no limita nada; este producto no lo usa. Sin migracion.
     # v1.153.0 -> v1.154.0 (2026-10-12): `libracore.cuit.solo_digitos` y se retira `cc_resumen` (codigo muerto, nadie lo usaba). Sin migracion.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.154.0",
+    # v1.154.0 -> v1.155.0 (2026-10-12): migracion 0024 retira cc_resumenes_enviados y clients.cc_resumen_* (ADR-042). Desplegar el producto ANTES de migrar.
+    # v1.155.0 -> v1.157.0 (2026-10-12): `libracore.auditoria` (ADR-043): las escrituras de clients avisan a un registrador, apagado si el producto no lo configura. v1.156.0 es un tag erroneo, no usar. Sin migracion.
+    # v1.157.0 -> v1.159.0 (2026-10-13): varios procesos (ADR-044: `libracore.candados`, la nota de credito con `conn=`) y el registro de errores (ADR-045: `libracore.errores.instalar_registro_de_errores`, `POST /api/errores-cliente`). Sin migracion. (La v1.156.0 es un tag erroneo: no usar.)
+    # v1.159.0 -> v1.162.0 (2026-10-13): concepto sin «Factura» doble con migracion 0025 (corre al migrar, backup antes), alta por CLI con aviso de casilla y `panel_admin casilla`, se retira `get_cc_movimientos_periodo` y los adicionales quedan fuera de la escalera de planes (ADR-048, sin migracion).
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.162.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
