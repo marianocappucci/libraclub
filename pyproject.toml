@@ -74,7 +74,7 @@ dependencies = [
     # v1.155.0 -> v1.157.0 (2026-10-12): `libracore.auditoria` (ADR-043): las escrituras de clients avisan a un registrador, apagado si el producto no lo configura. v1.156.0 es un tag erroneo, no usar. Sin migracion.
     # v1.157.0 -> v1.159.0 (2026-10-13): varios procesos (ADR-044: `libracore.candados`, la nota de credito con `conn=`) y el registro de errores (ADR-045: `libracore.errores.instalar_registro_de_errores`, `POST /api/errores-cliente`). Sin migracion. (La v1.156.0 es un tag erroneo: no usar.)
     # v1.159.0 -> v1.162.0 (2026-10-13): concepto sin «Factura» doble con migracion 0025 (corre al migrar, backup antes), alta por CLI con aviso de casilla y `panel_admin casilla`, se retira `get_cc_movimientos_periodo` y los adicionales quedan fuera de la escalera de planes (ADR-048, sin migracion).
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.162.0",
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.163.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
