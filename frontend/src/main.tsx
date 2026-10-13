@@ -4,6 +4,8 @@ import { BrowserRouter } from 'react-router-dom'
 import { App } from './App'
 import './index.css'
 import { aplicarIdentidad } from 'libra-ui/identidad'
+import { ErrorBoundary } from 'libra-ui/ErrorBoundary'
+import { instalarReporteDeErrores } from 'libra-ui/errores-del-navegador'
 import { cargarTema } from 'libra-ui/tema'
 
 // La identidad del producto (libra-ui ADR-033): su color de acento (botón principal, ítem activo del menú, foco) y el `theme-color`. Va antes
@@ -14,14 +16,20 @@ aplicarIdentidad('libraclub')
 // ni puede fallar: sin red o con un error, la app arranca con los colores de siempre.
 void cargarTema()
 
+// Los errores del navegador que nadie atrapa (`window.onerror`, promesas rechazadas) llegan al registro de errores de la instancia
+// (`POST /api/errores-cliente`, libra-ui ADR-053 / libracore ADR-045). Antes de montar: lo que falle al montar tambien cuenta.
+instalarReporteDeErrores()
+
 const raiz = document.getElementById('root')
 if (!raiz) throw new Error('falta #root en index.html')
 
 createRoot(raiz).render(
   <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </ErrorBoundary>
   </StrictMode>,
 )
 

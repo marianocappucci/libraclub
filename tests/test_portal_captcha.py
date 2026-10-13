@@ -241,3 +241,29 @@ def test_el_alta_anota_un_evento_propio_y_no_login(api, sesion):
     assert eventos[0]["detalle"] == DETALLE_PORTAL
     assert eventos[0]["username"] == MAIL
     assert eventos[0]["evento"] != "login"
+
+
+def test_el_portal_crea_su_captcha_con_los_usados_en_la_base(engine, sesion, monkeypatch):
+    """Con varios workers, el `GET /auth/captcha` puede caer en uno y el login del portal en otro. Al que no tiene
+    todavía el `Captcha` del proceso le toca crearlo, y tiene que anotar los desafíos en la base y no en su memoria
+    (libraauth v0.50.0, ADR-023). Si `routers/portal.py` vuelve a llamar `_captcha_de(request)` sin
+    `USADOS_DEL_CAPTCHA`, este test da rojo."""
+    from libraauth.captcha import UsadosEnBase
+
+    monkeypatch.setattr("libraauth.session_auth._captcha_de", CAPTCHA_DE_ORIGINAL)
+    monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", "clave-de-prueba")
+    AuthBase.metadata.drop_all(engine)
+    crear_schema_de_auth(engine)
+    try:
+        app = crear_app(_config())
+        assert getattr(app.state, "captcha", None) is None, "nadie pidió un desafío todavía"
+
+        r = TestClient(app, base_url="https://testserver").post(
+            "/api/portal/login", json={"email": MAIL, "password": PASS, "captcha": ""})
+
+        assert r.status_code == 400, r.text
+        assert isinstance(app.state.captcha._usados, UsadosEnBase)
+    finally:
+        sesion.rollback()
+        AuthBase.metadata.drop_all(engine)
