@@ -188,3 +188,47 @@ def test_config_no_secreta_mp_auto_facturar_reservas_sobrevive_la_migracion(api)
     migrar_secretos()
 
     assert lc_config_manager.load()["mp_auto_facturar_reservas"] is True
+
+
+def test_el_cron_enchufa_el_almacen_de_secretos(engine, sesion, monkeypatch, tmp_path):
+    """🔴 El token de MP vive en el almacén cifrado y lo enchufa `crear_app()`;
+    el cron corre por `docker exec` sin pasar por el arranque. Así Contalibra no
+    facturó ningún abono del 2026-09-18 al 2026-10-14.
+
+    Se parte de un proceso «recién nacido»: almacén desenchufado y `app.asgi`
+    sin importar. Si no, los fixtures ya lo dejaron enchufado y esto daría
+    verde aunque el script no hiciera nada."""
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    import app.main as app_main
+    from libracore import config_manager as lc_config_manager
+
+    config_path = str(tmp_path / "config.json")
+    monkeypatch.setattr(lc_config_manager, "CONFIG_PATH", config_path)
+    monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
+    monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
+    AuthBase.metadata.drop_all(engine)
+    crear_schema_de_auth(engine)
+    _escribir_crudo(config_path, {"mp_access_token": TOKEN})
+
+    lc_config_manager.usar_almacen_de_secretos(None)
+    monkeypatch.delitem(sys.modules, "app.asgi", raising=False)
+    # `app.asgi` llama `crear_app()` sin config: acá, la de la suite.
+    real = app_main.crear_app
+    monkeypatch.setattr(app_main, "crear_app", lambda *a, **k: real(_config()))
+    assert lc_config_manager.load()["mp_access_token"] == TOKEN   # aún en el JSON
+
+    script = Path(__file__).resolve().parent.parent / "scripts" / "sync_mp_auto.py"
+    spec = importlib.util.spec_from_file_location("sync_mp_auto_bajo_test", script)
+    spec.loader.exec_module(importlib.util.module_from_spec(spec))
+
+    assert lc_config_manager.almacen_de_secretos() is not None, (
+        "sync_mp_auto.py no enchufa el almacén de secretos: el cron va a leer el "
+        "token de MercadoPago vacío y no va a traer nada"
+    )
+    assert _crudo(config_path)["mp_access_token"] == ""      # migró al almacén
+    assert lc_config_manager.load()["mp_access_token"] == TOKEN
+
+    AuthBase.metadata.drop_all(engine)
