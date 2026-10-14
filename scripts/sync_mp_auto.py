@@ -29,6 +29,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from libracore.mp_sync import sincronizar_y_facturar  # noqa: E402
 
+# 🔴 `app.asgi` es lo que levanta el contenedor: `crear_app()` inicializa la base,
+# configura la de LibraCore y enchufa el almacén cifrado de secretos, donde vive
+# el token de MercadoPago desde el 2026-09-17. Sin esto el cron corre por
+# `docker exec` sin ese arranque, lee el token vacío y no trae nada — así pasó
+# en Contalibra del 2026-09-18 al 2026-10-14. Mismo criterio que GestioLibra:
+# importar el arranque, no rearmarlo. Lo vigila tests/test_secretos_config_json.py.
+import app.asgi  # noqa: E402,F401
 from app.routers.mp_bandeja import REFERENCIAS_PROPIAS  # noqa: E402
 
 logging.basicConfig(
