@@ -202,8 +202,9 @@ def test_el_cron_enchufa_el_almacen_de_secretos(engine, sesion, monkeypatch, tmp
     import sys
     from pathlib import Path
 
-    import app.main as app_main
     from libracore import config_manager as lc_config_manager
+
+    import app.main as app_main
 
     config_path = str(tmp_path / "config.json")
     monkeypatch.setattr(lc_config_manager, "CONFIG_PATH", config_path)
