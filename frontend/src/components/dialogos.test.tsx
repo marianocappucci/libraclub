@@ -176,7 +176,7 @@ describe('cómo se cierra', () => {
         onCerrar={onCerrar} onGuardada={vi.fn()}
       />,
     )
-    await userEvent.click(screen.getByRole('button', { name: /close/i }))
+    await userEvent.click(screen.getByRole('button', { name: 'Cerrar ventana' }))
     expect(onCerrar).toHaveBeenCalled()
   })
 })
