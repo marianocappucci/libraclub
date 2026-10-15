@@ -76,7 +76,8 @@ dependencies = [
     # v1.159.0 -> v1.162.0 (2026-10-13): concepto sin «Factura» doble con migracion 0025 (corre al migrar, backup antes), alta por CLI con aviso de casilla y `panel_admin casilla`, se retira `get_cc_movimientos_periodo` y los adicionales quedan fuera de la escalera de planes (ADR-048, sin migracion).
     # v1.163.0 -> v1.164.0 (2026-10-14): cada envio por mail de un comprobante o un presupuesto deja rastro (`envios_email`, ADR-050 de libracore): `GET .../{id}/envios`, `envios_email` en el detalle y `envio_email` en el listado. **Migracion `0026_envios_email`** (tabla nueva) en la cadena de `libracore-migrar`.
     # v1.164.0 -> v1.166.0 (2026-10-14): incluye v1.165.0 (un proceso sin el almacen de secretos dice la causa) y `GET /api/facturas?envio=enviada|sin_enviar` filtra el listado por el rastro de envios por mail (ADR-051 de libracore). Sin migracion.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.166.0",
+    # v1.167.0 -> v1.168.0 (2026-10-15, propuesta; ADR-053 de libracore): `libracore.docs_api.cerrar_docs_de_la_api`: `/docs`, `/redoc` y `/openapi.json` sólo con `ENV=development` (o `LIBRA_DOCS_API=1`); en un cliente real y en la demo dan 404. Sin migracion. `uv.lock` se regenera cuando exista el tag.
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.168.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.

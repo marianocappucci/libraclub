@@ -459,7 +459,7 @@ describe('el diálogo, que sigue existiendo para la cuenta de una cancha', () =>
       within(dialogo).getByRole('button', { name: /Cobrar con QR/i }))
     await within(dialogo).findByText(/Esperando el pago/i)
 
-    await userEvent.click(within(dialogo).getByRole('button', { name: /close/i }))
+    await userEvent.click(within(dialogo).getByRole('button', { name: 'Cerrar ventana' }))
     await waitFor(() => expect(bajarDelQr).toHaveBeenCalledWith(42))
   })
 })
