@@ -7,7 +7,7 @@ import type { Cliente, ClienteEntrada } from '@/lib/api'
 import { Input } from '@/components/ui/input'
 import { buttonVariants } from '@/components/ui/button'
 import { AvisoDeError } from '@/components/listado'
-import { ConsultarEnArca } from '@/components/ConsultarEnArca'
+import { ConsultarEnArca } from 'libra-ui/configuracion/ConsultarEnArca'
 
 function vacio(): ClienteEntrada {
   return {
