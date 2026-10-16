@@ -219,6 +219,7 @@ export function FacturaNueva() {
               {/* Es una acción («copiar los datos de…») y no un campo: el valor
                   vuelve siempre a «Copiar datos de…», así se puede copiar de
                   nuevo el mismo cliente después de editar el nombre. */}
+              {/* cliente-sin-alta: no elige a quién se factura sino de quién copiar los datos; «Se emite a nombre de» y «CUIT / DNI» de al lado se escriben a mano, sin pedir un cliente cargado */}
               <SelectBuscable
                 className="w-64"
                 ariaLabel="Elegir un cliente del complejo"

@@ -598,3 +598,21 @@ que `/api/reservas/series/listado`.
   - Sin migración propia. Con más de un worker, después de un restore en caliente hay que **reiniciar el contenedor** (`docs/varios-procesos.md` del motor).
   - Las serializaciones del arranque cubren las siembras («si no existe, crear»); la creación idempotente del esquema (`CREATE TABLE IF NOT EXISTS` de `ensure_schema`) no se serializa: antes de subir `WEB_CONCURRENCY` a más de 1 hay que medirlo con dos workers.
   - Tests: `tests/test_registro_de_errores.py`, `tests/test_arranque_varios_procesos.py` y el caso de `captcha_usados` en `tests/test_captcha_login.py`; los dobles del captcha de los `conftest` aceptan el segundo argumento que libraauth v0.50.0 pasa a `_captcha_de(request, usados)`.
+
+
+## ADR-019 — El cliente se elige con `SelectCliente` y se da de alta ahí mismo
+
+- Estado: aceptada. **Exige `libra-ui >= v0.158.0`** (ADR-071 del kit).
+- Fecha: 2026-10-16
+- Contexto: el humano pidió (2026-10-16) que **todo** campo de la suite donde se elige un cliente ofrezca darlo de alta en el lugar, con un solo componente. El caso que lo disparó fue el mostrador de LibraDesk, donde un cliente no cargado no se podía elegir. En este producto había dos campos: la reserva (con un «Cliente nuevo» propio que reemplazaba el select y creaba el cliente **al reservar**) y «Nueva cancha fija» (sin alta: sin clientes ni siquiera se mostraba el botón).
+- Qué ya existía (se miró antes): `libra-ui/SelectCliente` y su guard `libra-ui/auditoria-de-clientes`; el alta de clientes de `construir_abm` con `rol_escritura=require_staff` (`app/routers/maestros.py`): un encargado puede crear clientes, que es lo que ya hacía el «Cliente nuevo» de la reserva.
+- Decisión:
+  - Los dos campos usan `SelectCliente` con `campos=['telefono','email']` (lo que se tiene a mano cuando alguien llama por primera vez). Documento, CUIT y observaciones se completan en Clientes.
+  - **El cliente se crea en el panel, no al reservar.** `crear` hace `POST /api/clientes` con `{nombre, telefono, email}` y el campo lo elige solo; la reserva y la cancha fija usan su id. Un único helper, `frontend/src/lib/clientes.ts`.
+  - El campo no se esconde por falta de clientes: «Nueva cancha fija» se ofrece aunque la lista esté vacía.
+  - Lo que no es un campo de cliente se marca `cliente-sin-alta: <motivo>` en el código; hoy es «Copiar datos de…» de `FacturaNueva`, que rellena dos inputs escritos a mano.
+  - `frontend/src/test/campos-de-cliente.test.ts` falla si nace un desplegable de cliente sin alta ni marca.
+- Consecuencias:
+  - Una reserva rechazada (409/422) ya no deja un cliente huérfano ni crea otro al reintentar.
+  - Un cliente dado de alta en el panel existe aunque después se cancele la reserva: es a propósito, ya está en Clientes.
+  - Sin migración ni cambios de API.

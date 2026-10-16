@@ -3,11 +3,12 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import { agenda, clientes as apiClientes, ErrorDeApi } from '@/lib/api'
+import { CAMPOS_DE_ALTA, crearClienteParaSelect, opcionDeCliente } from '@/lib/clientes'
 import type { Cancha, Cliente, Turno } from '@/lib/api'
 import { fecha, hora, pesos } from '@/lib/fechas'
 import { Input } from '@/components/ui/input'
 import { buttonVariants } from '@/components/ui/button'
-import { SelectBuscable } from '@/components/select-buscable'
+import { SelectCliente } from 'libra-ui/SelectCliente'
 import { AvisoDeError } from '@/components/listado'
 import { AvisoDeAusentismo } from '@/components/AvisoDeAusentismo'
 import { useReincidentes } from '@/lib/ausentismo'
@@ -41,9 +42,6 @@ export function DialogoDeReserva({
 }) {
   const [lista, setLista] = useState<Cliente[]>([])
   const [clienteId, setClienteId] = useState<string>('')
-  const [nuevo, setNuevo] = useState(false)
-  const [nombreNuevo, setNombreNuevo] = useState('')
-  const [telefonoNuevo, setTelefonoNuevo] = useState('')
   const [turnos, setTurnos] = useState(1)
   const [origen, setOrigen] = useState('mostrador')
   const [estado, setEstado] = useState('confirmada')
@@ -62,9 +60,6 @@ export function DialogoDeReserva({
     // podría confirmarlo sin mirar.
     setError(null)
     setTurnos(1)
-    setNuevo(false)
-    setNombreNuevo('')
-    setTelefonoNuevo('')
     setObservaciones('')
     setOrigen('mostrador')
     setEstado('confirmada')
@@ -74,9 +69,6 @@ export function DialogoDeReserva({
         const activos = filas.filter((c) => (c as Cliente & { activo?: boolean }).activo !== false)
         setLista(activos)
         setClienteId(activos[0] ? String(activos[0].id) : '')
-        // Sin clientes cargados, la única salida es dar uno de alta. Se abre ya
-        // en ese modo en vez de mostrar un select vacío que no explica nada.
-        if (activos.length === 0) setNuevo(true)
       })
       .catch((e: Error) => setError(e.message))
   }, [abierto])
@@ -106,15 +98,9 @@ export function DialogoDeReserva({
     setEnviando(true)
     setError(null)
     try {
-      let id = Number(clienteId)
-      if (nuevo) {
-        if (!nombreNuevo.trim()) throw new Error('El cliente nuevo necesita un nombre.')
-        const creado = await apiClientes.crear({
-          nombre: nombreNuevo.trim(),
-          telefono: telefonoNuevo.trim() || null,
-        })
-        id = creado.id
-      }
+      // El cliente nuevo ya está creado y elegido: lo dio de alta el panel de
+      // `SelectCliente` antes de llegar acá, y su id está en `clienteId`.
+      const id = Number(clienteId)
       if (!id) throw new Error('Elegí un cliente o cargá uno nuevo.')
 
       await agenda.reservar({
@@ -187,67 +173,31 @@ export function DialogoDeReserva({
             </div>
           </div>
 
-          {!nuevo ? (
-            <div className="space-y-1">
-              {/* El botón va FUERA del `<label>`: adentro, su texto entra en el
-                  nombre accesible del select y el lector de pantalla anuncia
-                  "Cliente … Cliente nuevo" como si fuera una sola cosa. */}
-              <div className="block space-y-1">
-                <label htmlFor="reserva-cliente" className="block text-sm font-medium">Cliente</label>
-                <SelectBuscable
-                  id="reserva-cliente"
-                  value={clienteId}
-                  onChange={setClienteId}
-                  opciones={lista.map((c) => ({ value: String(c.id), label: c.nombre, hint: c.telefono ?? undefined }))}
-                  placeholder="Buscar cliente…"
-                  limpiable={false}
-                />
-              </div>
-              {/* 🔴 Avisa y nada más: el botón «Reservar» no mira esto. El
-                  encargado decide si le pide la seña entera, lo llama el día
-                  antes o le toma el turno igual. */}
-              <AvisoDeAusentismo
-                nombre={elegido?.nombre}
-                ausencia={elegido ? porCliente.get(elegido.id) : undefined}
-                dias={dias}
-              />
-              <button
-                type="button"
-                className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
-                onClick={() => setNuevo(true)}
-              >
-                Cliente nuevo
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <label className="block space-y-1">
-                <span className="text-sm font-medium">Nombre del cliente</span>
-                <Input
-                  
-                  value={nombreNuevo}
-                  onChange={(e) => setNombreNuevo(e.target.value)}
-                />
-              </label>
-              <label className="block space-y-1">
-                <span className="text-sm font-medium">Teléfono</span>
-                <Input
-                  
-                  value={telefonoNuevo}
-                  onChange={(e) => setTelefonoNuevo(e.target.value)}
-                />
-              </label>
-              {lista.length > 0 && (
-                <button
-                  type="button"
-                  className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
-                  onClick={() => setNuevo(false)}
-                >
-                  Elegir uno existente
-                </button>
-              )}
-            </div>
-          )}
+          <div className="space-y-1">
+            {/* El alta es el botón de al lado del buscador (ADR-071): el cliente se
+                crea al momento, queda elegido y la reserva usa su id. Antes había
+                un «Cliente nuevo» propio que reemplazaba el select y creaba al
+                reservar, con lo que un 409 dejaba un cliente huérfano. */}
+            <SelectCliente
+              id="reserva-cliente"
+              etiqueta="Cliente"
+              value={clienteId}
+              onChange={setClienteId}
+              opciones={lista.map(opcionDeCliente)}
+              placeholder="Buscar cliente…"
+              limpiable={false}
+              campos={CAMPOS_DE_ALTA}
+              crear={crearClienteParaSelect((c) => setLista((l) => [...l, c]))}
+            />
+            {/* 🔴 Avisa y nada más: el botón «Reservar» no mira esto. El
+                encargado decide si le pide la seña entera, lo llama el día
+                antes o le toma el turno igual. */}
+            <AvisoDeAusentismo
+              nombre={elegido?.nombre}
+              ausencia={elegido ? porCliente.get(elegido.id) : undefined}
+              dias={dias}
+            />
+          </div>
 
           <div className="grid grid-cols-3 gap-2">
             <label className="space-y-1">
