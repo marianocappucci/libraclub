@@ -7,6 +7,8 @@ import type { Cancha, Cliente, SerieCreada, SerieEntrada } from '@/lib/api'
 import { Input } from '@/components/ui/input'
 import { buttonVariants } from '@/components/ui/button'
 import { SelectBuscable } from '@/components/select-buscable'
+import { SelectCliente } from 'libra-ui/SelectCliente'
+import { CAMPOS_DE_ALTA, crearClienteParaSelect, opcionDeCliente } from '@/lib/clientes'
 import { AvisoDeError } from '@/components/listado'
 import { ResultadoDeSerie } from '@/components/ResultadoDeSerie'
 import { hoyISO } from 'libra-ui/fechas'
@@ -49,6 +51,14 @@ export function FormularioDeSerie({
   const [error, setError] = useState<string | null>(null)
   const [enviando, setEnviando] = useState(false)
   const [resultado, setResultado] = useState<SerieCreada | null>(null)
+  // Los clientes dados de alta desde este formulario. El padre recién los ve al
+  // recargar, y si el diálogo se cierra sin crear la serie, el cliente igual
+  // existe: tiene que seguir en la lista la próxima vez que se abra.
+  const [creados, setCreados] = useState<Cliente[]>([])
+  const opcionesDeClientes = [
+    ...clientes,
+    ...creados.filter((c) => !clientes.some((k) => k.id === c.id)),
+  ].map(opcionDeCliente)
 
   useEffect(() => {
     if (!abierto) return
@@ -108,17 +118,17 @@ export function FormularioDeSerie({
           </div>
         ) : (
           <form onSubmit={enviar} className="space-y-3">
-            <div className="block space-y-1">
-              <label htmlFor="serie-cliente" className="block text-sm font-medium">Cliente</label>
-              <SelectBuscable
-                id="serie-cliente"
-                value={String(datos.cliente_id)}
-                onChange={(v) => set('cliente_id', Number(v))}
-                opciones={clientes.map((c) => ({ value: String(c.id), label: c.nombre }))}
-                placeholder="Buscar cliente…"
-                limpiable={false}
-              />
-            </div>
+            <SelectCliente
+              id="serie-cliente"
+              etiqueta="Cliente"
+              value={String(datos.cliente_id)}
+              onChange={(v) => set('cliente_id', Number(v))}
+              opciones={opcionesDeClientes}
+              placeholder="Buscar cliente…"
+              limpiable={false}
+              campos={CAMPOS_DE_ALTA}
+              crear={crearClienteParaSelect((c) => setCreados((prev) => [...prev, c]))}
+            />
 
             <div className="block space-y-1">
               <label htmlFor="serie-cancha" className="block text-sm font-medium">Cancha</label>

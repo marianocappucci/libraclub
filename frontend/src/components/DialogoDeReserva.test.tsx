@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { elegirEnBuscable } from '@/test/select-buscable'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -53,7 +53,7 @@ function responder(url: string, metodo: string): { status: number; body: unknown
     return { status: 200, body: [{ id: 7, nombre: 'Juan Pérez', telefono: null }] }
   }
   if (url === REINCIDENTES) return { status: 200, body: { umbral: 3, dias: 90, reincidentes } }
-  if (url === '/api/clientes') return { status: 201, body: { id: 99, nombre: 'Nuevo' } }
+  if (url === '/api/clientes') return { status: 201, body: { id: 99, nombre: 'Ana Gómez', telefono: null } }
   return { status: 201, body: { id: 55 } }
 }
 
@@ -144,24 +144,89 @@ describe('alta de reserva desde la grilla', () => {
     expect(alta.cuerpo).toMatchObject({ duracion_min: 270, precio: '36000.00' })
   })
 
-  it('da de alta el cliente nuevo y reserva con su id', async () => {
+  it('da de alta el cliente en el panel (ADR-071), queda elegido y la reserva sale con su id', async () => {
+    const user = userEvent.setup()
     const onCreada = abrir()
     await screen.findByRole('combobox', { name: /cliente/i })
-    await userEvent.click(screen.getByRole('button', { name: 'Cliente nuevo' }))
-    await userEvent.type(
-      screen.getByRole('textbox', { name: /nombre del cliente/i }),
-      'Ana Gómez',
-    )
-    await userEvent.click(screen.getByRole('button', { name: 'Reservar' }))
+    // Mientras no se crea, la reserva sale con el cliente de la lista (Juan, id 7).
+    await user.click(screen.getByRole('button', { name: 'Agregar nuevo cliente' }))
+    const panel = screen.getByRole('group', { name: 'Nuevo cliente' })
+    await user.type(within(panel).getByLabelText(/nombre/i), 'Ana Gómez')
+    await user.type(within(panel).getByLabelText('Teléfono'), '3515550000')
+    await user.type(within(panel).getByLabelText('Email'), 'ana@example.com')
+    await user.click(within(panel).getByRole('button', { name: 'Crear cliente' }))
+
+    // El POST sale al crear en el panel, antes de reservar, con teléfono y email.
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'Nuevo cliente' })).toBeNull())
+    const altaCliente = llamadas.find((l) => l.url === '/api/clientes' && l.metodo === 'POST')!
+    expect(altaCliente.cuerpo).toEqual({ nombre: 'Ana Gómez', telefono: '3515550000', email: 'ana@example.com' })
+    expect(llamadas.some((l) => l.url === '/api/reservas')).toBe(false)
+    // Quedó elegido: el campo muestra su nombre.
+    expect(screen.getByRole('combobox', { name: /cliente/i })).toHaveValue('Ana Gómez')
+
+    await user.click(screen.getByRole('button', { name: 'Reservar' }))
+    await waitFor(() => expect(onCreada).toHaveBeenCalled())
+    // El id del cliente recién creado, no el del primero de la lista; y no se creó dos veces.
+    expect(llamadas.find((l) => l.url === '/api/reservas')!.cuerpo).toMatchObject({ cliente_id: 99 })
+    expect(llamadas.filter((l) => l.url === '/api/clientes' && l.metodo === 'POST')).toHaveLength(1)
+  })
+
+  it('el cliente se crea en el panel, no al reservar: si la reserva falla, no se vuelve a crear', async () => {
+    // Antes el POST de cliente salía junto con el de la reserva; un 409 dejaba un cliente huérfano y el reintento creaba otro.
+    siguienteRespuesta = (url, metodo) =>
+      url === '/api/reservas' ? { status: 409, body: { detail: 'Ocupada.' } } : responder(url, metodo)
+    const user = userEvent.setup()
+    abrir()
+    await screen.findByRole('combobox', { name: /cliente/i })
+    await user.click(screen.getByRole('button', { name: 'Agregar nuevo cliente' }))
+    await user.type(screen.getByLabelText(/nombre/i), 'Ana Gómez')
+    await user.click(screen.getByRole('button', { name: 'Crear cliente' }))
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'Nuevo cliente' })).toBeNull())
+
+    await user.click(screen.getByRole('button', { name: 'Reservar' }))
+    await screen.findByRole('alert')
+    await user.click(screen.getByRole('button', { name: 'Reservar' }))
+    await waitFor(() => expect(llamadas.filter((l) => l.url === '/api/reservas')).toHaveLength(2))
+
+    expect(llamadas.filter((l) => l.url === '/api/clientes' && l.metodo === 'POST')).toHaveLength(1)
+  })
+
+  it('si el alta falla, el panel muestra el motivo y no se pierde lo cargado', async () => {
+    siguienteRespuesta = (url, metodo) =>
+      url === '/api/clientes' && metodo === 'POST'
+        ? { status: 422, body: { detail: 'El nombre es demasiado largo.' } }
+        : responder(url, metodo)
+    const user = userEvent.setup()
+    abrir()
+    await screen.findByRole('combobox', { name: /cliente/i })
+    await user.click(screen.getByRole('button', { name: 'Agregar nuevo cliente' }))
+    await user.type(screen.getByLabelText(/nombre/i), 'Ana Gómez')
+    await user.click(screen.getByRole('button', { name: 'Crear cliente' }))
+
+    // El texto del backend, no el «Error de conexión.» genérico del componente.
+    expect(await screen.findByText('El nombre es demasiado largo.')).toBeInTheDocument()
+    expect(screen.getByLabelText(/nombre/i)).toHaveValue('Ana Gómez')
+    expect(llamadas.some((l) => l.url === '/api/reservas')).toBe(false)
+  })
+
+  it('sin clientes cargados el campo está vacío y el alta sigue a un click', async () => {
+    siguienteRespuesta = (url, metodo) =>
+      url === '/api/clientes' && metodo === 'GET' ? { status: 200, body: [] } : responder(url, metodo)
+    const user = userEvent.setup()
+    const onCreada = abrir()
+    await screen.findByRole('combobox', { name: /cliente/i })
+    await user.click(screen.getByRole('button', { name: 'Reservar' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/elegí un cliente/i)
+    expect(onCreada).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Agregar nuevo cliente' }))
+    await user.type(screen.getByLabelText(/nombre/i), 'Ana Gómez')
+    await user.click(screen.getByRole('button', { name: 'Crear cliente' }))
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'Nuevo cliente' })).toBeNull())
+    await user.click(screen.getByRole('button', { name: 'Reservar' }))
 
     await waitFor(() => expect(onCreada).toHaveBeenCalled())
-    const altaCliente = llamadas.find(
-      (l) => l.url === '/api/clientes' && l.metodo === 'POST',
-    )!
-    expect(altaCliente.cuerpo).toMatchObject({ nombre: 'Ana Gómez' })
-    const alta = llamadas.find((l) => l.url === '/api/reservas')!
-    // El id del cliente recién creado, no el del select.
-    expect(alta.cuerpo).toMatchObject({ cliente_id: 99 })
+    expect(llamadas.find((l) => l.url === '/api/reservas')!.cuerpo).toMatchObject({ cliente_id: 99 })
   })
 
   it('un 409 se muestra con qué hacer, y NO cierra el diálogo', async () => {
