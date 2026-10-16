@@ -602,7 +602,7 @@ que `/api/reservas/series/listado`.
 
 ## ADR-019 — El cliente se elige con `SelectCliente` y se da de alta ahí mismo
 
-- Estado: aceptada. **Exige `libra-ui >= v0.158.0`** (ADR-071 del kit).
+- Estado: aceptada. **Exige `libra-ui >= v0.158.1`** (ADR-071 del kit).
 - Fecha: 2026-10-16
 - Contexto: el humano pidió (2026-10-16) que **todo** campo de la suite donde se elige un cliente ofrezca darlo de alta en el lugar, con un solo componente. El caso que lo disparó fue el mostrador de LibraDesk, donde un cliente no cargado no se podía elegir. En este producto había dos campos: la reserva (con un «Cliente nuevo» propio que reemplazaba el select y creaba el cliente **al reservar**) y «Nueva cancha fija» (sin alta: sin clientes ni siquiera se mostraba el botón).
 - Qué ya existía (se miró antes): `libra-ui/SelectCliente` y su guard `libra-ui/auditoria-de-clientes`; el alta de clientes de `construir_abm` con `rol_escritura=require_staff` (`app/routers/maestros.py`): un encargado puede crear clientes, que es lo que ya hacía el «Cliente nuevo» de la reserva.
