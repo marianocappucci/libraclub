@@ -23,6 +23,7 @@ from collections.abc import Sequence
 from datetime import date
 from decimal import Decimal
 
+from libracore import cobros as libracore_cobros
 from libracore import medios_pago
 from libracore.db import caja as db_caja
 from libracore.db import cierre_diario as db_cierre_diario
@@ -162,8 +163,11 @@ def resumen(turno_id: int) -> dict:
 
 def registrar_movimiento(usuario: dict, tipo: str, monto: Decimal, concepto: str,
                          medio_pago: str, referencia: str = "",
-                         factura_id: int | None = None) -> int:
+                         factura_id: int | None = None, *, conn=None) -> int:
     """Un movimiento en el turno abierto: plata que entra o que sale.
+
+    `conn` es la transacción de quien llama (ver `cobrar`, que escribe dentro de
+    `libracore.cobros.transaccion_de_cobro`): sin ella el movimiento abre la suya.
 
     🔑 **El `caja_id` sale del turno, no del pedido.** La pantalla no lo elige:
     ya eligió el mostrador al abrir. Dejarlo en el payload permitiría cargar un
@@ -183,7 +187,7 @@ def registrar_movimiento(usuario: dict, tipo: str, monto: Decimal, concepto: str
         date.today().isoformat(), tipo, concepto, float(monto),
         referencia=referencia, factura_id=factura_id,
         usuario_id=int(usuario["id"]), medio_pago=medio_pago, turno_id=turno["id"],
-        caja_id=turno.get("caja_id"),
+        caja_id=turno.get("caja_id"), conn=conn,
     )
 
 
@@ -332,7 +336,7 @@ def anular_movimiento(usuario: dict, movimiento_id: int) -> dict:
 
 
 def registrar_ingreso(usuario: dict, monto: Decimal, concepto: str, medio_pago: str,
-                      referencia: str = "", factura_id: int | None = None) -> int:
+                      referencia: str = "", factura_id: int | None = None, *, conn=None) -> int:
     """El ingreso en el turno abierto de este usuario. Devuelve el id del movimiento.
 
     Está separado de `cobrar` porque el cobro con QR **necesita ese id**: lo
@@ -345,7 +349,7 @@ def registrar_ingreso(usuario: dict, monto: Decimal, concepto: str, medio_pago: 
     # una columna nueva y nadie se entera hasta que falta en un reporte.
     return registrar_movimiento(
         usuario, "ingreso", monto, concepto, medio_pago,
-        referencia=referencia, factura_id=factura_id,
+        referencia=referencia, factura_id=factura_id, conn=conn,
     )
 
 
@@ -356,11 +360,25 @@ def cobrar(usuario: dict, monto: Decimal, concepto: str, medio_pago: str,
     Sin turno abierto no se cobra: el movimiento quedaría sin `turno_id` y por
     lo tanto fuera de todo arqueo — plata que entró y que ningún cierre va a
     contar.
+
+    🔴 **Con `factura_id`, el cobro no puede superar lo que le falta a la factura**
+    (ADR-058 y ADR-059 de libracore: `pendiente = total − cobrado − acreditado`).
+    Se escribe dentro de `libracore.cobros.transaccion_de_cobro`, que bloquea la
+    factura, mira el tope y deja el movimiento en la misma transacción: dos cobros
+    simultáneos que juntos la superan, entra uno. Levanta `CobroNoPermitido`, que
+    el router traduce. Es la ruta que decide una persona (la pantalla de Caja):
+    el cobro con QR (`cobro_qr.py`, la plata ya entró) y el de un turno de la
+    agenda (`reservas.py`, cuyo pendiente es el de la reserva con su buffet, no el
+    de la factura) **no** pasan por acá con tope, a propósito.
     """
-    registrar_ingreso(
-        usuario, monto, concepto, medio_pago,
-        referencia=referencia, factura_id=factura_id,
-    )
+    if factura_id is None:
+        registrar_ingreso(usuario, monto, concepto, medio_pago, referencia=referencia)
+    else:
+        with libracore_cobros.transaccion_de_cobro(factura_id, float(monto)) as conn:
+            registrar_ingreso(
+                usuario, monto, concepto, medio_pago,
+                referencia=referencia, factura_id=factura_id, conn=conn,
+            )
     # `turno_abierto` se vuelve a resolver en vez de reusarse: `registrar_ingreso`
     # ya falló si no había turno, así que acá siempre hay uno.
     return db_turnos.get_resumen_turno_caja(turno_abierto(usuario)["id"])
