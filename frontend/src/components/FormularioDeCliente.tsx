@@ -7,6 +7,7 @@ import type { Cliente, ClienteEntrada } from '@/lib/api'
 import { Input } from '@/components/ui/input'
 import { buttonVariants } from '@/components/ui/button'
 import { AvisoDeError } from '@/components/listado'
+import { ConsultarEnArca } from '@/components/ConsultarEnArca'
 
 function vacio(): ClienteEntrada {
   return {
@@ -149,6 +150,14 @@ export function FormularioDeCliente({
               />
             </label>
           </div>
+          {/* «Consultar en ARCA»: completa el nombre con el padrón. Sólo `nombre`: el cliente de este producto no
+              guarda domicilio ni condición de IVA. No pisa lo ya escrito sin preguntar. */}
+          <ConsultarEnArca
+            cuit={datos.cuit}
+            valores={datos}
+            destino={{ nombre: { campo: 'nombre', etiqueta: 'Nombre' } }}
+            alAplicar={(cambios) => setDatos((d) => ({ ...d, ...cambios }))}
+          />
           <p className="text-xs text-muted-foreground">
             Documento y CUIT son texto, no números: un DNI con cero adelante no
             sobrevive a un entero, y el CUIT puede venir con guiones. Hacen falta
