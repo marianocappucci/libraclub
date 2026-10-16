@@ -265,6 +265,33 @@ def test_cobrar_de_mas_no_deja_el_pendiente_en_negativo(
     assert estado["cobrado"] > estado["total"]
 
 
+def test_el_cobro_de_la_agenda_no_tiene_el_tope_de_la_factura_pero_el_de_la_caja_si(
+    api, cancha, cliente, tarifa_base, abrir_caja, sucursal,
+):
+    """Dos puertas, dos reglas, a propósito.
+
+    `POST /api/reservas/{id}/cobros` cobra contra **lo pendiente de la reserva**
+    (el alquiler más el buffet), que no es lo pendiente de la factura: no lleva el
+    tope del motor. `POST /api/caja/cobros` con el `factura_id` de esa misma
+    reserva es un cobro contra la factura y sí lo lleva (ADR-058): 409.
+    """
+    reserva = _reserva(api, cancha, cliente)
+    factura = api.post(f"/api/reservas/{reserva['id']}/facturar").json()
+    abrir_caja(api, sucursal)
+    total = api.get(f"/api/reservas/{reserva['id']}/cobros").json()["total"]
+
+    de_mas = api.post("/api/caja/cobros", json={
+        "monto": str(total + 1000), "concepto": "Cobro de más", "medio_pago": "efectivo",
+        "factura_id": factura["id"]})
+    assert de_mas.status_code == 409, de_mas.text
+    assert api.get(f"/api/facturas/{factura['id']}").json()["cobros"] == []
+
+    # La agenda, con la misma factura vinculada, sigue sin tope (ver el test de arriba).
+    agenda = api.post(f"/api/reservas/{reserva['id']}/cobros",
+                      json={"monto": str(total + 1000), "medio_pago": "efectivo"})
+    assert agenda.status_code == 201, agenda.text
+
+
 # ── Las guardas ───────────────────────────────────────────────────────────
 
 

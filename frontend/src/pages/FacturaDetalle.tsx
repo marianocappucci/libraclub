@@ -6,12 +6,13 @@
 // `createAuthContext`, así que el `useAuth` de libra-ui apunta a otro contexto y
 // devolvería siempre vacío. Entra como prop.
 //
-// 🔑 **`muestraCobros` prendido desde que el backend tiene su propio hook de
-// cobro** (`_cobrar_del_turno` en `app/routers/facturas.py`): la plata entra
-// por la caja del **turno abierto**, y `POST /api/facturas/{id}/cobrar` queda
-// atado a la factura igual que cualquier otro cobro de este producto. Antes
-// estaba apagado porque el hook no existía —el default del motor escribía el
-// movimiento sin `turno_id`, fuera de todo arqueo— y porque el selector no
+// 🔑 **`muestraCobros` prendido desde que el backend cobra por el turno**
+// (`exigir_turno=True` en `app/routers/facturas.py`, ADR-060 de libracore): la
+// plata entra por la caja del **turno abierto**, y `POST /api/facturas/{id}/cobrar`
+// queda atado a la factura igual que cualquier otro cobro de este producto, con
+// el tope de lo pendiente del motor. Antes estaba apagado porque no había cobro
+// por turno —el default del motor escribía el movimiento sin `turno_id`, fuera
+// de todo arqueo— y porque el selector no
 // tenía de dónde sacar los medios: `/api/cajas` exige `sucursal_id` y
 // `/api/ventas/medios-pago` no existe en este producto, así que los dos
 // pedidos que hace el paquete fallan y el selector abriría vacío. Se

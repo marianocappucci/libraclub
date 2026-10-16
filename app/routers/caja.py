@@ -13,6 +13,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from libracore import medios_pago
+from libracore.cobros import CobroNoPermitido
 from pydantic import BaseModel, Field
 
 from app.auth import get_current_user, require_admin, require_staff
@@ -171,7 +172,11 @@ def actual(usuario: dict = Depends(require_staff)):
 
 @router.post("/cobros")
 def cobrar(datos: CobroEntrada, usuario: dict = Depends(require_staff)):
-    """Registra un ingreso en el turno abierto. Devuelve el resumen al momento."""
+    """Registra un ingreso en el turno abierto. Devuelve el resumen al momento.
+
+    Con `factura_id`, no puede superar lo que falta cobrar de esa factura: 409
+    con lo que falta (ADR-058 de libracore), y 404 si la factura no existe.
+    """
     try:
         return servicio.cobrar(
             usuario, datos.monto, datos.concepto, datos.medio_pago,
@@ -179,6 +184,10 @@ def cobrar(datos: CobroEntrada, usuario: dict = Depends(require_staff)):
         )
     except servicio.SinTurnoAbierto as e:
         raise HTTPException(409, str(e)) from e
+    except CobroNoPermitido as e:
+        # El mismo reparto que `POST /api/caja` del motor: el estado de la factura es lo que lo impide (409),
+        # salvo que la factura no esté (404).
+        raise HTTPException(404 if e.codigo == CobroNoPermitido.NO_EXISTE else 409, str(e)) from e
     except servicio.MedioDePagoInvalido as e:
         raise HTTPException(422, str(e)) from e
 

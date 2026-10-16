@@ -102,10 +102,10 @@ describe('el detalle de comprobante de este producto', () => {
       .toBeInTheDocument()
   })
 
-  it('🔑 ofrece «Registrar cobro» con pendiente > 0: el backend ya tiene su hook', async () => {
-    // Hasta el hook `_cobrar_del_turno` esto estaba apagado con
-    // `muestraCobros={false}` — ver el comentario de cabecera del shim. Con el
-    // hook puesto, el bloque de cobro tiene que aparecer sobre la factura
+  it('🔑 ofrece «Registrar cobro» con pendiente > 0: el backend cobra por el turno', async () => {
+    // Hasta el cobro por turno (`exigir_turno`) esto estaba apagado con
+    // `muestraCobros={false}` — ver el comentario de cabecera del shim. Con
+    // el cobro puesto, el bloque de cobro tiene que aparecer sobre la factura
     // `DETALLE` de este archivo, que trae `pendiente: 14000` y CAE emitido.
     //
     // De dónde salen los MEDIOS del selector (`/api/caja/medios-pago`,
