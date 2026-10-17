@@ -80,7 +80,8 @@ dependencies = [
     # v1.167.0 -> v1.168.0 (2026-10-15, propuesta; ADR-053 de libracore): `libracore.docs_api.cerrar_docs_de_la_api`: `/docs`, `/redoc` y `/openapi.json` sólo con `ENV=development` (o `LIBRA_DOCS_API=1`); en un cliente real y en la demo dan 404. Sin migracion. `uv.lock` se regenera cuando exista el tag.
     # v1.168.0 -> v1.170.0 (2026-10-15): v1.169.0 suma `fk_de_producto.soltar_fk` (ADR-056; sin efecto en este producto, la usa LibraDesk) y v1.170.0 hace que `delete_client` bloquee la baja de un cliente con cuenta corriente (`cc_pagos`, `cc_debitos`, `recibos` y `cc_asientos` con rol cliente; ADR-057): desactivarlo en vez de borrarlo. Sin migracion.
     # v1.170.0 -> v1.173.0 (2026-10-16): v1.171.0 (ADR-058) no deja cobrar de mas una factura (409 con lo que falta); v1.172.0 (ADR-059 y ADR-060) las notas de credito con CAE restan de lo pendiente (`libracore.db.facturas.sql_pendiente`) y el cobro puede entrar por el turno (`build_comprobantes_router(exigir_turno=, usuario_del_turno=, validar_cobro=)`, `cobros.transaccion_de_cobro`); v1.173.0 (ADR-061, `libracore.demo`): una demo no habla con ARCA ni muestra datos fiscales reales y `usar_empresa_demo` rechaza un CUIT no ficticio. Sin migracion.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.173.0",
+    # v1.173.0 -> v1.176.0 (2026-10-17): v1.174.0 `OpcionesCajas.sucursal_por_defecto` (ADR-062, opt-in); v1.175.0 el pago a cuenta corriente bloquea sus facturas en una transaccion (ADR-063) y la nota de debito tiene tope de cobro (ADR-064, 409 si se cobra de mas); v1.176.0 la NC de una factura al contado cobrada acepta `destino` devolver/a_favor (ADR-065, sin `destino` como antes). Sin migracion.
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.176.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
@@ -90,7 +91,8 @@ dependencies = [
     # dominio como en LibraGenda: aca no hay una persistencia propia que valga
     # la pena escribir, y VentaLibra ya probo ese camino.
     # v0.16.4 -> v0.63.0 (2026-10-16): LibraClub usa solo el repositorio, `confirm_sale` y el dominio. Lo que le toca: `RepositorioAuditado` pide un registrador de `libraauth` y no acepta `usuario=` (v0.57.0, ADR-050; ver `app/commerce.py`); `confirm_sale` rechaza un deposito inactivo o inexistente (ADR-051); `init_schema` se serializa entre procesos (v0.62.0, ADR-062, pide libracore>=1.168) y suma la tabla `branches`, vacia. La cadena de Alembic del motor (0002 a 0007) es de la capa ERP, que este producto no usa: no corre. Sin migracion.
-    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.63.0",
+    # v0.63.0 -> v0.64.0 (2026-10-17): `anular_venta` resta lo que las notas de credito ya devolvieron o dejaron a favor (ADR-064). Sin migracion.
+    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.64.0",
 ]
 
 [project.optional-dependencies]
