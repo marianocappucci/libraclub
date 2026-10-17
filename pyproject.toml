@@ -89,7 +89,8 @@ dependencies = [
     # —dominio, casos de uso y repositorio SQLite/PostgreSQL— y no solo el
     # dominio como en LibraGenda: aca no hay una persistencia propia que valga
     # la pena escribir, y VentaLibra ya probo ese camino.
-    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.16.4",
+    # v0.16.4 -> v0.63.0 (2026-10-16): LibraClub usa solo el repositorio, `confirm_sale` y el dominio. Lo que le toca: `RepositorioAuditado` pide un registrador de `libraauth` y no acepta `usuario=` (v0.57.0, ADR-050; ver `app/commerce.py`); `confirm_sale` rechaza un deposito inactivo o inexistente (ADR-051); `init_schema` se serializa entre procesos (v0.62.0, ADR-062, pide libracore>=1.168) y suma la tabla `branches`, vacia. La cadena de Alembic del motor (0002 a 0007) es de la capa ERP, que este producto no usa: no corre. Sin migracion.
+    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.63.0",
 ]
 
 [project.optional-dependencies]
