@@ -241,13 +241,13 @@ export const tarifas = {
   borrar: (id: number) => api.del(`/api/tarifas/${id}`),
 }
 
-/** El mínimo para dar de alta un cliente desde el diálogo de reserva.
+/** El mínimo para dar de alta un cliente desde el campo «Cliente» (`SelectCliente`, ver `lib/clientes.ts`).
  *
  *  Los demás campos quedan en su default del schema: un cliente que llama por
  *  teléfono para reservar da su nombre, y pedirle el CUIT en ese momento es la
  *  forma más rápida de que el encargado no lo cargue. Se completan después
  *  desde la pantalla de Clientes. */
-export type ClienteMinimo = { nombre: string; telefono?: string | null }
+export type ClienteMinimo = { nombre: string; telefono?: string | null; email?: string | null }
 
 export const clientes = {
   listar: () => api.get<Cliente[]>('/api/clientes'),

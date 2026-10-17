@@ -180,7 +180,7 @@ export function TurnosFijos() {
   return (
     <div className="space-y-3">
       <EncabezadoDePantalla titulo={<TituloPantalla icono={Repeat}>Turnos fijos</TituloPantalla>}>
-        {deLaSucursal.length > 0 && clientes.length > 0 && (
+        {deLaSucursal.length > 0 && (
           <Button onClick={() => setAbierto(true)}>
             <Plus className="size-4" />
             Nueva cancha fija
