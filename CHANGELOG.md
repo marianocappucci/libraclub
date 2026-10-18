@@ -125,6 +125,7 @@ versionado [SemVer](https://semver.org/lang/es/).
 
 ### Corregido
 
+- **«Nueva cancha fija» ya no borra la pantalla de resultado apenas aparece.** El `useEffect` de `FormularioDeSerie` reseteaba el formulario cada vez que cambiaba la identidad de `canchas` o `clientes`, y `TurnosFijos` recarga ambos en `onCreada` (y arma `canchas` con un `filter` en cada render): el resumen de turnos generados y salteados se reemplazaba por el formulario vacío. Ahora resetea sólo al abrir (cerrado → abierto). Tests en `FormularioDeSerie.test.tsx`. Sólo frontend; sin migración.
 - 🔴 **Mandar una factura por mail no podía funcionar.** El motor leía
   `email_smtp_*` de `config.json`, un store que en LibraClub **no escribe
   nadie**: la pantalla de Configuración siempre guardó en la base cifrada de
