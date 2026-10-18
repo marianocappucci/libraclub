@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
@@ -60,8 +60,16 @@ export function FormularioDeSerie({
     ...creados.filter((c) => !clientes.some((k) => k.id === c.id)),
   ].map(opcionDeCliente)
 
+  // Se resetea sólo al abrir (cerrado → abierto), no cada vez que cambian
+  // `canchas` o `clientes`: el padre recarga en `onCreada` y además arma
+  // `canchas` con un `filter` en cada render, así que la identidad de los
+  // arrays cambia sola. Si eso reseteara, la pantalla de resultado —lo único
+  // que dice qué turnos se salteó— se borraría apenas aparece.
+  const abiertoAntes = useRef(false)
   useEffect(() => {
-    if (!abierto) return
+    const recienAbierto = abierto && !abiertoAntes.current
+    abiertoAntes.current = abierto
+    if (!recienAbierto) return
     setError(null)
     setResultado(null)
     setDatos({
