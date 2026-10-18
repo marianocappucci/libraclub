@@ -21,8 +21,12 @@ router = APIRouter(tags=["salud"])
 # **no se ve como un 404**: lo contesta el catch-all con el `index.html`, o sea
 # 200. La instancia nacería con un chequeo que mide que haya estáticos y no que
 # la base responda, y se vería sana con la base caída.
-@router.get("/salud")
-@router.get("/health")
+#
+# 🔑 **`GET` y `HEAD`.** Un monitor de uptime (uptime-kuma) sondea con `HEAD`, y
+# `@router.get` a secas lo contestaba con 405: la instancia figuraba caída
+# estando sana. FastAPI no deriva el `HEAD` del `GET`.
+@router.api_route("/salud", methods=["GET", "HEAD"])
+@router.api_route("/health", methods=["GET", "HEAD"])
 def salud(sesion: Session = Depends(obtener_sesion)) -> dict[str, object]:
     """Falla cerrado: si la base no responde, la sonda no dice 'ok'."""
     sesion.execute(text("SELECT 1"))
