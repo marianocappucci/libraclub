@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import Sequence
-from datetime import date
 from decimal import Decimal
 
 from libracore import cobros as libracore_cobros
@@ -30,6 +29,8 @@ from libracore.db import cierre_diario as db_cierre_diario
 from libracore.db import core as libracore_core
 from libracore.db import reportes as db_reportes
 from libracore.db import turnos as db_turnos
+
+from app.tiempo import hoy
 
 #: Los medios que ofrece este producto. Es un **subconjunto deliberado** de los
 #: del motor: un complejo de canchas cobra en efectivo, por transferencia, con
@@ -184,7 +185,7 @@ def registrar_movimiento(usuario: dict, tipo: str, monto: Decimal, concepto: str
     if turno is None:
         raise SinTurnoAbierto("No hay una caja abierta. Abrí el turno antes de cobrar.")
     return db_caja.create_caja_movimiento(
-        date.today().isoformat(), tipo, concepto, float(monto),
+        hoy().isoformat(), tipo, concepto, float(monto),
         referencia=referencia, factura_id=factura_id,
         usuario_id=int(usuario["id"]), medio_pago=medio_pago, turno_id=turno["id"],
         caja_id=turno.get("caja_id"), conn=conn,

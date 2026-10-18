@@ -4,8 +4,9 @@ Argentina, UTC-3 fijo, sin horario de verano. La base guarda `timestamptz`; el
 formateo `dd-mm-aaaa` es sólo de presentación y vive **acá**, no repetido por
 vista.
 
-> Cuando LibraCore amplíe su alcance en este producto, `ahora()` pasa a delegar
-> en su `_ar_now()`. Se define local para no atarlo antes de tiempo.
+`ahora()` y `hoy()` delegan en `libracore.fechas` (ADR-070, LibraCore v1.182.0):
+un solo reloj de Argentina para la fecha de negocio de todo el producto y del
+motor, el mismo que estampa las tablas del core. No se define otro acá.
 """
 
 from __future__ import annotations
@@ -13,17 +14,20 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
+from libracore import fechas
+
 TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 UTC = ZoneInfo("UTC")
 
 
 def ahora() -> datetime:
-    """Momento actual, consciente de zona horaria."""
-    return datetime.now(TZ)
+    """Momento actual, consciente de zona horaria (hora de Argentina)."""
+    return fechas.ahora()
 
 
 def hoy() -> date:
-    return ahora().date()
+    """El día de hoy en Argentina: la fecha de negocio (`libracore.fechas.hoy()`)."""
+    return fechas.hoy()
 
 
 def a_local(valor: datetime) -> datetime:

@@ -23,7 +23,6 @@ que la separación es al revés — pero la conclusión es la misma: dos bases.
 
 from __future__ import annotations
 
-from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
 from libracommerce.db.schema import init_schema as init_commerce_schema
@@ -36,7 +35,7 @@ from libracore.db import facturas as db_facturas
 from libracore.db.schema import init_core_schema
 
 from app.servicios import buffet, caja
-from app.tiempo import a_local
+from app.tiempo import a_local, hoy
 
 #: Una sola "empresa" ARCA: LibraClub es de instancia única por cliente
 #: (arquitectura silo), así que no hay lista de empresas para elegir. Es una
@@ -379,7 +378,7 @@ async def facturar_reserva(
         punto_venta, tipo
     )
     factura_id = db_facturas.create_factura(
-        tipo, punto_venta, numero, date.today().isoformat(),
+        tipo, punto_venta, numero, hoy().isoformat(),
         (cliente.cuit or "") if cliente else "",
         (cliente.nombre if cliente else "Consumidor Final"),
         # Sin campo de condición frente al IVA en `Cliente`, el receptor es
