@@ -115,6 +115,10 @@ services:
       # abre nada; lo que abriría algo sería ponerle un valor adivinable, y por
       # eso no hay uno de ejemplo.
       - LIBRA_SERVICE_TOKEN=${LIBRA_SERVICE_TOKEN:-}
+      # Rotación sin corte (libraauth v0.52.0): mientras está definida, la
+      # instancia acepta el token nuevo y el anterior. Vacía no vale nada. La
+      # maneja `panel_admin.py token-servicio <slug> --rotar|--cerrar`.
+      - LIBRA_SERVICE_TOKEN_ANTERIOR=${LIBRA_SERVICE_TOKEN_ANTERIOR:-}
       # 🔴 **Credencial propia, distinta de `LIBRA_SERVICE_TOKEN`.** Aquél es
       # UN TOKEN POR PRODUCTO, compartido por todas sus instancias de
       # cliente: dárselo al dueño de un complejo le daría acceso de servicio
