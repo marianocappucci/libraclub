@@ -55,3 +55,34 @@ describe('cancha fija: el cliente se da de alta en el mismo campo (ADR-071)', ()
     expect(await screen.findByRole('button', { name: 'Agregar nuevo cliente' })).toBeEnabled()
   })
 })
+
+describe('cancha fija: la pantalla de resultado no se borra si el padre recarga', () => {
+  const LUCIA = { id: 8, nombre: 'Lucía Gómez', telefono: null } as Cliente
+
+  async function crearSerie() {
+    const user = userEvent.setup()
+    const props = { canchas: [CANCHA], onCerrar: vi.fn(), onCreada: vi.fn() }
+    const vista = render(<FormularioDeSerie abierto clientes={[JUAN]} {...props} />)
+    await user.click(await screen.findByRole('button', { name: 'Crear y generar turnos' }))
+    expect(await screen.findByText('Cancha fija creada')).toBeInTheDocument()
+    return { ...vista, props }
+  }
+
+  it('otra lista de clientes (y canchas) tras crear no resetea el formulario', async () => {
+    const { rerender, props } = await crearSerie()
+    // Lo que hace TurnosFijos en onCreada: recarga y llegan arrays nuevos.
+    rerender(<FormularioDeSerie abierto {...props} canchas={[{ ...CANCHA }]} clientes={[{ ...JUAN }, LUCIA]} />)
+    expect(screen.getByText('Cancha fija creada')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Listo' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Crear y generar turnos' })).toBeNull()
+  })
+
+  it('al volver a abrir sí arranca de cero', async () => {
+    const { rerender, props } = await crearSerie()
+    rerender(<FormularioDeSerie abierto={false} {...props} clientes={[JUAN]} />)
+    rerender(<FormularioDeSerie abierto {...props} clientes={[JUAN]} />)
+    expect(await screen.findByText('Nueva cancha fija')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Crear y generar turnos' })).toBeInTheDocument()
+    expect(screen.queryByText('Cancha fija creada')).toBeNull()
+  })
+})
