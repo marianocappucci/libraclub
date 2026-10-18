@@ -84,7 +84,8 @@ dependencies = [
     # v1.176.0 -> v1.181.0 (2026-10-18): v1.177.0 alta con 2 workers y 2 CPU; v1.178.0 lo pendiente de una ND visible (ADR-066); v1.179.0 la NC sin CAE recuerda el destino de la plata (ADR-067, **migracion 0027 aditiva**); v1.180.0 create_remito(conn=) (ADR-068); v1.181.0 HEAD en montar_spa (ADR-069).
     # v1.181.0 -> v1.182.0 (2026-10-18): un solo reloj de Argentina para «hoy» y «ahora» (ADR-070, libracore.fechas.hoy/ahora). Sin migracion.
     # v1.182.0 -> v1.183.0 (2026-10-18): tokens de servicio e integracion propios de cada instancia (ADR-071); con libraauth v0.52.0 (ADR-025, token anterior para rotar sin corte). Sin migracion.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.183.0",
+    # v1.183.0 -> v1.184.0 (2026-10-18): los cobros de MercadoPago con el CUIT de quien factura nacen ignorados y no se auto-facturan (ADR-072); `admin.services.clientes_dir()` publica. Sin migracion.
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.184.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
