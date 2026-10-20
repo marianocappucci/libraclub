@@ -45,6 +45,12 @@ function useAuthConSucursal() {
   }
 }
 
+/** El nombre de la sucursal elegida en el selector, para la barra de estado del pie. */
+function useSucursalActiva(): string | undefined {
+  const { sucursales, actual } = useSucursal()
+  return sucursales.find((s) => s.id === actual)?.nombre
+}
+
 const Cascaron = createLayout<Usuario>({
   productName: 'LibraClub',
   productInitial: 'C',
@@ -181,6 +187,9 @@ const Cascaron = createLayout<Usuario>({
   // se está mirando no depende de que haya otra.
   getUserSubtitle: (u) => u.sucursal,
   userMenu: <SelectorDeSucursal />,
+  // La barra de estado del pie (libra-ui ADR-083, libracore ADR-075): usuario y sucursal, ARCA, respaldo y versión, de
+  // `GET /api/estado-del-sistema` al cargar y cada pocos minutos. La sucursal es la del selector (vive en el navegador).
+  barraDeEstado: { useSucursal: useSucursalActiva },
   useAuth: useAuthConSucursal,
 })
 
