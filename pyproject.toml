@@ -90,10 +90,8 @@ dependencies = [
     # v1.185.0 -> v1.186.0 (2026-10-19): facturar en el nodo de LibraEdge con ticket prestado por el central y bandeja al volver (ADR-074). Sin migracion.
     # v1.186.0 -> v1.186.1 (2026-10-19): la bandeja no deja descartar a mano una venta del nodo (completa ADR-074). Sin migracion.
     # v1.186.1 -> v1.186.2 (2026-10-19): el motor se puede importar en Windows (bloqueo de archivo portable, nodo de LibraEdge). Sin migracion.
-    # v1.186.2 -> v1.187.0 (propuesto, 2026-10-20): la barra de estado del pie, `GET /api/estado-del-sistema` (ADR-075). Sin
-    # migracion. 🔴 Hasta que se corte el tag, el pin apunta al commit del PR del motor (libracore#421): cambiarlo por
-    # `@v1.187.0` antes de mergear.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@2d0319a042028e549cbc1f1d2ddbd0517e85059f",
+    # v1.186.2 -> v1.187.0 (2026-10-20): la barra de estado del pie, `GET /api/estado-del-sistema` (ADR-075). Sin migracion.
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.187.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
