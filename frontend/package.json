@@ -17,7 +17,7 @@
     "@hookform/resolvers": "^5.4.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "libra-ui": "github:marianocappucci/libra-ui#v0.168.0",
+    "libra-ui": "github:marianocappucci/libra-ui#65fa4d455eecbe7e065afe30803308a2348079b3",
     "lucide-react": "^1.52.0",
     "radix-ui": "^1.7.0",
     "react": "^19.3.0",
