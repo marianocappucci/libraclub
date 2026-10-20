@@ -5,6 +5,8 @@ versionado [SemVer](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+- **La barra de estado del pie** (2026-10-20; pedido del humano; libracore ADR-075, libra-ui ADR-083; sin migración). Una línea chica al pie de todas las pantallas con el usuario, el certificado de ARCA que vence en menos de 30 días o venció, el último respaldo y la versión (este producto no tiene LibraEdge: esa parte no se muestra). `app/main.py` monta `build_estado_del_sistema_router` del motor (`GET /api/estado-del-sistema`, con `require_staff`: cualquier rol de la instancia; ARCA, respaldo y versión del motor, sólo el admin) con la carpeta de respaldos. Frontend: `createLayout({ barraDeEstado })`. La sucursal es la elegida en el selector (`barraDeEstado: { useSucursal }`). Tests: `tests/test_estado_del_sistema.py`. Pines: **libracore `v1.187.0`** (antes `v1.186.2`) y **libra-ui `v0.170.0`** (antes `v0.168.0`; trae también el ADR-084 del kit, «Sucursal sin internet» dice que en el local se entra por la copia local). Sin migración.
+
 ### Cambiado
 
 - **Rotación sin corte del token de servicio** (libraauth `v0.52.0`): `docker-compose.yml` y `.env.example` declaran **`LIBRA_SERVICE_TOKEN_ANTERIOR`** con default vacío; mientras está definida, la instancia acepta el token nuevo y el anterior (`panel_admin.py token-servicio <slug> --rotar|--cerrar`, ADR-071 de libracore). Sin el pin de libraauth `v0.52.0` la variable no hace nada. Sin migración, sin cambio de código.
