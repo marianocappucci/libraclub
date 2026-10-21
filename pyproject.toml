@@ -27,7 +27,8 @@ dependencies = [
     # v0.50.0 -> v0.51.0 (2026-10-15, ADR-024): el responsable acepta por adelantado la proxima version de los Terminos (`GET /terminos` suma `proxima`, `POST /aceptar` acepta la vigente o la proxima). Sin migracion; el aviso pide libra-ui v0.153.0.
     # v0.52.0 -> v0.53.0 (2026-10-20): la marca Secure de la cookie de sesion es configurable (LIBRAAUTH_COOKIE_SECURE, ADR-026); sin la variable no cambia nada. Sin migracion.
     # v0.53.0 -> v0.54.0 (2026-10-21): en un nodo de LibraEdge los usuarios son los del central (ADR-027); fuera de un nodo no cambia nada. Sin migracion.
-    "libraauth[migrations] @ git+https://github.com/marianocappucci/libraauth.git@v0.54.0",
+    # v0.54.0 -> v0.55.0 (2026-10-21): en un nodo de LibraEdge no se pide captcha y la IP del bloqueo es el par directo (ADR-028); fuera de un nodo no cambia nada. Sin migracion.
+    "libraauth[migrations] @ git+https://github.com/marianocappucci/libraauth.git@v0.55.0",
     # Entra en F1 sólo por `respaldo`: una instancia sin backup no se puede
     # poner en produccion. Su alcance crece en F2 (`mp_api`, `pdf_generator`)
     # y F3 (ARCA) — ver ARCHITECTURE.md.

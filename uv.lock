@@ -596,8 +596,8 @@ wheels = [
 
 [[package]]
 name = "libraauth"
-version = "0.54.0"
-source = { git = "https://github.com/marianocappucci/libraauth.git?rev=v0.54.0#e4005947e312ea33808e3199600f91e0fbff702b" }
+version = "0.55.0"
+source = { git = "https://github.com/marianocappucci/libraauth.git?rev=v0.55.0#251a8e9fb809a1d3f0137ad89fcd01cfe30163ea" }
 dependencies = [
     { name = "altcha" },
     { name = "argon2-cffi" },
@@ -646,7 +646,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.14" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
-    { name = "libraauth", extras = ["migrations"], git = "https://github.com/marianocappucci/libraauth.git?rev=v0.54.0" },
+    { name = "libraauth", extras = ["migrations"], git = "https://github.com/marianocappucci/libraauth.git?rev=v0.55.0" },
     { name = "libracommerce", git = "https://github.com/marianocappucci/libracommerce.git?rev=v0.70.1" },
     { name = "libracore", git = "https://github.com/marianocappucci/libracore.git?rev=v1.189.0" },
     { name = "libragenda", git = "https://github.com/marianocappucci/libragenda.git?rev=v0.11.0" },
