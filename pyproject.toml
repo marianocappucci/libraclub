@@ -27,7 +27,8 @@ dependencies = [
     # v0.50.0 -> v0.51.0 (2026-10-15, ADR-024): el responsable acepta por adelantado la proxima version de los Terminos (`GET /terminos` suma `proxima`, `POST /aceptar` acepta la vigente o la proxima). Sin migracion; el aviso pide libra-ui v0.153.0.
     # v0.52.0 -> v0.53.0 (2026-10-20): la marca Secure de la cookie de sesion es configurable (LIBRAAUTH_COOKIE_SECURE, ADR-026); sin la variable no cambia nada. Sin migracion.
     # v0.53.0 -> v0.54.0 (2026-10-21): en un nodo de LibraEdge los usuarios son los del central (ADR-027); fuera de un nodo no cambia nada. Sin migracion.
-    "libraauth[migrations] @ git+https://github.com/marianocappucci/libraauth.git@v0.54.0",
+    # v0.54.0 -> v0.55.0 (2026-10-21): en un nodo de LibraEdge no se pide captcha y la IP del bloqueo es el par directo (ADR-028); fuera de un nodo no cambia nada. Sin migracion.
+    "libraauth[migrations] @ git+https://github.com/marianocappucci/libraauth.git@v0.55.0",
     # Entra en F1 sólo por `respaldo`: una instancia sin backup no se puede
     # poner en produccion. Su alcance crece en F2 (`mp_api`, `pdf_generator`)
     # y F3 (ARCA) — ver ARCHITECTURE.md.
@@ -111,7 +112,8 @@ dependencies = [
     # v0.66.0 -> v0.68.0 (2026-10-19): ventas de la capa ERP en un nodo offline (ADR-067) y venta.facturada con reconciliacion (ADR-068). Sin migracion.
     # v0.68.0 -> v0.69.0 (2026-10-21): la caja y los turnos del nodo suben al central (ADR-069). Sin migracion.
     # v0.69.0 -> v0.70.0 (2026-10-21): cliente.alta: las altas de clientes del nodo suben al central (ADR-070); incluye v0.69.1 (cerrar_turno con ganchos). Sin migracion.
-    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.70.0",
+    # v0.70.0 -> v0.70.1 (2026-10-21): el central recalcula el arqueo del turno como el nodo (ventas o caja); ya no marca [REVISAR ARQUEO] siempre en ContaLibra y RestoLibra. Sin migracion.
+    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.70.1",
 ]
 
 [project.optional-dependencies]
