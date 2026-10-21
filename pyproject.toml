@@ -26,7 +26,8 @@ dependencies = [
     # v0.49.0 -> v0.50.0 (2026-10-13, ADR-023): `UsadosEnBase`, el anti-replay del captcha en la base (varios procesos). **Con migracion** (`0003_captcha_usados`): el arranque la exige (`exigir_schema_al_dia`), asi que `libraauth-migrar upgrade` corre antes de uvicorn.
     # v0.50.0 -> v0.51.0 (2026-10-15, ADR-024): el responsable acepta por adelantado la proxima version de los Terminos (`GET /terminos` suma `proxima`, `POST /aceptar` acepta la vigente o la proxima). Sin migracion; el aviso pide libra-ui v0.153.0.
     # v0.52.0 -> v0.53.0 (2026-10-20): la marca Secure de la cookie de sesion es configurable (LIBRAAUTH_COOKIE_SECURE, ADR-026); sin la variable no cambia nada. Sin migracion.
-    "libraauth[migrations] @ git+https://github.com/marianocappucci/libraauth.git@v0.53.0",
+    # v0.53.0 -> v0.54.0 (2026-10-21): en un nodo de LibraEdge los usuarios son los del central (ADR-027); fuera de un nodo no cambia nada. Sin migracion.
+    "libraauth[migrations] @ git+https://github.com/marianocappucci/libraauth.git@v0.54.0",
     # Entra en F1 sólo por `respaldo`: una instancia sin backup no se puede
     # poner en produccion. Su alcance crece en F2 (`mp_api`, `pdf_generator`)
     # y F3 (ARCA) — ver ARCHITECTURE.md.
@@ -92,7 +93,8 @@ dependencies = [
     # v1.186.0 -> v1.186.1 (2026-10-19): la bandeja no deja descartar a mano una venta del nodo (completa ADR-074). Sin migracion.
     # v1.186.1 -> v1.186.2 (2026-10-19): el motor se puede importar en Windows (bloqueo de archivo portable, nodo de LibraEdge). Sin migracion.
     # v1.186.2 -> v1.187.0 (2026-10-20): la barra de estado del pie, `GET /api/estado-del-sistema` (ADR-075). Sin migracion.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.187.0",
+    # v1.187.0 -> v1.188.0 (2026-10-21): ganchos de caja para que la caja del nodo suba al central (ADR-076). Migracion 0028 aditiva (origen/origen_id).
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.188.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
@@ -106,7 +108,8 @@ dependencies = [
     # v0.64.0 -> v0.65.0 (2026-10-18): el reloj de hora.py sale de libracore.fechas (ADR-065; pide libracore>=1.182). Sin migracion.
     # v0.65.0 -> v0.66.0 (2026-10-18): los reportes por dia leen el dia de Argentina; se sigue guardando el instante UTC (ADR-066). Sin migracion.
     # v0.66.0 -> v0.68.0 (2026-10-19): ventas de la capa ERP en un nodo offline (ADR-067) y venta.facturada con reconciliacion (ADR-068). Sin migracion.
-    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.68.0",
+    # v0.68.0 -> v0.69.0 (2026-10-21): la caja y los turnos del nodo suben al central (ADR-069). Sin migracion.
+    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.69.0",
 ]
 
 [project.optional-dependencies]
