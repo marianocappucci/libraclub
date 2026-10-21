@@ -596,8 +596,8 @@ wheels = [
 
 [[package]]
 name = "libraauth"
-version = "0.52.0"
-source = { git = "https://github.com/marianocappucci/libraauth.git?rev=v0.52.0#d4cfb784ef8795ef7d5c3da804580355117b9854" }
+version = "0.54.0"
+source = { git = "https://github.com/marianocappucci/libraauth.git?rev=v0.54.0#e4005947e312ea33808e3199600f91e0fbff702b" }
 dependencies = [
     { name = "altcha" },
     { name = "argon2-cffi" },
@@ -646,9 +646,9 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.14" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
-    { name = "libraauth", extras = ["migrations"], git = "https://github.com/marianocappucci/libraauth.git?rev=v0.52.0" },
-    { name = "libracommerce", git = "https://github.com/marianocappucci/libracommerce.git?rev=v0.68.0" },
-    { name = "libracore", git = "https://github.com/marianocappucci/libracore.git?rev=v1.187.0" },
+    { name = "libraauth", extras = ["migrations"], git = "https://github.com/marianocappucci/libraauth.git?rev=v0.54.0" },
+    { name = "libracommerce", git = "https://github.com/marianocappucci/libracommerce.git?rev=v0.70.0" },
+    { name = "libracore", git = "https://github.com/marianocappucci/libracore.git?rev=v1.189.0" },
     { name = "libragenda", git = "https://github.com/marianocappucci/libragenda.git?rev=v0.11.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.9" },
@@ -664,13 +664,13 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "libracommerce"
-version = "0.68.0"
-source = { git = "https://github.com/marianocappucci/libracommerce.git?rev=v0.68.0#bdff91da6034a49113a86af12fc3ec4878484d99" }
+version = "0.70.0"
+source = { git = "https://github.com/marianocappucci/libracommerce.git?rev=v0.70.0#d50c1ea2509cc245ae8acb807f6129f59ebc279c" }
 
 [[package]]
 name = "libracore"
-version = "1.187.0"
-source = { git = "https://github.com/marianocappucci/libracore.git?rev=v1.187.0#ed1f5fa4d96e3208e1dd191602798b533b1ab491" }
+version = "1.189.0"
+source = { git = "https://github.com/marianocappucci/libracore.git?rev=v1.189.0#6af2600286455d9f493cf816b89beb8219c1725e" }
 dependencies = [
     { name = "cryptography" },
     { name = "fastapi" },
