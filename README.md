@@ -93,16 +93,18 @@ Cuatro cosas que no se pueden saltear, cada una porque ya falló en la familia:
    *después* de guardar, así que `ssl_forced` y `http2_support` quedan apagados
    aunque el alta los haya mandado en `true`.
 
-## Una base o dos
+## Una sola base
 
-Una instancia nueva nace con **una sola base**: `LIBRACLUB_DATABASE_URL` y
-`LIBRACLUB_LIBRACORE_DATABASE_URL` llevan la misma URL (ADR-020). Las dos que
-existen hoy, `libraclub-dev` y `libraclub-demo`, tienen `libraclub_core` aparte
-hasta que se unan con `libracore-unir-bases`; el código anda con las dos formas
-(`app/config.py`: sin la variable del core, o con la misma base, todo usa la del
-dominio). Para unir una: ADR-020, «Consecuencias» — primero se despliega este
-código con las bases separadas, y la demo necesita `LIBRACOMMERCE_MIGRAR_URL` en
-su compose apuntando al core (como el `docker-compose.yml` de dev).
+LibraClub corre con **una sola base**: LibraCore vive en la del dominio (ADR-020).
+`libracore-unir-bases` (ADR-078) unió `libraclub-dev` y `libraclub-demo` el
+2026-10-22 y no queda ninguna instancia con `libraclub_core` aparte, así que el
+compose de dev no lleva `LIBRACLUB_LIBRACORE_DATABASE_URL` ni
+`LIBRACOMMERCE_MIGRAR_URL`: sin la primera, todo usa `DATABASE_URL`
+(`app/config.py`). El código sigue andando si alguien la define con otra base
+(el respaldo lleva las dos), pero ya nadie lo hace. Una instancia nueva sale del
+motor con las dos variables en la misma URL, y también es una sola base.
+Exige libracore `>= v1.190.1` para que `libracore-migrar --prefijo libraclub`
+caiga solo a la base del dominio.
 
 La tabla de versión de Alembic del producto es `alembic_version_libraclub`; una
 base de antes se renombra sola en la primera migración (`migrations/env.py`).
@@ -183,6 +185,5 @@ pip install -e '.[dev]'
 pytest -q
 ```
 
-La suite corre con las dos formas de la instancia: por defecto con **dos bases**
-(`<base>_core`, como `dev` y `demo` hoy) y con `LIBRACLUB_SUITE_UNA_BASE=1` con
-**una sola** (como una instancia nueva). El CI corre las dos.
+La suite corre con **una sola base**: dominio y LibraCore juntos, como la instancia.
+Cada worker de xdist tiene la suya (`tests/conftest.py`).

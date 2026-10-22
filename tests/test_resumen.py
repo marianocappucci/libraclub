@@ -37,7 +37,7 @@ DIA = date(2026, 9, 8)
 
 
 def _url_core() -> str:
-    """La URL de la base de LibraCore: `<dominio>_core`, o la del dominio si la suite corre con una sola base."""
+    """La URL de la base de LibraCore: la del dominio (una sola base, ADR-020)."""
     return url_del_core()
 
 

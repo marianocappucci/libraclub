@@ -5,7 +5,7 @@ la caja, no por API»— y no registraba nada: el pago seguía `aprobado`, la ca
 se movía, y la plata que se le devolvía al jugador salía del cajón como un
 faltante sin explicación en el arqueo.
 
-Estos tests corren el circuito entero contra las dos bases: el cobro por QR con
+Estos tests corren el circuito entero, con la caja de LibraCore: el cobro por QR con
 el simulador —que llama a las MISMAS funciones que el cobro real—, la
 cancelación por la API del mostrador, y el movimiento leído **directo de
 `caja_movimientos`**, no de un resumen que lo pudiera estar calculando por otro
@@ -234,10 +234,11 @@ def test_el_reintento_con_la_caja_abierta_la_completa(
 def test_reintentar_no_saca_la_plata_dos_veces(
     api, sesion, cancha, cliente, complejo, abrir_caja, base_de_libracore
 ):
-    """🔑 El egreso y el estado del pago viven en DOS bases.
+    """🔑 El egreso y el estado del pago se commitean por separado.
 
-    El movimiento se escribe en la de LibraCore, que commitea sola; el
-    `DEVUELTO` en la del dominio, al final del request. Si el segundo commit se
+    El movimiento lo escribe LibraCore, que commitea sola (su propio engine, aunque
+    hoy comparta base con el dominio, ADR-020); el `DEVUELTO`, el dominio, al final
+    del request. Si el segundo commit se
     pierde, el pago queda pendiente con el egreso ya hecho — y el reintento no
     puede sacar la plata otra vez. Se simula exactamente eso: egreso hecho, pago
     devuelto a pendiente a mano.

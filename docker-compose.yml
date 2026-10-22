@@ -92,29 +92,15 @@ services:
       - LIBRACLUB_ADMIN_USERNAME=${LIBRACLUB_ADMIN_USERNAME:-admin}
       - LIBRACLUB_ADMIN_PASSWORD=${LIBRACLUB_ADMIN_PASSWORD:?hay que definirla en el .env}
       - DATABASE_URL=postgresql+psycopg://libraclub:${LIBRACLUB_POSTGRES_PASSWORD:?hay que definirla en el .env}@libraclub-postgres:5432/libraclub
-      # 🔴 La base de LibraCore, SEPARADA de la del dominio y en el mismo
-      # servidor. Separada porque `init_core_schema()` crea `usuarios` y
-      # `auth_log`, que este producto ya tiene con la forma de `libraauth`:
-      # compartiendo base nada falla al arrancar y libracore queda leyendo
-      # tablas de otro motor. Mismo arreglo que Gestiolibra, MedLibra y
-      # VentaLibra.
-      #
-      # No hace falta crearla a mano: la app la crea si no existe (ver
-      # `servicios/facturacion.py`). Un paso manual acá tiraría el contenedor
-      # al arrancar el dia que alguien se lo olvide.
-      #
-      # ⚠️ Con esto el backup pasa a llevarse las DOS bases. Un backup de una
-      # sola no se puede restaurar y **no falla**: da un ZIP que pesa poco.
-      - LIBRACLUB_LIBRACORE_DATABASE_URL=postgresql://libraclub:${LIBRACLUB_POSTGRES_PASSWORD:?hay que definirla en el .env}@libraclub-postgres:5432/libraclub_core
-      # 🔴 **Dónde migra `libracommerce-migrar`.** Por defecto migra la base del
-      # DOMINIO (`libracommerce.migrar.url_de_commerce`), pero mientras esta
-      # instancia tenga DOS bases el buffet vive en la del core. Sin esta línea el
-      # `command:` crearía 25 tablas vacías de LibraCommerce en `libraclub` que la
-      # app no lee, y `libracore-unir-bases verificar` cortaría la unión con 21
-      # `choque_de_tablas` (medido el 2026-10-22). Tiene que apuntar a la MISMA
-      # base que la variable de arriba: al unir, las dos pasan a la del dominio (o
-      # esta se saca). `tests/test_una_sola_base.py` ata las dos.
-      - LIBRACOMMERCE_MIGRAR_URL=postgresql://libraclub:${LIBRACLUB_POSTGRES_PASSWORD:?hay que definirla en el .env}@libraclub-postgres:5432/libraclub_core
+      # 🔑 **Una sola base** (ADR-020, decisión del humano del 2026-10-22): LibraCore
+      # vive en la misma base que el dominio, así que no hay variable del core.
+      # Sin `LIBRACLUB_LIBRACORE_DATABASE_URL`, `Config.desde_entorno()` cae a la
+      # del dominio y el respaldo lleva una sola base. `libracommerce-migrar` migra
+      # la del dominio por defecto, y `libracore-migrar --prefijo libraclub` también
+      # **desde libracore v1.190.1** (`_UNA_SOLA_BASE`): con v1.190.0 sin la variable
+      # del core falla con `SinURL`, así que el pin tiene que ser >= v1.190.1.
+      # `libracore-unir-bases` (ADR-078) unió `libraclub-dev` y `libraclub-demo`;
+      # `libraclub_core` quedó como respaldo de la unión y no se usa más.
       - ENTORNO=dev
       # Como el backoffice (admin.libraclub.com.ar) administra los usuarios de
       # esta instancia, y como el panel del dueño pide `/admin/resumen`.
