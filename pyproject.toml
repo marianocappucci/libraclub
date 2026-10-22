@@ -115,7 +115,8 @@ dependencies = [
     # v0.70.0 -> v0.70.1 (2026-10-21): el central recalcula el arqueo del turno como el nodo (ventas o caja); ya no marca [REVISAR ARQUEO] siempre en ContaLibra y RestoLibra. Sin migracion.
     # v0.70.1 -> v0.71.0 (2026-10-22): el stock de un nodo de LibraEdge (ADR-071): ganchos del ledger, guarda de sucursales con nodo, stock.movimiento y compra.recibida. Migracion 0008 aditiva (stock_movements.origen/origen_id); fuera de un nodo no cambia nada.
     # v0.71.0 -> v0.72.0 (2026-10-22): en un nodo de LibraEdge el deposito por defecto es el de su sucursal. Migracion 0009 aditiva (nodo_local); fuera de un nodo no cambia nada.
-    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.72.0",
+    # v0.72.0 -> v0.72.1 (2026-10-22): la carga inicial lleva a cero los depositos ajenos del nodo (PC que cambia de sucursal). Sin migracion.
+    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.72.1",
 ]
 
 [project.optional-dependencies]
