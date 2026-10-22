@@ -108,10 +108,10 @@ if ! docker ps --format '{{.Names}}' | grep -qx "$SIDECAR"; then
 fi
 log "motor: PostgreSQL (sidecar $SIDECAR)"
 
-# 🔴 [LIBRACLUB] **Son DOS bases, no una.** El dominio vive en `libraclub` y
-# LibraCore en `libraclub_core`, separadas a proposito porque
-# `init_core_schema()` crea `usuarios` y `auth_log`, que este producto ya tiene
-# con la forma de `libraauth`.
+# 🔴 [LIBRACLUB] **Mientras la demo tenga DOS bases, son dos.** El dominio vive en
+# `libraclub` y LibraCore en `libraclub_core` (ADR-020: la demo pasa a una sola
+# cuando se una, y desde ese dia las dos variables llevan la misma URL; el
+# script anda con las dos formas).
 #
 # Resetear solo la del dominio deja **33 tablas de LibraCore con los datos de
 # ayer**: los turnos de caja, sus movimientos y el espejo de `usuarios`. Y ese
@@ -126,7 +126,14 @@ if [ -z "$URL_CORE" ]; then
 fi
 BASE_CORE=${URL_CORE##*/}
 BASE_CORE=${BASE_CORE%%\?*}
-log "bases a resetear: la del dominio y '$BASE_CORE' (LibraCore)"
+BASE_DOMINIO=${URL_BASE##*/}
+BASE_DOMINIO=${BASE_DOMINIO%%\?*}
+if [ "$BASE_CORE" = "$BASE_DOMINIO" ]; then
+  # Una sola base: el DROP SCHEMA del dominio ya se lleva a LibraCore.
+  log "una sola base ('$BASE_DOMINIO'): LibraCore vive en la del dominio"
+else
+  log "bases a resetear: la del dominio y '$BASE_CORE' (LibraCore)"
+fi
 
 # Cuantas filas hay en tres tablas del dominio **y dos de LibraCore**. Es la
 # unica forma de que este script pueda DECIR que reseteo: se mide antes y
@@ -197,15 +204,18 @@ docker exec "$SIDECAR" sh -c '
 ' >/dev/null || { log "ABORTA: no se pudo recrear el schema del dominio."; docker start "$CONTENEDOR" >/dev/null; exit 10; }
 log "schema del dominio recreado, vacio"
 
-# [LIBRACLUB] Y la de LibraCore. La app la recrea sola al arrancar
-# (`init_core_schema`), asi que alcanza con dejarla vacia.
-docker exec "$SIDECAR" sh -c "
-  psql -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d $BASE_CORE \
-    -c \"DROP SCHEMA IF EXISTS public CASCADE\" \
-    -c \"CREATE SCHEMA public\" \
-    -c \"GRANT ALL ON SCHEMA public TO \\\"\$POSTGRES_USER\\\"\"
-" >/dev/null || { log "ABORTA: no se pudo recrear el schema de $BASE_CORE."; docker start "$CONTENEDOR" >/dev/null; exit 10; }
-log "schema de $BASE_CORE recreado, vacio"
+# [LIBRACLUB] Y la de LibraCore, si es OTRA. La app la recrea sola al arrancar
+# (`init_core_schema`), asi que alcanza con dejarla vacia. Con una sola base ya
+# quedo vacia arriba, y repetir el DROP sobre la misma sobraria.
+if [ "$BASE_CORE" != "$BASE_DOMINIO" ]; then
+  docker exec "$SIDECAR" sh -c "
+    psql -v ON_ERROR_STOP=1 -U \"\$POSTGRES_USER\" -d $BASE_CORE \
+      -c \"DROP SCHEMA IF EXISTS public CASCADE\" \
+      -c \"CREATE SCHEMA public\" \
+      -c \"GRANT ALL ON SCHEMA public TO \\\"\$POSTGRES_USER\\\"\"
+  " >/dev/null || { log "ABORTA: no se pudo recrear el schema de $BASE_CORE."; docker start "$CONTENEDOR" >/dev/null; exit 10; }
+  log "schema de $BASE_CORE recreado, vacio"
+fi
 
 # --- Las cadenas de migracion, ANTES de que arranque la app --------------
 #

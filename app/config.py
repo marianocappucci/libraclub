@@ -8,6 +8,19 @@ from dataclasses import dataclass
 from libracore.db.url_de_instancia import url_de_instancia
 
 
+def misma_base(a: str, b: str) -> bool:
+    """Si dos URLs apuntan a la misma base, aunque una diga `+psycopg` y la otra no.
+
+    Compara servidor, usuario y nombre de la base; ignora el driver, los
+    parámetros (`?sslmode=...`) y la barra final. No resuelve nombres de host: dos
+    alias del mismo servidor cuentan como distintos, y entonces se trata como dos
+    bases (respaldar de más es el error barato; respaldar de menos no).
+    """
+    def _normal(u: str) -> str:
+        return u.replace("postgresql+psycopg://", "postgresql://", 1).split("?", 1)[0].rstrip("/")
+    return _normal(a) == _normal(b)
+
+
 @dataclass(frozen=True)
 class Config:
     database_url: str
@@ -18,19 +31,33 @@ class Config:
     #: código — en `dev` ese árbol es un bind mount del checkout del servidor, y
     #: un `git pull` con archivos nuevos adentro es un problema.
     directorio_de_datos: str = "./data"
-    #: La base de [[libracore]], **separada de la del dominio**.
+    #: La base de [[libracore]]: **la misma que la del dominio, o una aparte**.
     #:
-    #: 🔴 Separada y no la misma, y no es una preferencia: `init_core_schema()`
-    #: crea `usuarios` y `auth_log`, que en este producto **ya existen** con la
-    #: forma de `libraauth`. Compartiendo base, el `CREATE TABLE IF NOT EXISTS`
-    #: no las pisa —así que nada falla— pero libracore quedaría leyendo tablas
-    #: con las columnas de otro motor. Es el mismo arreglo que ya usan
-    #: Gestiolibra, MedLibra y VentaLibra.
+    #: 🔑 **Una sola base es el destino** (ADR-020, decisión del humano del
+    #: 2026-10-22): `usuarios` y `auth_log` son las de `libraauth` y el motor las
+    #: comparte —es la convivencia de LibraCargo, Contalibra y VentaLibra—, y
+    #: para que el buffet, la caja y la factura se escriban en una sola
+    #: transacción tienen que estar en la misma base. `Config.desde_entorno()`
+    #: resuelve así: sin `LIBRACLUB_LIBRACORE_DATABASE_URL`, o con la misma URL
+    #: que la del dominio, esto **es** la URL del dominio.
     #:
-    #: `None` mientras no esté configurada: sin ella la app levanta igual y lo
-    #: único que no anda es la facturación. Un producto que todavía no factura
-    #: no tiene por qué exigir una segunda base para arrancar.
+    #: 🔴 **Todavía hay instancias con dos bases** (`libraclub-dev` y
+    #: `libraclub-demo`, con `libraclub_core` al lado) hasta que se unan con
+    #: `libracore-unir-bases`, cada una con su OK. Por eso el código mira
+    #: `core_en_la_del_dominio` y no supone: con dos bases el respaldo lleva las
+    #: dos y la de LibraCore se crea si falta; con una, nada de eso.
+    #:
+    #: `None` sólo si se arma la `Config` a mano (los tests de «una instancia
+    #: sin facturación»): sin ella la app levanta igual y lo único que no anda
+    #: es la facturación.
     libracore_database_url: str | None = None
+
+    @property
+    def core_en_la_del_dominio(self) -> bool:
+        """Si el schema de LibraCore vive en la base del dominio (una sola base)."""
+        return bool(self.libracore_database_url) and misma_base(
+            self.database_url, self.libracore_database_url
+        )
 
     @classmethod
     def desde_entorno(cls) -> Config:
@@ -69,8 +96,22 @@ class Config:
             entorno=os.environ.get("ENTORNO", "dev"),
             debug=os.environ.get("DEBUG", "").lower() in {"1", "true", "si"},
             directorio_de_datos=os.environ.get("DATA_DIR", "./data"),
-            libracore_database_url=cls._url_de_libracore(),
+            libracore_database_url=cls._url_del_core(url),
         )
+
+    @classmethod
+    def _url_del_core(cls, url_del_dominio: str) -> str:
+        """La base de LibraCore de esta instancia: la propia o, si no hay, la del dominio.
+
+        Sin variable, o con la misma base que el dominio, devuelve **la URL del
+        dominio tal cual**: un solo valor, escrito una sola vez, para que nadie
+        más compare cadenas. Con una base distinta (las instancias que todavía
+        no se unieron) devuelve esa.
+        """
+        propia = cls._url_de_libracore()
+        if propia is None or misma_base(url_del_dominio, propia):
+            return url_del_dominio
+        return propia
 
     @staticmethod
     def _url_de_libracore() -> str | None:

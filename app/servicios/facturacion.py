@@ -34,6 +34,7 @@ from libracore.db import core as libracore_core
 from libracore.db import facturas as db_facturas
 from libracore.db.schema import init_core_schema
 
+from app.config import misma_base
 from app.servicios import buffet, caja
 from app.tiempo import a_local, hoy
 
@@ -101,7 +102,7 @@ class FacturacionNoConfigurada(RuntimeError):
     """
 
 
-def configurar(database_url: str | None) -> bool:
+def configurar(database_url: str | None, *, url_del_dominio: str | None = None) -> bool:
     """Apunta `libracore.db` a su base y crea el schema. Devuelve si quedó lista.
 
     Idempotente: `init_core_schema` usa `CREATE TABLE IF NOT EXISTS`, así que
@@ -109,6 +110,13 @@ def configurar(database_url: str | None) -> bool:
 
     Sin URL no hace nada y devuelve `False` — la app levanta igual y lo único
     que no anda es la facturación.
+
+    🔑 **`url_del_dominio`: con una sola base no se crea nada.** Si la base de
+    LibraCore es la del dominio (ADR-020), ya existe —la app está conectada a
+    ella— y `_crear_base_si_falta` sobraría: pediría conectarse a la base
+    `postgres` del servidor y tener permiso de `CREATE DATABASE` para no hacer
+    nada. Sólo se llama cuando son dos bases distintas. Sin el parámetro (los
+    tests que arman la base del core a mano) se comporta como siempre.
     """
     global _hay_base
     if not database_url:
@@ -128,7 +136,8 @@ def configurar(database_url: str | None) -> bool:
             "retiro el 2026-08-12: no chequea las FK, tipa dinamicamente y "
             "acepta cadenas donde la base pide enteros."
         )
-    _crear_base_si_falta(database_url)
+    if url_del_dominio is None or not misma_base(url_del_dominio, database_url):
+        _crear_base_si_falta(database_url)
     libracore_core.configure(database_url)
     conexion = libracore_core.get_connection()
     try:

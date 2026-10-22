@@ -236,14 +236,18 @@ def test_bajo_docker_exec_el_core_se_configura_solo(api, base_de_libracore, monk
 
 def test_bajo_docker_exec_sin_la_variable_falla_nombrandola(monkeypatch):
     """g) Sin base de LibraCore el backoffice tiene que ver un error que diga qué
-    falta, no un `False` que parezca "apagado"."""
+    falta, no un `False` que parezca "apagado".
+
+    «Sin base» es sin la del core **ni** la del dominio: desde ADR-020, con sólo la del
+    dominio (una sola base) se usa ésa (`test_una_sola_base.py`)."""
     from libracore.db import core as libracore_core
 
     from app.database import get_modulos
 
     monkeypatch.setattr(libracore_core, "_db_path", None)
     monkeypatch.setattr(libracore_core, "_database_url", None)
-    monkeypatch.delenv("LIBRACLUB_LIBRACORE_DATABASE_URL", raising=False)
+    for variable in ("LIBRACLUB_LIBRACORE_DATABASE_URL", "LIBRACLUB_DATABASE_URL", "DATABASE_URL"):
+        monkeypatch.delenv(variable, raising=False)
 
     with pytest.raises(RuntimeError, match="LIBRACLUB_LIBRACORE_DATABASE_URL"):
         get_modulos()

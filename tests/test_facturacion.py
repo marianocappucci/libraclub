@@ -21,19 +21,14 @@ from libraauth.testing import crear_schema_de_auth
 
 from app.config import Config
 from app.main import crear_app
+from tests.conftest import UNA_BASE, url_del_core
 
 USUARIO, CLAVE = "admin", "clave-de-prueba"
 
 
 def _url_core() -> str:
-    """La URL de la base de LibraCore para los tests, derivada de la del dominio.
-
-    Se deriva en vez de pedir otra variable para que corra igual en el CI y en
-    cualquier máquina: es el mismo servidor, otra base.
-    """
-    url = os.environ["DATABASE_URL"]
-    base, _, nombre = url.rpartition("/")
-    return f"{base}/{nombre}_core".replace("postgresql+psycopg://", "postgresql://")
+    """La URL de la base de LibraCore: `<dominio>_core`, o la del dominio si la suite corre con una sola base."""
+    return url_del_core()
 
 
 def _config(url_core: str | None) -> Config:
@@ -130,13 +125,13 @@ def test_el_ambiente_por_default_es_homologacion(api):
     assert api.get("/config/arca").json()["ambiente"] == "homologacion"
 
 
-def test_las_tablas_de_libracore_NO_caen_en_la_base_del_dominio(api, engine):
-    """El choque que motivó las dos bases.
+def test_las_tablas_de_libracore_viven_donde_dice_la_forma_de_la_instancia(api, engine):
+    """Con dos bases, el choque que las motivó; con una sola, la convivencia de ADR-020.
 
-    `arca_config` tiene que existir del lado de LibraCore y **no** del lado del
-    dominio. El control positivo —que exista de un lado— es lo que hace que el
-    negativo signifique algo: sin él, "no está en el dominio" se cumpliría
-    también si el schema no se hubiera creado en ningún lado.
+    Dos bases: `arca_config` tiene que existir del lado de LibraCore y **no** del lado del
+    dominio. Una sola: tiene que estar en la del dominio, que es la de LibraCore. El control
+    positivo —que exista de un lado— es lo que hace que el negativo signifique algo: sin él,
+    «no está en el dominio» se cumpliría también si el schema no se hubiera creado en ningún lado.
     """
     from sqlalchemy import text
 
@@ -144,7 +139,10 @@ def test_las_tablas_de_libracore_NO_caen_en_la_base_del_dominio(api, engine):
         en_dominio = c.execute(
             text("SELECT count(*) FROM pg_tables WHERE tablename = 'arca_config'")
         ).scalar_one()
-    assert en_dominio == 0, "arca_config no puede estar en la base del dominio"
+    if UNA_BASE:
+        assert en_dominio == 1, "con una sola base, arca_config vive en la base del dominio"
+    else:
+        assert en_dominio == 0, "arca_config no puede estar en la base del dominio"
 
     # Control positivo: del lado de LibraCore sí está, y responde.
     assert api.put("/config/arca", json=ARCA).status_code == 200

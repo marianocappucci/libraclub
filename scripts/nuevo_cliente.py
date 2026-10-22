@@ -52,6 +52,14 @@ configure(
     repo_root=REPO_ROOT,
     # Este producto nace sobre PostgreSQL: no hay instancias SQLite que migrar.
     postgres=True,
+    # **Una sola base: LibraCore vive en la del dominio** (ADR-020, decisión del
+    # humano del 2026-10-22). Las dos variables, `LIBRACLUB_DATABASE_URL` y
+    # `LIBRACLUB_LIBRACORE_DATABASE_URL`, llevan la MISMA URL. Es lo que ya hacía
+    # el default (`False`); se escribe para que se vea que es una decisión y no un
+    # olvido, y `tests/test_una_sola_base.py` lo ata. Las instancias que ya existen
+    # (dev y demo) tienen `libraclub_core` aparte hasta que se unan con
+    # `libracore-unir-bases`, cada una con su OK; el código anda con las dos formas.
+    base_core_separada=False,
     # La misma imagen que el CI, la de dev y la del cliente. El collation viene
     # de la imagen y `-alpine` ordena por bytes: una instancia nueva que ordenara
     # distinto que dev sería un cambio de comportamiento invisible.
@@ -90,18 +98,37 @@ configure(
     # —`canchas`, `reservas`, `torneos`, `sucursales`— y ninguna del esquema de
     # LibraGenda, así que no hay una segunda `alembic_version` que aplicar antes.
     # Gestiolibra y MedLibra sí la tienen y por eso declaran dos comandos.
-    # 🔴 **DOS cadenas, y la del motor va primero.** El esquema de LibraCore
-    # de este producto vive en `libraclub_core`, una base **aparte** de la del
-    # dominio — `libracore-migrar` la resuelve por
-    # `LIBRACLUB_LIBRACORE_DATABASE_URL` y NO por `DATABASE_URL`, que apunta al
-    # dominio. Ver `libracore.migrar.url_de_core`.
+    # 🔴 **CUATRO cadenas, y el orden importa** (ADR-020, 2026-10-22: una sola
+    # base). Medido sobre una base vacía con las dos variables en la misma URL:
+    #   1. `libracore-migrar`: el motor. Con dos bases (`libraclub-dev` y
+    #      `libraclub-demo`, hasta que se unan) lo resuelve
+    #      `LIBRACLUB_LIBRACORE_DATABASE_URL` y NO `DATABASE_URL`, que apunta al
+    #      dominio (`libracore.migrar.url_de_core`); con una sola, las dos son la
+    #      misma. Tabla de versión: `alembic_version`.
+    #   2. `libracommerce-migrar`: el buffet. **Siempre en la base del DOMINIO**
+    #      (`libracommerce.migrar.url_de_commerce`), a menos que
+    #      `LIBRACOMMERCE_MIGRAR_URL` diga otra. Hasta acá las tablas de
+    #      LibraCommerce las creaba `init_schema()` al arrancar la app, en la base
+    #      del core; con una sola base es la misma y el arranque las encuentra
+    #      hechas. 🔴 **Con dos bases hace falta esa variable apuntando al core**
+    #      (ver el `docker-compose.yml`; la demo la lleva en su compose del VPS):
+    #      sin ella crea 25 tablas vacías en el dominio y `libracore-unir-bases
+    #      verificar` corta la unión con 21 `choque_de_tablas` (medido el
+    #      2026-10-22). Tabla de versión: `alembic_version_libracommerce`.
+    #   3. `libraauth-migrar`: las seis tablas de auth viven en la base del
+    #      dominio (medido 2026-09-16), por eso `--base dominio`. Va después del
+    #      motor, que declara `usuarios` y FK hacia ella: la dueña es libraauth.
+    #   4. `alembic`: la cadena propia, con su tabla `alembic_version_libraclub`
+    #      (hasta el 2026-10-22 era `alembic_version`, la del motor: ver
+    #      `migrations/env.py`, que renombra la vieja sola).
     #
-    # Hasta el 2026-08-25 esa cadena **no la corría nadie**: las migraciones del
-    # motor no viajaban en el wheel, así que las dos instancias de este producto
+    # Hasta el 2026-08-25 la del motor **no la corría nadie**: las migraciones
+    # no viajaban en el wheel, así que las dos instancias de este producto
     # tenían `libraclub_core` sin `alembic_version` y sin las cuatro columnas
     # que la revisión `0002` le agrega a `clients`.
     migraciones=(
         ("libracore-migrar", "upgrade", "--prefijo", "libraclub"),
+        ("libracommerce-migrar", "upgrade", "--prefijo", "libraclub"),
         # libraauth: sus seis tablas viven en la base del dominio (medido 2026-09-16), por eso --base dominio.
         ("libraauth-migrar", "upgrade", "--prefijo", "libraclub", "--base", "dominio"),
         ("alembic", "upgrade", "head"),
