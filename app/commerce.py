@@ -8,11 +8,18 @@ filas de los otros servicios y parece sano.
 `test_ningun_servicio_usa_el_repositorio_desnudo` es lo que lo sostiene: falla si
 alguien vuelve a importar `SqliteCommerceRepository` fuera de este archivo.
 
-⚠️ **`actividad_log` es un SEGUNDO log, distinto del de la pantalla de Logs.**
-El de `/logs` es el de `libraauth` y vive en la base del dominio; éste es el del
-motor comercial y vive en la de LibraCore. No es una duplicación a resolver acá:
-son dos bases y dos motores. Lo que sí es un pendiente es que la pantalla de
-Logs muestre los dos — hoy muestra uno.
+⚠️ **Con DOS bases, `actividad_log` es un SEGUNDO log, distinto del de la pantalla
+de Logs.** El de `/logs` es el de `libraauth` y vive en la base del dominio; éste
+es el del motor comercial y vive en la de LibraCore. No es una duplicación a
+resolver acá: son dos bases y dos motores. Lo que sí es un pendiente es que la
+pantalla de Logs muestre los dos — hoy muestra uno.
+
+🔑 **Con UNA sola base (ADR-020) son la misma tabla.** Las dos definiciones de
+`actividad_log` —la de `libraauth` y la del motor comercial— tienen las mismas
+columnas a propósito, así que `/logs` ve también lo que escribe el buffet y el
+pendiente de arriba desaparece solo cuando la instancia se une. El código no
+cambia: `repositorio()` sigue abriendo la conexión de LibraCore, que ahí es la
+del dominio.
 """
 
 from __future__ import annotations

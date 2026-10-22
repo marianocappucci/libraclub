@@ -84,7 +84,7 @@ services:
     # `exec` para que uvicorn quede como PID 1 y `docker stop` le llegue. Si la
     # migración falla el contenedor sale con error, que es mejor que servir
     # código nuevo sobre un esquema viejo.
-    command: sh -c "libracore-migrar upgrade --prefijo libraclub && libraauth-migrar upgrade --prefijo libraclub --base dominio && alembic upgrade head && exec uvicorn app.asgi:app --host 0.0.0.0 --port 8000 --workers ${WEB_CONCURRENCY:-1}"
+    command: sh -c "libracore-migrar upgrade --prefijo libraclub && libracommerce-migrar upgrade --prefijo libraclub && libraauth-migrar upgrade --prefijo libraclub --base dominio && alembic upgrade head && exec uvicorn app.asgi:app --host 0.0.0.0 --port 8000 --workers ${WEB_CONCURRENCY:-1}"
     environment:
       # Las tres sin default: la app tiene que fallar al arrancar si falta
       # alguna, no levantar con un secreto de juguete en un dominio público.
@@ -106,6 +106,15 @@ services:
       # ⚠️ Con esto el backup pasa a llevarse las DOS bases. Un backup de una
       # sola no se puede restaurar y **no falla**: da un ZIP que pesa poco.
       - LIBRACLUB_LIBRACORE_DATABASE_URL=postgresql://libraclub:${LIBRACLUB_POSTGRES_PASSWORD:?hay que definirla en el .env}@libraclub-postgres:5432/libraclub_core
+      # 🔴 **Dónde migra `libracommerce-migrar`.** Por defecto migra la base del
+      # DOMINIO (`libracommerce.migrar.url_de_commerce`), pero mientras esta
+      # instancia tenga DOS bases el buffet vive en la del core. Sin esta línea el
+      # `command:` crearía 25 tablas vacías de LibraCommerce en `libraclub` que la
+      # app no lee, y `libracore-unir-bases verificar` cortaría la unión con 21
+      # `choque_de_tablas` (medido el 2026-10-22). Tiene que apuntar a la MISMA
+      # base que la variable de arriba: al unir, las dos pasan a la del dominio (o
+      # esta se saca). `tests/test_una_sola_base.py` ata las dos.
+      - LIBRACOMMERCE_MIGRAR_URL=postgresql://libraclub:${LIBRACLUB_POSTGRES_PASSWORD:?hay que definirla en el .env}@libraclub-postgres:5432/libraclub_core
       - ENTORNO=dev
       # Como el backoffice (admin.libraclub.com.ar) administra los usuarios de
       # esta instancia, y como el panel del dueño pide `/admin/resumen`.

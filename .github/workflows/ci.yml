@@ -180,6 +180,19 @@ jobs:
         # sin eso los workers se pisarian el `DROP SCHEMA` y el `TRUNCATE`.
         run: pytest -n 4 -q -rs --cov=app --cov-report=term-missing
 
+      # 🔑 La misma suite con UNA sola base (ADR-020, 2026-10-22): dominio y LibraCore
+      # juntos, que es como corre una instancia nueva o ya unida. La de arriba es la
+      # de dos bases (`<base>_core`), que es la de `libraclub-dev` y `libraclub-demo`
+      # hasta que se unan. Mientras haya instancias de las dos formas, el código
+      # tiene que andar con las dos y las dos suites tienen que estar verdes; cuando
+      # se unan las dos instancias, la de una base pasa a ser la de arriba y esta se
+      # retira. Sin cobertura: la mide la corrida de arriba.
+      - name: Tests (una sola base)
+        if: steps.cambios.outputs.backend == 'true'
+        env:
+          LIBRACLUB_SUITE_UNA_BASE: "1"
+        run: pytest -n 4 -q -rs
+
       # 🔑 El gate de F1 tiene que haber corrido de verdad, no haberse salteado.
       # Un `pytest` verde con cero tests de concurrencia se ve idéntico a uno con
       # los nueve — y la diferencia es toda la garantía del producto.
