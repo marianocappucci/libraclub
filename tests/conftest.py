@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import atexit
 import os
+import uuid
 from datetime import date, time
 from decimal import Decimal
 
@@ -48,12 +49,27 @@ _PG = base_por_worker("libraclub", os.environ.get("DATABASE_URL", ""))
 if _PG:
     os.environ["DATABASE_URL"] = _PG.url
 
+#: 🔑 **La suite corre con las dos formas de la instancia** (ADR-020):
+#:
+#: - **dos bases** (por defecto): la de LibraCore es `<base del dominio>_core`, como
+#:   `libraclub-dev` y `libraclub-demo` hasta que se unan. Cada test que factura
+#:   recibe una copia de la plantilla `armada` (ver `base_de_libracore`).
+#: - **una sola** (`LIBRACLUB_SUITE_UNA_BASE=1`): LibraCore vive en la base del
+#:   dominio, como una instancia nueva o unida. No hay segunda base: entre test y
+#:   test se vacían las tablas que no son del dominio y se devuelven las semillas
+#:   (`_dejar_el_core_de_cero`). Y como `usuarios` la referencian las FK del
+#:   motor, las tablas de `libraauth` se vacían y no se borran (`_auth_se_vacia`).
+#:
+#: El CI corre las dos (`.github/workflows/ci.yml`). La que cae por defecto es la
+#: de dos bases: es la que hoy tiene instancias vivas.
+UNA_BASE = os.environ.get("LIBRACLUB_SUITE_UNA_BASE", "").strip().lower() in {"1", "si", "true"}
+
 #: La base de LibraCore de ESTE worker y su plantilla `armada`. Se la maneja con
 #: `BasePorWorker` a mano y no con `base_por_worker("...")`: ese deriva el nombre
 #: como `<original>_<worker>` (`libraclub_test_core_gw0`) y los tests —que
 #: componen `<base del dominio>_core` por su cuenta— esperan
-#: `libraclub_test_gw0_core`. Ver `base_de_libracore`.
-_CORE = BasePorWorker(_PG.url_original, f"{_PG.nombre}_core") if _PG else None
+#: `libraclub_test_gw0_core`. Ver `base_de_libracore`. Con una sola base no hay.
+_CORE = BasePorWorker(_PG.url_original, f"{_PG.nombre}_core") if _PG and not UNA_BASE else None
 if _CORE:
     _marca = f"_LIBRACLUB_CORE_LISTA_{os.environ.get('PYTEST_XDIST_WORKER', 'main')}"
     if _marca not in os.environ:
@@ -238,7 +254,21 @@ def sesion(engine) -> Session:
         yield sesion
 
 
-def _construir_core_armada(url: str) -> None:
+def url_del_core() -> str:
+    """La URL de la base de LibraCore para los tests, según la forma de la suite.
+
+    Dos bases: la del dominio con `_core` al final (el mismo servidor, otra base).
+    Una sola: la del dominio, en forma libpq. La usan `base_de_libracore` y los
+    `_url_core()` de cada archivo, para que ninguno la componga por su cuenta.
+    """
+    url = os.environ["DATABASE_URL"]
+    if UNA_BASE:
+        return url.replace("postgresql+psycopg://", "postgresql://", 1)
+    base, _, nombre = url.rpartition("/")
+    return f"{base}/{nombre}_core".replace("postgresql+psycopg://", "postgresql://")
+
+
+def _construir_core_armada(url: str, *, url_del_dominio: str | None = None) -> None:
     """Deja la base de LibraCore como la deja `crear_app()` sobre una base vacía.
 
     Es lo que `facturacion.configurar()` hace en cada arranque: el schema de
@@ -262,14 +292,123 @@ def _construir_core_armada(url: str) -> None:
         for nombre in ("_db_path", "_database_url", "_timeout", "_extra_pragmas"):
             mp.setattr(libracore_core, nombre, getattr(libracore_core, nombre))
         mp.setattr(facturacion, "_hay_base", facturacion._hay_base)
-        facturacion.configurar(url.replace("postgresql+psycopg://", "postgresql://", 1))
+        facturacion.configurar(
+            url.replace("postgresql+psycopg://", "postgresql://", 1), url_del_dominio=url_del_dominio,
+        )
     finally:
         mp.undo()
 
 
+#: Con una sola base: las filas que `facturacion.configurar()` deja sembradas (la
+#: caja por defecto, las categorías de egreso, el depósito), tomadas una vez por
+#: worker. Es la plantilla `armada` de la suite de dos bases, en forma de filas.
+_SEMILLAS: dict[str, tuple[list[str], list[tuple]]] | None = None
+
+
+def _tablas_del_core(con) -> list[str]:
+    """Las tablas de la base que NO son del dominio ni llevan versiones.
+
+    Del dominio se ocupa `sesion`; las `alembic_version*` y `schema_migrations`
+    (la marca de la cadena numerada de LibraCommerce) se conservan: vaciarlas
+    haría que el próximo `configurar()` rehaga lo que ya está hecho.
+    """
+    from app.models import Base
+
+    propias = set(Base.metadata.tables)
+    filas = con.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public'").fetchall()
+    return sorted(
+        t for (t,) in filas
+        if t not in propias and not t.startswith("alembic_version") and t != "schema_migrations"
+    )
+
+
+def _dejar_el_core_de_cero(url: str) -> None:
+    """Una sola base: deja LibraCore como lo deja la plantilla `armada` de dos bases.
+
+    La primera vez en el worker arma el schema (`configurar()` sobre la base del
+    dominio) y anota las semillas; las demás, vacía todo lo que no es del dominio y
+    las devuelve. Es el equivalente de `CREATE DATABASE ... TEMPLATE armada`, sin
+    segunda base.
+    """
+    global _SEMILLAS
+    if _SEMILLAS is None:
+        _construir_core_armada(url, url_del_dominio=url)
+        with psycopg.connect(url) as con:
+            semillas = {}
+            for tabla in _tablas_del_core(con):
+                cur = con.execute(f'SELECT * FROM "{tabla}"')
+                columnas = [d.name for d in cur.description]
+                filas = cur.fetchall()
+                if filas:
+                    semillas[tabla] = (columnas, filas)
+        _SEMILLAS = semillas
+        return
+    with psycopg.connect(url, autocommit=True) as con:
+        con.execute("SET lock_timeout = '15s'")
+        tablas = _tablas_del_core(con)
+        con.execute("TRUNCATE " + ", ".join(f'"{t}"' for t in tablas) + " RESTART IDENTITY CASCADE")
+        for tabla, (columnas, filas) in _SEMILLAS.items():
+            lista = ", ".join(f'"{c}"' for c in columnas)
+            marcas = ", ".join(["%s"] * len(columnas))
+            with con.cursor() as cur:
+                cur.executemany(
+                    f'INSERT INTO "{tabla}" ({lista}) OVERRIDING SYSTEM VALUE VALUES ({marcas})', filas,
+                )
+            secuencia = con.execute("SELECT pg_get_serial_sequence(%s, 'id')", (f'"{tabla}"',)).fetchone()[0]
+            if secuencia and "id" in columnas:
+                con.execute(f'SELECT setval(%s, (SELECT max(id) FROM "{tabla}"))', (secuencia,))
+
+
+@pytest.fixture(autouse=True)
+def _core_de_cero(request):
+    """Una sola base: cada test que toca la base arranca con el core como recién armado.
+
+    Sólo los tests que piden `engine` (directa o indirectamente): los demás no
+    tocan la base y vaciar un centenar de tablas no se les paga. Con dos bases no
+    hace nada: ahí lo hace la copia de la plantilla de `base_de_libracore`.
+    """
+    if UNA_BASE and "engine" in request.fixturenames:
+        request.getfixturevalue("engine")
+        _dejar_el_core_de_cero(url_del_core())
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _auth_se_vacia(request, monkeypatch):
+    """Una sola base: `AuthBase.metadata.drop_all(...)` vacía las tablas de `libraauth` y no las borra.
+
+    🔴 Con una sola base, `usuarios` la referencian las FK del motor
+    (`facturas.usuario_id`, `caja_movimientos.usuario_id`...): `drop_all` muere con
+    `cannot drop table usuarios because other objects depend on it`. LibraCargo
+    resolvió lo mismo con `vaciar_auth`; acá hay 250 llamadas a `drop_all` en 39
+    archivos y se prefirió no tocarlas: el fixture las traduce, y con dos bases
+    (`UNA_BASE` apagado) siguen siendo el `drop_all` de siempre.
+    """
+    if UNA_BASE:
+        from libraauth.models import Base as AuthBase
+
+        monkeypatch.setattr(AuthBase.metadata, "drop_all", lambda bind=None, *a, **kw: vaciar_auth(bind))
+    yield
+
+
+def vaciar_auth(engine) -> None:
+    """Deja las tablas de `libraauth` vacías, sin borrarlas. `CASCADE` vacía también lo que las referencia."""
+    from libraauth.models import Base as AuthBase
+    from sqlalchemy import inspect
+
+    existentes = set(inspect(engine).get_table_names())
+    tablas = [t.name for t in reversed(AuthBase.metadata.sorted_tables) if t.name in existentes]
+    if tablas:
+        with engine.begin() as con:
+            con.execute(text("TRUNCATE TABLE " + ", ".join(f'"{t}"' for t in tablas) + " RESTART IDENTITY CASCADE"))
+
+
 @pytest.fixture
-def base_de_libracore():
+def base_de_libracore(request):
     """La base de LibraCore de este worker, ya armada, para un test que factura.
+
+    Con una sola base (`UNA_BASE`) es la del dominio, con el core recién armado
+    por `_core_de_cero`: no hay base que copiar ni que borrar al terminar.
 
     Parte de una copia de la plantilla `armada` (`_construir_core_armada`) en vez
     de una base vacía que `crear_app()` tenía que llenar. La URL es la que
@@ -278,17 +417,49 @@ def base_de_libracore():
     `<base>_core` sin pedir esta fixture tiene que encontrar la base AUSENTE, no
     los datos del test anterior.
     """
+    if UNA_BASE:
+        request.getfixturevalue("engine")
+        yield url_del_core()
+        return
     if _CORE is None:
         pytest.skip("Falta DATABASE_URL: la suite corre contra PostgreSQL real.")
-    url = os.environ["DATABASE_URL"]
-    base, _, nombre = url.rpartition("/")
-    url_core = f"{base}/{nombre}_core".replace("postgresql+psycopg://", "postgresql://")
+    url_core = url_del_core()
+    nombre = os.environ["DATABASE_URL"].rpartition("/")[2]
     assert nombre + "_core" == _CORE.nombre, (nombre, _CORE.nombre)
     _CORE.restaurar("armada", _construir_core_armada)
     yield url_core
     servidor, _, nombre_core = url_core.rpartition("/")
     with psycopg.connect(f"{servidor}/postgres", autocommit=True) as c:
         c.execute(f'DROP DATABASE IF EXISTS "{nombre_core}" WITH (FORCE)')
+
+
+@pytest.fixture
+def base_temporal():
+    """Fábrica de bases descartables en el servidor de la suite, que se borran al terminar.
+
+    Para los tests que necesitan una base **vacía y propia** —correr la cadena de
+    migraciones desde cero, armar una instancia de una sola base— sin tocar la del
+    worker, que otros tests dan por armada. El nombre cuelga del de la base del
+    worker, así dos workers no se pisan. `existe=False` reserva el nombre sin
+    crearla: para probar que el código la crea.
+
+    Devuelve la URL con el prefijo de SQLAlchemy (`postgresql+psycopg://`).
+    """
+    servidor, _, nombre = _url().rpartition("/")
+    creadas = []
+
+    def _crear(etiqueta: str, *, existe: bool = True) -> str:
+        propio = f"{nombre}_{etiqueta}"[:55] + "_" + uuid.uuid4().hex[:6]
+        if existe:
+            with psycopg.connect(servidor.replace("+psycopg", "", 1) + "/postgres", autocommit=True) as c:
+                c.execute(f'CREATE DATABASE "{propio}"')
+        creadas.append(propio)
+        return f"{servidor}/{propio}"
+
+    yield _crear
+    with psycopg.connect(servidor.replace("+psycopg", "", 1) + "/postgres", autocommit=True) as c:
+        for propio in creadas:
+            c.execute(f'DROP DATABASE IF EXISTS "{propio}" WITH (FORCE)')
 
 
 @pytest.fixture

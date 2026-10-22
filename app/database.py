@@ -10,9 +10,10 @@ backoffice muestra el add-on como "no se pudo leer".
 
 ⚠️ No confundir con `app/db.py`, que es el engine de SQLAlchemy de la base del
 **dominio**. La tabla `modulos` no vive ahí: vive en la base de LibraCore
-(`LIBRACLUB_LIBRACORE_DATABASE_URL`), la crea `init_core_schema()` y la lee
-`libracore.db.modulos`. Acá no se copia lógica: se delega en esa implementación
-única de la familia, con el mismo patrón que `libradesk/app/database.py`.
+(`LIBRACLUB_LIBRACORE_DATABASE_URL`, que con una sola base es la misma del
+dominio), la crea `init_core_schema()` y la lee `libracore.db.modulos`. Acá no se
+copia lógica: se delega en esa implementación única de la familia, con el mismo
+patrón que `libradesk/app/database.py`.
 """
 
 from __future__ import annotations
@@ -30,11 +31,15 @@ def _asegurar_core_configurado() -> None:
       `get_connection()` levanta `RuntimeError`. Ese caso se resuelve solo, sin
       pedirle al backoffice que bootee la app entera.
 
-    🔴 **Con `core=True`.** En LibraClub la base del dominio y la de LibraCore
-    son dos bases distintas (`app/config.py`), y `modulos` está en la segunda:
-    `url_de_instancia("libraclub")` a secas apuntaría a la del dominio, que no
-    tiene esa tabla. `requerida=True` para que una instancia sin la variable
-    falle nombrándola, y no conectándose a la cadena vacía.
+    🔴 **Primero `core=True`.** Mientras la instancia tiene dos bases (todavía
+    `libraclub-dev` y `libraclub-demo`, `app/config.py`), `modulos` está en la de
+    LibraCore: `url_de_instancia("libraclub")` a secas apuntaría a la del
+    dominio, que no tiene esa tabla.
+
+    🔑 **Sin la variable del core, la base del dominio** (ADR-020: una sola base).
+    Es la misma regla que `Config.desde_entorno()`, y por eso se resuelve igual
+    acá: este camino no arma la `Config`. Una instancia sin ninguna de las dos
+    falla nombrándolas, y no conectándose a la cadena vacía.
 
     Se pregunta antes de configurar (`esta_configurado()`) para no pisarle la
     configuración a una app viva.
@@ -43,7 +48,14 @@ def _asegurar_core_configurado() -> None:
     from libracore.db.url_de_instancia import url_de_instancia
 
     if not libracore_core.esta_configurado():
-        libracore_core.configure(url_de_instancia("libraclub", core=True, requerida=True))
+        url = url_de_instancia("libraclub", core=True) or url_de_instancia("libraclub")
+        if not url:
+            raise RuntimeError(
+                "Falta la URL de la base de LibraCore de libraclub: definí "
+                "LIBRACLUB_LIBRACORE_DATABASE_URL o, con una sola base, la del dominio "
+                "(LIBRACLUB_DATABASE_URL o DATABASE_URL)."
+            )
+        libracore_core.configure(url)
 
 
 def get_modulos() -> dict[str, bool]:

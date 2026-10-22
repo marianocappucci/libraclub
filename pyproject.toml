@@ -96,7 +96,8 @@ dependencies = [
     # v1.186.2 -> v1.187.0 (2026-10-20): la barra de estado del pie, `GET /api/estado-del-sistema` (ADR-075). Sin migracion.
     # v1.187.0 -> v1.188.0 (2026-10-21): ganchos de caja para que la caja del nodo suba al central (ADR-076). Migracion 0028 aditiva (origen/origen_id).
     # v1.188.0 -> v1.189.0 (2026-10-21): altas de clientes en un nodo: id provisorio y gancho al crear (ADR-077). Sin migracion.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.189.0",
+    # v1.189.0 -> v1.190.0 (2026-10-22): libracore-unir-bases para unir la base core dentro de la del dominio (ADR-078). Sin migracion.
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.190.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
@@ -113,7 +114,11 @@ dependencies = [
     # v0.68.0 -> v0.69.0 (2026-10-21): la caja y los turnos del nodo suben al central (ADR-069). Sin migracion.
     # v0.69.0 -> v0.70.0 (2026-10-21): cliente.alta: las altas de clientes del nodo suben al central (ADR-070); incluye v0.69.1 (cerrar_turno con ganchos). Sin migracion.
     # v0.70.0 -> v0.70.1 (2026-10-21): el central recalcula el arqueo del turno como el nodo (ventas o caja); ya no marca [REVISAR ARQUEO] siempre en ContaLibra y RestoLibra. Sin migracion.
-    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.70.1",
+    # v0.70.1 -> v0.71.0 (2026-10-22): el stock de un nodo de LibraEdge (ADR-071): ganchos del ledger, guarda de sucursales con nodo, stock.movimiento y compra.recibida. Migracion 0008 aditiva (stock_movements.origen/origen_id); fuera de un nodo no cambia nada.
+    # v0.71.0 -> v0.72.0 (2026-10-22): en un nodo de LibraEdge el deposito por defecto es el de su sucursal. Migracion 0009 aditiva (nodo_local); fuera de un nodo no cambia nada.
+    # v0.72.0 -> v0.72.1 (2026-10-22): la carga inicial lleva a cero los depositos ajenos del nodo (PC que cambia de sucursal). Sin migracion.
+    # 2026-10-22 (ADR-020): el deploy corre ahora `libracommerce-migrar upgrade --prefijo libraclub` (`scripts/panel_admin.py`), asi que la cadena de Alembic del motor corre ENTERA, la capa ERP incluida (0002 a 0009), que antes no corria: son tablas aditivas que este producto no usa. Sin cambio de pin.
+    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.72.1",
 ]
 
 [project.optional-dependencies]

@@ -27,6 +27,7 @@ from app.main import crear_app
 from app.models.enums import AlcanceDia, EstadoReserva
 from app.models.maestros import FranjaDeAtencion
 from app.tiempo import TZ
+from tests.conftest import url_del_core
 
 USUARIO, CLAVE = "admin", "clave-de-prueba"
 TOKEN = "token-de-panel-de-prueba"
@@ -36,9 +37,8 @@ DIA = date(2026, 9, 8)
 
 
 def _url_core() -> str:
-    url = os.environ["DATABASE_URL"]
-    base, _, nombre = url.rpartition("/")
-    return f"{base}/{nombre}_core".replace("postgresql+psycopg://", "postgresql://")
+    """La URL de la base de LibraCore: `<dominio>_core`, o la del dominio si la suite corre con una sola base."""
+    return url_del_core()
 
 
 def _config(url_core: str | None) -> Config:

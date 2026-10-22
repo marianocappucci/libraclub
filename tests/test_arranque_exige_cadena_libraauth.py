@@ -19,8 +19,11 @@ RAIZ = Path(__file__).resolve().parent.parent
 COMANDO = "libraauth-migrar upgrade --prefijo libraclub --base dominio"
 
 
-def test_sin_la_cadena_la_app_no_arranca_y_dice_el_comando(engine, monkeypatch):
+def test_sin_la_cadena_la_app_no_arranca_y_dice_el_comando(engine, monkeypatch, base_de_libracore):
     monkeypatch.setenv("ENV", "development")
+    # `crear_app()` sin config lee el entorno, y sin la variable del core usa la base del dominio (ADR-020):
+    # armaría LibraCore adentro de la base de la suite. Con dos bases, la suya.
+    monkeypatch.setenv("LIBRACLUB_LIBRACORE_DATABASE_URL", base_de_libracore)
     crear_schema_de_auth(engine)
     with engine.begin() as c:
         c.execute(text(f"DROP TABLE {TABLA_DE_VERSION}"))
@@ -40,7 +43,8 @@ def test_la_guarda_usa_el_comando_que_declara_el_deploy():
     assert " ".join(partes) == COMANDO
 
 
-def test_control_con_la_cadena_arranca(engine, monkeypatch):
+def test_control_con_la_cadena_arranca(engine, monkeypatch, base_de_libracore):
     monkeypatch.setenv("ENV", "development")
+    monkeypatch.setenv("LIBRACLUB_LIBRACORE_DATABASE_URL", base_de_libracore)
     crear_schema_de_auth(engine)
     assert crear_app(sembrar_admin=False) is not None

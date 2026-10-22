@@ -95,7 +95,8 @@ jobs:
           ENV: development
           DATA_DIR: ${{ github.workspace }}/smoke-data
           LIBRACLUB_DATABASE_URL: postgresql+psycopg://libraclub:libraclub-ci@localhost:5432/libraclub
-          LIBRACLUB_LIBRACORE_DATABASE_URL: postgresql+psycopg://libraclub:libraclub-ci@localhost:5432/libraclub_core
+          # Una sola base, como un alta nueva (ADR-020): las dos variables llevan la misma URL.
+          LIBRACLUB_LIBRACORE_DATABASE_URL: postgresql+psycopg://libraclub:libraclub-ci@localhost:5432/libraclub
           DATABASE_URL: postgresql+psycopg://libraclub:libraclub-ci@localhost:5432/libraclub
           SECRET_KEY: smoke-de-navegador-no-es-un-secreto-real-0123456789
           DOCS_AUTH_SECRET: smoke-docs
@@ -106,7 +107,6 @@ jobs:
           LIBRACLUB_ADMIN_PASSWORD: smoke-admin-1234
         run: |
           mkdir -p "$DATA_DIR"
-          PGPASSWORD=libraclub-ci psql -h localhost -U libraclub -d libraclub -c 'CREATE DATABASE libraclub_core'
           # Las migraciones son LAS QUE DECLARA scripts/panel_admin.py, en su orden,
           # y no una copia: el mismo snippet que usa scripts/reset_demo.sh. Hasta el
           # 2026-09-17 esta lista era a mano y le faltaba libraauth-migrar (y

@@ -61,7 +61,7 @@ from app.auth import (
     require_admin_o_servicio,
     require_staff,
 )
-from app.config import Config
+from app.config import Config, misma_base
 from app.models.maestros import Sucursal
 from app.routers import admin, disponibilidad, maestros, reservas, salud, torneos
 from app.routers import ausentismo as ausentismo_router
@@ -130,13 +130,17 @@ AUDITABLES = {
 def _instancia_a_respaldar(config: Config) -> Instancia:
     """Qué se lleva el backup.
 
-    🔴 **DOS bases desde que entró la facturación, y las dos tienen que entrar.**
-    `libracore` corre contra una base propia —ver `servicios/facturacion.py`—,
-    así que un backup del dominio solo **no se puede restaurar**: o volvés las
-    reservas y te quedan las facturas de otro momento, o al revés. Y no falla:
-    da un ZIP que se descarga y pesa poco, que es la peor forma de perder datos.
+    🔴 **Con DOS bases, las dos tienen que entrar.** Una instancia que todavía no
+    se unió corre `libracore` contra una base propia —ver
+    `servicios/facturacion.py`—, así que un backup del dominio solo **no se puede
+    restaurar**: o volvés las reservas y te quedan las facturas de otro momento,
+    o al revés. Y no falla: da un ZIP que se descarga y pesa poco, que es la peor
+    forma de perder datos.
 
-    En una instancia sin facturar sigue siendo una sola, y eso está bien: no hay
+    🔑 **Con una sola base** (ADR-020: dominio y core juntos) el dump de la
+    principal ya lo trae todo, y declararla dos veces haría que las dos cayeran
+    en `libraclub.dump` —`Instancia` lo rechaza al arrancar—. Por eso el core va
+    como extra sólo si es OTRA base. En una instancia sin facturar tampoco hay
     nada del otro lado que respaldar.
 
     `directorios=[]` todavía: no hay logos ni adjuntos. **El certificado de ARCA
@@ -144,7 +148,10 @@ def _instancia_a_respaldar(config: Config) -> Instancia:
     explícitamente si entra al ZIP — un backup con la clave privada adentro es un
     archivo que circula por mail.
     """
-    extra = [config.libracore_database_url] if config.libracore_database_url else []
+    otra_base = config.libracore_database_url and not misma_base(
+        config.database_url, config.libracore_database_url
+    )
+    extra = [config.libracore_database_url] if otra_base else []
     return Instancia(
         nombre="libraclub", postgres_url=config.database_url, postgres_extra=extra,
     )
@@ -195,7 +202,7 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # no, porque su schema lo versiona él y no nosotros.
     # La base de LibraCore, si esta instancia factura. Devuelve False y no hace
     # nada cuando no está configurada — la app levanta igual.
-    facturacion.configurar(config.libracore_database_url)
+    facturacion.configurar(config.libracore_database_url, url_del_dominio=config.database_url)
 
     # 🔴 Las tablas de auth las crea la cadena de LibraAuth (`libraauth-migrar
     # upgrade --prefijo libraclub --base dominio`, declarada en `scripts/panel_admin.py`),
