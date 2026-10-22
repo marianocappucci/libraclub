@@ -23,7 +23,7 @@ target_metadata = Base.metadata
 #: 🔴 **La tabla de versión es PROPIA de este producto, no `alembic_version`.**
 #:
 #: `alembic_version` es el nombre por defecto y es el que usa la cadena de
-#: LibraCore (`libracore-migrar`). Hasta ahora no importaba: el core vivía en
+#: LibraCore (`libracore-migrar`). Hasta el 2026-10-22 no importaba: el core vivía en
 #: `libraclub_core`, otra base. Con **una sola base** (ADR-020, decisión del
 #: humano del 2026-10-22) las dos cadenas migran en la misma, y dos cadenas sobre
 #: una tabla de versión se pisan la revisión: la segunda en correr cree que la
@@ -34,7 +34,7 @@ target_metadata = Base.metadata
 VERSION_TABLE = "alembic_version_libraclub"
 
 #: El nombre que tenía hasta el 2026-10-22, y que sigue teniendo en cada base que
-#: no se migró desde entonces (`libraclub-dev`, `libraclub-demo`).
+#: no se migró desde entonces.
 VERSION_TABLE_VIEJA = "alembic_version"
 
 

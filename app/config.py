@@ -41,11 +41,12 @@ class Config:
     #: resuelve así: sin `LIBRACLUB_LIBRACORE_DATABASE_URL`, o con la misma URL
     #: que la del dominio, esto **es** la URL del dominio.
     #:
-    #: 🔴 **Todavía hay instancias con dos bases** (`libraclub-dev` y
-    #: `libraclub-demo`, con `libraclub_core` al lado) hasta que se unan con
-    #: `libracore-unir-bases`, cada una con su OK. Por eso el código mira
-    #: `core_en_la_del_dominio` y no supone: con dos bases el respaldo lleva las
-    #: dos y la de LibraCore se crea si falta; con una, nada de eso.
+    #: 🔑 **Hoy no queda ninguna instancia con dos bases**: `libracore-unir-bases`
+    #: (ADR-078) unió `libraclub-dev` y `libraclub-demo` el 2026-10-22 y ninguna
+    #: instancia lleva ya `LIBRACLUB_LIBRACORE_DATABASE_URL`. El código sigue
+    #: mirando `core_en_la_del_dominio` y no supone: si alguien la define con
+    #: OTRA base, el respaldo lleva las dos y la de LibraCore se crea si falta
+    #: (`tests/test_una_sola_base.py` lo ata); con una, nada de eso.
     #:
     #: `None` sólo si se arma la `Config` a mano (los tests de «una instancia
     #: sin facturación»): sin ella la app levanta igual y lo único que no anda

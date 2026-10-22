@@ -108,22 +108,19 @@ if ! docker ps --format '{{.Names}}' | grep -qx "$SIDECAR"; then
 fi
 log "motor: PostgreSQL (sidecar $SIDECAR)"
 
-# 🔴 [LIBRACLUB] **Mientras la demo tenga DOS bases, son dos.** El dominio vive en
-# `libraclub` y LibraCore en `libraclub_core` (ADR-020: la demo pasa a una sola
-# cuando se una, y desde ese dia las dos variables llevan la misma URL; el
-# script anda con las dos formas).
+# 🔑 [LIBRACLUB] **Una sola base** (ADR-020, 2026-10-22): `libracore-unir-bases`
+# (ADR-078) unio la demo, y LibraCore vive en la base del dominio. El contenedor ya
+# no lleva `LIBRACLUB_LIBRACORE_DATABASE_URL`: sin ella, la base de LibraCore ES la
+# del dominio (`Config.desde_entorno()` hace lo mismo). Si alguien la define con
+# OTRA base, el script resetea las dos: el codigo sigue andando con esa forma.
 #
-# Resetear solo la del dominio deja **33 tablas de LibraCore con los datos de
-# ayer**: los turnos de caja, sus movimientos y el espejo de `usuarios`. Y ese
-# espejo es lo peor de los tres: `turnos_caja.usuario_id` tiene una FK a los
-# usuarios de LibraCore, asi que quedarian turnos apuntando a usuarios de una
-# base del dominio que ya no existe. Nada de eso falla al arrancar.
+# Por que importa resetear las dos cuando son dos: resetear solo la del dominio
+# deja **33 tablas de LibraCore con los datos de ayer**, y entre ellas el espejo
+# de `usuarios`, al que apunta la FK de `turnos_caja.usuario_id`. Nada de eso falla
+# al arrancar. (A esta altura el contenedor ya contesto `printenv DATABASE_URL`, asi
+# que una variable ausente es "no esta definida" y no "no pude entrar".)
 URL_CORE=$(docker exec "$CONTENEDOR" printenv LIBRACLUB_LIBRACORE_DATABASE_URL 2>/dev/null || true)
-if [ -z "$URL_CORE" ]; then
-  log "ABORTA: no pude leer LIBRACLUB_LIBRACORE_DATABASE_URL del contenedor."
-  log "        Sin ella este script reseteria media instancia y diria que anduvo."
-  exit 8
-fi
+[ -n "$URL_CORE" ] || URL_CORE=$URL_BASE
 BASE_CORE=${URL_CORE##*/}
 BASE_CORE=${BASE_CORE%%\?*}
 BASE_DOMINIO=${URL_BASE##*/}
@@ -304,7 +301,7 @@ fi
 # que corre con la app parada (2026-08-25). Dos motivos:
 #
 # 1. aca corria SOLO la cadena propia, asi que `libraclub_core` --el esquema
-#    de LibraCore, que vive en otra base-- amanecia sin `alembic_version` y
+#    de LibraCore, que entonces vivia en otra base-- amanecia sin `alembic_version` y
 #    sin las cuatro columnas de la revision `0002`;
 # 2. y los comandos ahora salen de `migraciones` del `configure()`, que es la
 #    misma fuente que lee el deploy, en vez de estar escritos aca.

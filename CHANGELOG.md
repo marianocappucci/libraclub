@@ -5,6 +5,13 @@ versionado [SemVer](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+- **Se va la variable del core: LibraClub es una sola base** (2026-10-22, addendum a ADR-020; sin migración ni cambios de API). `libracore-unir-bases` (ADR-078) unió `libraclub-dev` y `libraclub-demo`, y no hay clientes reales: no queda ninguna instancia con `libraclub_core`.
+  - **Compose de dev**: sin `LIBRACLUB_LIBRACORE_DATABASE_URL` ni `LIBRACOMMERCE_MIGRAR_URL`. `Config.desde_entorno()` cae a `DATABASE_URL` y `libracommerce-migrar` migra la del dominio. `libracore-migrar --prefijo libraclub` sin la variable del core exige **libracore >= v1.190.1** (con `v1.190.0` falla con `SinURL`): el pin se sube en este mismo PR.
+  - **Suite y CI**: la suite corre con una sola base; se retiró la de dos (`<base>_core`, plantilla `armada`, `LIBRACLUB_SUITE_UNA_BASE`) y el paso «Tests (una sola base)» del CI. El check protegido `test` no cambia de nombre. El código que soporta una variable del core con otra base se queda, y lo miden los tests de `tests/test_una_sola_base.py` sobre bases descartables.
+  - **`scripts/reset_demo.sh`**: sin la variable en el contenedor, la base de LibraCore es la del dominio (antes abortaba). **Scripts, README y comentarios** dejan de presentar `libraclub_core` como algo vigente.
+  - Tests nuevos o reescritos: el compose no declara las variables del core; `libracore-migrar` cae al dominio sin la variable (control: respeta una variable con otra base).
+  - `libraclub_core` en el VPS queda sin uso; borrarla espera el OK del humano.
+
 - **Una sola base: dominio y LibraCore juntos, y el código anda con las dos formas** (2026-10-22, ADR-020; decisión del humano). **Este PR no une ninguna instancia**: prepara el código para desplegarse antes de que `libracore-unir-bases` una `libraclub-dev` y `libraclub-demo`, y para que un alta nueva nazca con una sola base.
   - **Tabla de versión propia**: `alembic_version_libraclub` (antes `alembic_version`, el nombre de la cadena del motor). `migrations/env.py` la **renombra sola** —con su clave primaria— si encuentra la vieja con una revisión de este producto, en la misma transacción que la migración; una base nueva crea la suya; una base unida con la del motor no confunde las dos. Con `include_object` como LibraCargo.
   - **Config**: sin `LIBRACLUB_LIBRACORE_DATABASE_URL`, o con la misma base que el dominio, todo usa la del dominio (`Config.core_en_la_del_dominio`, `app.config.misma_base`): el respaldo no declara el core dos veces, `facturacion.configurar` no intenta crear una base que ya existe, `app/database.py` cae al dominio. Con dos bases, igual que hoy. Cambio visible: `crear_app()` sin la variable del core ya no es «instancia sin facturación»: factura contra el dominio.

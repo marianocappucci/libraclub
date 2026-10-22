@@ -130,8 +130,9 @@ AUDITABLES = {
 def _instancia_a_respaldar(config: Config) -> Instancia:
     """Qué se lleva el backup.
 
-    🔴 **Con DOS bases, las dos tienen que entrar.** Una instancia que todavía no
-    se unió corre `libracore` contra una base propia —ver
+    🔴 **Con DOS bases, las dos tienen que entrar.** Hoy no queda ninguna así
+    (ADR-020), pero una instancia con la variable del core apuntando a otra base
+    corre `libracore` contra una base propia —ver
     `servicios/facturacion.py`—, así que un backup del dominio solo **no se puede
     restaurar**: o volvés las reservas y te quedan las facturas de otro momento,
     o al revés. Y no falla: da un ZIP que se descarga y pesa poco, que es la peor

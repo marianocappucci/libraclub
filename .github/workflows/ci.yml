@@ -175,23 +175,16 @@ jobs:
         # que más importa es justamente el que necesita PostgreSQL.
         #
         # `-n 4` (F3, 2026-09-05; reglas/ci.md del wiki): 4 workers de xdist, que son
-        # las vCPU del runner. Cada uno tiene SU base de PostgreSQL y su plantilla de
-        # la base de LibraCore (`tests/conftest.py`, `libracore.testing.pg_por_worker`);
-        # sin eso los workers se pisarian el `DROP SCHEMA` y el `TRUNCATE`.
+        # las vCPU del runner. Cada uno tiene SU base de PostgreSQL, con LibraCore adentro
+        # (`tests/conftest.py`, `libracore.testing.pg_por_worker`); sin eso los workers se
+        # pisarian el `DROP SCHEMA` y el `TRUNCATE`.
+        #
+        # 🔑 Una sola base (ADR-020, 2026-10-22): dominio y LibraCore juntos, que es como
+        # corre toda instancia desde que `libracore-unir-bases` unio dev y demo. La suite
+        # de dos bases (`<base>_core`) se retiro con la ultima instancia que la usaba; el
+        # codigo que soporta esa forma lo miden los tests de `test_una_sola_base.py` sobre
+        # bases descartables. El nombre del paso no cambia: el check protegido es `test`.
         run: pytest -n 4 -q -rs --cov=app --cov-report=term-missing
-
-      # 🔑 La misma suite con UNA sola base (ADR-020, 2026-10-22): dominio y LibraCore
-      # juntos, que es como corre una instancia nueva o ya unida. La de arriba es la
-      # de dos bases (`<base>_core`), que es la de `libraclub-dev` y `libraclub-demo`
-      # hasta que se unan. Mientras haya instancias de las dos formas, el código
-      # tiene que andar con las dos y las dos suites tienen que estar verdes; cuando
-      # se unan las dos instancias, la de una base pasa a ser la de arriba y esta se
-      # retira. Sin cobertura: la mide la corrida de arriba.
-      - name: Tests (una sola base)
-        if: steps.cambios.outputs.backend == 'true'
-        env:
-          LIBRACLUB_SUITE_UNA_BASE: "1"
-        run: pytest -n 4 -q -rs
 
       # 🔑 El gate de F1 tiene que haber corrido de verdad, no haberse salteado.
       # Un `pytest` verde con cero tests de concurrencia se ve idéntico a uno con

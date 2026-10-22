@@ -124,7 +124,7 @@ def _corrutina_lenta(monkeypatch, lento: _Lento, modulo, nombre: str, devuelve=N
     monkeypatch.setattr(modulo, nombre, lenta)
 
 
-# ── Arnés: la app real, con las dos bases ────────────────────────────────
+# ── Arnés: la app real, con facturación ──────────────────────────────────
 
 
 def _config(url_core: str | None) -> Config:
