@@ -1,9 +1,10 @@
 """Una sola base: dominio y LibraCore juntos (ADR-020), y el código anda con las dos formas.
 
 Decisión del humano del 2026-10-22. Este PR no une ninguna instancia (`libraclub-dev` y
-`libraclub-demo` siguen con `libraclub_core` aparte hasta que las una `libracore-unir-bases`):
-prepara el código para que se despliegue **antes** de unir y siga andando después. Lo que se fija
-acá, en el orden en que lo va a vivir cada instancia:
+`libraclub-demo` seguían con `libraclub_core` aparte hasta que las unió `libracore-unir-bases`, el
+mismo 2026-10-22; hoy no queda ninguna instancia con dos bases, y la variable del core se retiró del
+compose de dev): el código anda con las dos formas, y estos tests son los que miden la de dos
+bases, que la suite ya no cubre. Lo que se fija acá, en el orden en que lo vivió cada instancia:
 
 1. **La tabla de versión es propia** (`alembic_version_libraclub`). Una base de antes tiene la
    revisión de este producto en `alembic_version` —el nombre de la cadena del motor— y se renombra
@@ -319,7 +320,7 @@ def test_la_0012_convierte_la_de_el_motor_comercial_y_conserva_las_filas(base_te
 
 
 def test_la_0012_no_toca_la_que_ya_tiene_la_forma_de_libraauth(base_temporal, monkeypatch):
-    """`libraclub-dev` y `libraclub-demo` hoy: el arranque la creó con `AuditoriaBase`."""
+    """`libraclub-dev` y `libraclub-demo` antes de unirse: el arranque la creó con `AuditoriaBase`."""
     url = base_temporal("log_vieja")
     _migrar_el_producto(url, monkeypatch)
     with psycopg.connect(_libpq(url), autocommit=True) as con:
@@ -362,7 +363,7 @@ def test_la_misma_base_escrita_de_otra_forma_se_resuelve_a_la_del_dominio(entorn
 
 
 def test_con_otra_base_para_el_core_se_respetan_las_dos(entorno_de_config):
-    """Las instancias que todavía no se unieron."""
+    """La forma de dos bases, que ya no tiene instancias pero el código sigue soportando."""
     entorno_de_config.setenv("LIBRACLUB_LIBRACORE_DATABASE_URL", "postgresql://u:p@servidor:5432/libraclub_core")
     config = Config.desde_entorno()
     assert config.database_url == DOMINIO
@@ -532,21 +533,17 @@ def test_un_alta_nueva_nace_con_una_sola_base(script):
     assert configuracion.bases_postgres == ("libraclub",)
 
 
-def test_el_compose_de_dev_migra_el_buffet_en_la_misma_base_que_el_core():
-    """Con dos bases el buffet vive en la del core: `libracommerce-migrar` migra el dominio salvo que se le diga.
+def test_el_compose_de_dev_no_declara_variables_del_core():
+    """Una sola base: el compose de dev no lleva la base del core ni el destino del buffet.
 
-    Sin `LIBRACOMMERCE_MIGRAR_URL` apuntando al core, el `command:` crea las tablas de LibraCommerce
-    en `libraclub` además de las que ya tiene `libraclub_core`, y `libracore-unir-bases verificar` corta
-    la unión por `choque_de_tablas` (21 tablas repetidas, medido el 2026-10-22). Al unir, la variable del
-    core pasa a la base del dominio y ésta tiene que ir con ella: por eso se atan.
+    `LIBRACLUB_LIBRACORE_DATABASE_URL` y `LIBRACOMMERCE_MIGRAR_URL` apuntaban a `libraclub_core`
+    mientras la instancia tenía dos bases (la segunda hacía falta para que `libracommerce-migrar`
+    no creara 25 tablas vacías en el dominio). Con una sola, `Config.desde_entorno()` y las
+    cadenas de migración caen a `DATABASE_URL`; una de las dos que volviera a aparecer apuntando
+    a otra base reabriría la instancia de dos bases sin que nadie lo decida.
     """
     import re
 
     texto = (RAIZ / "docker-compose.yml").read_text(encoding="utf-8")
-
-    def _base(nombre: str) -> str:
-        m = re.search(rf"^\s*-\s*{nombre}=(.+?)\s*$", texto, re.M)
-        assert m, f"el compose de dev no declara {nombre}"
-        return m.group(1).rsplit("/", 1)[-1]
-
-    assert _base("LIBRACOMMERCE_MIGRAR_URL") == _base("LIBRACLUB_LIBRACORE_DATABASE_URL")
+    declaradas = re.findall(r"^\s*-\s*(LIBRACLUB_LIBRACORE_DATABASE_URL|LIBRACOMMERCE_MIGRAR_URL)=", texto, re.M)
+    assert declaradas == [], f"el compose de dev declara {declaradas}: la instancia es de una sola base"

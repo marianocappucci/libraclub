@@ -16,8 +16,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 PREFIJO = "libraclub"
 COMPOSE = Path(__file__).resolve().parent.parent / "docker-compose.yml"
 
@@ -34,11 +32,11 @@ def _entorno_del_compose() -> dict[str, str]:
     return entorno
 
 
-def test_el_compose_declara_las_dos_bases():
+def test_el_compose_declara_una_sola_base():
+    """ADR-020: LibraCore vive en la base del dominio, así que el compose no lleva la variable del core."""
     entorno = _entorno_del_compose()
-    assert set(entorno) == {"DATABASE_URL", f"{PREFIJO.upper()}_LIBRACORE_DATABASE_URL"}
+    assert set(entorno) == {"DATABASE_URL"}
     assert entorno["DATABASE_URL"].endswith(f"/{PREFIJO}")
-    assert entorno[f"{PREFIJO.upper()}_LIBRACORE_DATABASE_URL"].endswith(f"/{PREFIJO}_core")
 
 
 def test_libraauth_migrar_resuelve_la_base_del_DOMINIO():
@@ -49,23 +47,29 @@ def test_libraauth_migrar_resuelve_la_base_del_DOMINIO():
     assert url.rsplit("/", 1)[-1] == PREFIJO
 
 
-def test_libracore_migrar_sigue_resolviendo_la_base_del_CORE():
-    """Control: sumar `DATABASE_URL` como histórico del dominio no le mueve la base
-    a `libracore-migrar`."""
+def test_libracore_migrar_cae_a_la_base_del_dominio_sin_la_variable_del_core():
+    """Con el entorno del compose (sin variable del core), `libracore-migrar` migra la del dominio.
+
+    🔴 **Esto exige libracore >= v1.190.1**, que suma `libraclub` a `url_de_instancia._UNA_SOLA_BASE`.
+    Con v1.190.0 `url_de_core` falla con `SinURL` (su regla era «el core aparte no cae al dominio»,
+    de cuando LibraClub tenía `libraclub_core`), y el `command:` del compose, que corre
+    `libracore-migrar upgrade --prefijo libraclub` antes que nada, no arrancaría el contenedor.
+    """
     from libracore.migrar import url_de_core
 
     url = url_de_core(PREFIJO, entorno=_entorno_del_compose())
-    assert url.rsplit("/", 1)[-1] == f"{PREFIJO}_core"
+    assert url.rsplit("/", 1)[-1] == PREFIJO
 
 
-def test_sin_la_variable_del_core_libracore_migrar_FALLA_y_no_cae_al_dominio():
-    """El riesgo que libracore v1.103.0 cierra: migrar el schema del motor
-    adentro de la base del dominio sin fallar."""
-    from libracore.migrar import SinURL, url_de_core
+def test_libracore_migrar_respeta_una_variable_del_core_con_otra_base():
+    """Control: la forma de dos bases sigue resolviendo la base del core, no la del dominio."""
+    from libracore.migrar import url_de_core
 
-    entorno = {"DATABASE_URL": f"postgresql://u:p@h/{PREFIJO}"}
-    with pytest.raises(SinURL):
-        url_de_core(PREFIJO, entorno=entorno)
+    entorno = {
+        "DATABASE_URL": f"postgresql://u:p@h/{PREFIJO}",
+        f"{PREFIJO.upper()}_LIBRACORE_DATABASE_URL": f"postgresql://u:p@h/{PREFIJO}_core",
+    }
+    assert url_de_core(PREFIJO, entorno=entorno).rsplit("/", 1)[-1] == f"{PREFIJO}_core"
 
 
 def test_el_command_de_dev_migra_auth_con_base_dominio():

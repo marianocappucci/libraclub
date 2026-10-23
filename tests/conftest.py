@@ -7,7 +7,6 @@ no tiene. Una suite verde sobre SQLite estaría midiendo otro producto.
 
 from __future__ import annotations
 
-import atexit
 import os
 import uuid
 from datetime import date, time
@@ -18,7 +17,7 @@ import psycopg
 import pytest
 from alembic import command
 from alembic.config import Config as AlembicConfig
-from libracore.testing.pg_por_worker import BasePorWorker, base_por_worker
+from libracore.testing.pg_por_worker import base_por_worker
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -38,9 +37,10 @@ RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # y de ahí en adelante TODO lo que la lee —`_url()`, `Config.desde_entorno()`, los
 # `os.environ["DATABASE_URL"]` de cada test— habla con SU base.
 #
-# 🔴 Y la base de LibraCore sale de esa misma variable: los tests la derivan como
-# `<base del dominio>_core` (`_url_core()`), así que **también queda una por
-# worker** sin tocarles una línea. Mira `base_de_libracore` más abajo.
+# 🔑 **Una sola base** (ADR-020, decisión del humano del 2026-10-22): LibraCore vive
+# en la base del dominio, así que la de LibraCore de cada test (`url_del_core()`)
+# es esa misma, y **también queda una por worker** sin tocarles una línea. Mirá
+# `base_de_libracore` más abajo.
 #
 # `base_por_worker` es idempotente a propósito: el proceso que lanza a los
 # workers importa este conftest también, y un test que hace
@@ -49,33 +49,18 @@ _PG = base_por_worker("libraclub", os.environ.get("DATABASE_URL", ""))
 if _PG:
     os.environ["DATABASE_URL"] = _PG.url
 
-#: 🔑 **La suite corre con las dos formas de la instancia** (ADR-020):
+#: 🔑 **La suite corre con UNA sola base** (ADR-020): LibraCore vive en la base del
+#: dominio, como corre toda instancia desde que `libracore-unir-bases` (ADR-078)
+#: unió `libraclub-dev` y `libraclub-demo` (2026-10-22). No hay segunda base: entre
+#: test y test se vacían las tablas que no son del dominio y se devuelven las
+#: semillas (`_dejar_el_core_de_cero`). Y como `usuarios` la referencian las FK del
+#: motor, las tablas de `libraauth` se vacían y no se borran (`_auth_se_vacia`).
 #:
-#: - **dos bases** (por defecto): la de LibraCore es `<base del dominio>_core`, como
-#:   `libraclub-dev` y `libraclub-demo` hasta que se unan. Cada test que factura
-#:   recibe una copia de la plantilla `armada` (ver `base_de_libracore`).
-#: - **una sola** (`LIBRACLUB_SUITE_UNA_BASE=1`): LibraCore vive en la base del
-#:   dominio, como una instancia nueva o unida. No hay segunda base: entre test y
-#:   test se vacían las tablas que no son del dominio y se devuelven las semillas
-#:   (`_dejar_el_core_de_cero`). Y como `usuarios` la referencian las FK del
-#:   motor, las tablas de `libraauth` se vacían y no se borran (`_auth_se_vacia`).
-#:
-#: El CI corre las dos (`.github/workflows/ci.yml`). La que cae por defecto es la
-#: de dos bases: es la que hoy tiene instancias vivas.
-UNA_BASE = os.environ.get("LIBRACLUB_SUITE_UNA_BASE", "").strip().lower() in {"1", "si", "true"}
-
-#: La base de LibraCore de ESTE worker y su plantilla `armada`. Se la maneja con
-#: `BasePorWorker` a mano y no con `base_por_worker("...")`: ese deriva el nombre
-#: como `<original>_<worker>` (`libraclub_test_core_gw0`) y los tests —que
-#: componen `<base del dominio>_core` por su cuenta— esperan
-#: `libraclub_test_gw0_core`. Ver `base_de_libracore`. Con una sola base no hay.
-_CORE = BasePorWorker(_PG.url_original, f"{_PG.nombre}_core") if _PG and not UNA_BASE else None
-if _CORE:
-    _marca = f"_LIBRACLUB_CORE_LISTA_{os.environ.get('PYTEST_XDIST_WORKER', 'main')}"
-    if _marca not in os.environ:
-        _CORE.soltar_todo()  # restos de una corrida interrumpida, plantilla incluida
-        atexit.register(_CORE.soltar_todo)
-        os.environ[_marca] = "1"
+#: Hasta el 2026-10-22 había además una forma de dos bases (`<base>_core`, con una
+#: plantilla `armada` por worker y `LIBRACLUB_SUITE_UNA_BASE=1` para elegir la otra).
+#: Se retiró con la última instancia que la usaba; el código sigue soportando una
+#: `LIBRACLUB_LIBRACORE_DATABASE_URL` con otra base, y lo miden los tests de
+#: `tests/test_una_sola_base.py` sobre bases descartables (`base_temporal`).
 
 #: Todas las tablas del dominio, en orden de borrado. `TRUNCATE ... CASCADE`
 #: entre tests en vez de recrear el schema: recrear cuesta segundos por test y
@@ -255,17 +240,12 @@ def sesion(engine) -> Session:
 
 
 def url_del_core() -> str:
-    """La URL de la base de LibraCore para los tests, según la forma de la suite.
+    """La URL de la base de LibraCore para los tests: la del dominio, en forma libpq.
 
-    Dos bases: la del dominio con `_core` al final (el mismo servidor, otra base).
-    Una sola: la del dominio, en forma libpq. La usan `base_de_libracore` y los
-    `_url_core()` de cada archivo, para que ninguno la componga por su cuenta.
+    Una sola base (ADR-020). La usan `base_de_libracore` y los `_url_core()` de cada
+    archivo, para que ninguno la componga por su cuenta.
     """
-    url = os.environ["DATABASE_URL"]
-    if UNA_BASE:
-        return url.replace("postgresql+psycopg://", "postgresql://", 1)
-    base, _, nombre = url.rpartition("/")
-    return f"{base}/{nombre}_core".replace("postgresql+psycopg://", "postgresql://")
+    return os.environ["DATABASE_URL"].replace("postgresql+psycopg://", "postgresql://", 1)
 
 
 def _construir_core_armada(url: str, *, url_del_dominio: str | None = None) -> None:
@@ -274,10 +254,10 @@ def _construir_core_armada(url: str, *, url_del_dominio: str | None = None) -> N
     Es lo que `facturacion.configurar()` hace en cada arranque: el schema de
     LibraCore, el del buffet (LibraCommerce), las tablas del cierre diario y la
     caja por defecto. Medido: ~0,6 s por test, el grueso de lo que cuesta armar
-    una app con facturación. Se corre una vez por worker; los tests la reciben
-    copiada con `CREATE DATABASE ... TEMPLATE`, y el `configurar()` de su propia
-    `crear_app()` es idempotente sobre ella (`CREATE TABLE IF NOT EXISTS`, y sólo
-    crea la caja por defecto si no hay).
+    una app con facturación. Se corre una vez por worker (`_dejar_el_core_de_cero`
+    anota lo que sembró y lo devuelve entre test y test), y el `configurar()` de la
+    `crear_app()` de cada test es idempotente sobre ello (`CREATE TABLE IF NOT
+    EXISTS`, y sólo crea la caja por defecto si no hay).
 
     🔴 `configurar()` deja apuntados a la plantilla `libracore.db.core` y
     `_hay_base` —globales del proceso—: se restauran, o el primer test que lea
@@ -299,9 +279,8 @@ def _construir_core_armada(url: str, *, url_del_dominio: str | None = None) -> N
         mp.undo()
 
 
-#: Con una sola base: las filas que `facturacion.configurar()` deja sembradas (la
-#: caja por defecto, las categorías de egreso, el depósito), tomadas una vez por
-#: worker. Es la plantilla `armada` de la suite de dos bases, en forma de filas.
+#: Las filas que `facturacion.configurar()` deja sembradas (la caja por defecto, las
+#: categorías de egreso, el depósito), tomadas una vez por worker.
 _SEMILLAS: dict[str, tuple[list[str], list[tuple]]] | None = None
 
 
@@ -323,12 +302,12 @@ def _tablas_del_core(con) -> list[str]:
 
 
 def _dejar_el_core_de_cero(url: str) -> None:
-    """Una sola base: deja LibraCore como lo deja la plantilla `armada` de dos bases.
+    """Deja LibraCore como lo deja `crear_app()` sobre una base vacía.
 
     La primera vez en el worker arma el schema (`configurar()` sobre la base del
     dominio) y anota las semillas; las demás, vacía todo lo que no es del dominio y
-    las devuelve. Es el equivalente de `CREATE DATABASE ... TEMPLATE armada`, sin
-    segunda base.
+    las devuelve. Es lo que antes (con dos bases) hacía copiar la plantilla
+    `armada` con `CREATE DATABASE ... TEMPLATE`.
     """
     global _SEMILLAS
     if _SEMILLAS is None:
@@ -361,13 +340,12 @@ def _dejar_el_core_de_cero(url: str) -> None:
 
 @pytest.fixture(autouse=True)
 def _core_de_cero(request):
-    """Una sola base: cada test que toca la base arranca con el core como recién armado.
+    """Cada test que toca la base arranca con el core como recién armado.
 
     Sólo los tests que piden `engine` (directa o indirectamente): los demás no
-    tocan la base y vaciar un centenar de tablas no se les paga. Con dos bases no
-    hace nada: ahí lo hace la copia de la plantilla de `base_de_libracore`.
+    tocan la base y vaciar un centenar de tablas no se les paga.
     """
-    if UNA_BASE and "engine" in request.fixturenames:
+    if "engine" in request.fixturenames:
         request.getfixturevalue("engine")
         _dejar_el_core_de_cero(url_del_core())
     yield
@@ -375,19 +353,17 @@ def _core_de_cero(request):
 
 @pytest.fixture(autouse=True)
 def _auth_se_vacia(request, monkeypatch):
-    """Una sola base: `AuthBase.metadata.drop_all(...)` vacía las tablas de `libraauth` y no las borra.
+    """`AuthBase.metadata.drop_all(...)` vacía las tablas de `libraauth` y no las borra.
 
     🔴 Con una sola base, `usuarios` la referencian las FK del motor
     (`facturas.usuario_id`, `caja_movimientos.usuario_id`...): `drop_all` muere con
     `cannot drop table usuarios because other objects depend on it`. LibraCargo
     resolvió lo mismo con `vaciar_auth`; acá hay 250 llamadas a `drop_all` en 39
-    archivos y se prefirió no tocarlas: el fixture las traduce, y con dos bases
-    (`UNA_BASE` apagado) siguen siendo el `drop_all` de siempre.
+    archivos y se prefirió no tocarlas: el fixture las traduce.
     """
-    if UNA_BASE:
-        from libraauth.models import Base as AuthBase
+    from libraauth.models import Base as AuthBase
 
-        monkeypatch.setattr(AuthBase.metadata, "drop_all", lambda bind=None, *a, **kw: vaciar_auth(bind))
+    monkeypatch.setattr(AuthBase.metadata, "drop_all", lambda bind=None, *a, **kw: vaciar_auth(bind))
     yield
 
 
@@ -407,30 +383,11 @@ def vaciar_auth(engine) -> None:
 def base_de_libracore(request):
     """La base de LibraCore de este worker, ya armada, para un test que factura.
 
-    Con una sola base (`UNA_BASE`) es la del dominio, con el core recién armado
-    por `_core_de_cero`: no hay base que copiar ni que borrar al terminar.
-
-    Parte de una copia de la plantilla `armada` (`_construir_core_armada`) en vez
-    de una base vacía que `crear_app()` tenía que llenar. La URL es la que
-    derivan los tests de la del dominio (`<base>_core`), que con xdist es la del
-    worker. Se borra al terminar, como siempre: un test que arma su app contra
-    `<base>_core` sin pedir esta fixture tiene que encontrar la base AUSENTE, no
-    los datos del test anterior.
+    Una sola base (ADR-020): es la del dominio, con el core recién armado por
+    `_core_de_cero`. No hay base que copiar ni que borrar al terminar.
     """
-    if UNA_BASE:
-        request.getfixturevalue("engine")
-        yield url_del_core()
-        return
-    if _CORE is None:
-        pytest.skip("Falta DATABASE_URL: la suite corre contra PostgreSQL real.")
-    url_core = url_del_core()
-    nombre = os.environ["DATABASE_URL"].rpartition("/")[2]
-    assert nombre + "_core" == _CORE.nombre, (nombre, _CORE.nombre)
-    _CORE.restaurar("armada", _construir_core_armada)
-    yield url_core
-    servidor, _, nombre_core = url_core.rpartition("/")
-    with psycopg.connect(f"{servidor}/postgres", autocommit=True) as c:
-        c.execute(f'DROP DATABASE IF EXISTS "{nombre_core}" WITH (FORCE)')
+    request.getfixturevalue("engine")
+    return url_del_core()
 
 
 @pytest.fixture

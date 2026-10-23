@@ -31,15 +31,15 @@ def _asegurar_core_configurado() -> None:
       `get_connection()` levanta `RuntimeError`. Ese caso se resuelve solo, sin
       pedirle al backoffice que bootee la app entera.
 
-    🔴 **Primero `core=True`.** Mientras la instancia tiene dos bases (todavía
-    `libraclub-dev` y `libraclub-demo`, `app/config.py`), `modulos` está en la de
-    LibraCore: `url_de_instancia("libraclub")` a secas apuntaría a la del
-    dominio, que no tiene esa tabla.
+    🔑 **Sin la variable del core, la base del dominio** (ADR-020: una sola base,
+    que es como corren hoy todas las instancias). Es la misma regla que
+    `Config.desde_entorno()`, y por eso se resuelve igual acá: este camino no
+    arma la `Config`. Una instancia sin ninguna de las dos falla nombrándolas, y
+    no conectándose a la cadena vacía.
 
-    🔑 **Sin la variable del core, la base del dominio** (ADR-020: una sola base).
-    Es la misma regla que `Config.desde_entorno()`, y por eso se resuelve igual
-    acá: este camino no arma la `Config`. Una instancia sin ninguna de las dos
-    falla nombrándolas, y no conectándose a la cadena vacía.
+    Se prueba primero `core=True` por si alguien define la variable con OTRA
+    base: ahí `modulos` está en la de LibraCore, y `url_de_instancia("libraclub")`
+    a secas apuntaría a la del dominio, que no tiene esa tabla.
 
     Se pregunta antes de configurar (`esta_configurado()`) para no pisarle la
     configuración a una app viva.
