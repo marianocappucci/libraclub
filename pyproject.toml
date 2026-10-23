@@ -98,7 +98,8 @@ dependencies = [
     # v1.188.0 -> v1.189.0 (2026-10-21): altas de clientes en un nodo: id provisorio y gancho al crear (ADR-077). Sin migracion.
     # v1.189.0 -> v1.190.0 (2026-10-22): libracore-unir-bases para unir la base core dentro de la del dominio (ADR-078). Sin migracion.
     # v1.190.0 -> v1.190.1 (2026-10-22): LibraCargo y LibraClub en _UNA_SOLA_BASE (ADR-078). Sin migracion.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.190.1",
+    # v1.190.1 -> v1.191.0 (2026-10-23): cola de comprobantes del nodo offline (cola_arca, ADR-079). Migracion 0029 aditiva.
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.191.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
