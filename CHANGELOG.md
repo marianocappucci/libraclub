@@ -5,6 +5,14 @@ versionado [SemVer](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+- **La venta del buffet nace por `registrar_venta` del motor** (2026-10-24, ADR-021; PR 10 del plan de la versión de escritorio; sin migración). `registrar_consumo` pasa de `save_sale` + `confirm_sale` a `libracommerce.erp.ventas.crear_venta_directa`, la puerta que usan ContaLibra, RestoLibra y VentaLibra, para que un nodo de LibraEdge la encole y la suba al central. **Sin cambio visible**: mismos totales, mismo vínculo (`source_type='reserva'` + `source_id`, o `'mostrador'`), misma caja (`servicios/caja.py`, referencia `buffet-<id>`; el motor no escribe pagos), mismo stock del depósito de la sucursal y misma factura conjunta.
+  - **`ganchos_del_consumo(reserva_id)`**: su `al_registrar_venta` pone el vínculo (`UPDATE sales`) y anota el alta en `actividad_log`; con `con_outbox` corre antes de encolar, así el payload sale con `source_type` / `source_id` (ADR-072 de LibraCommerce). `GANCHOS_PROPIOS` (numerador y sin turno) es lo que usará el central.
+  - **Numeración** (`BUF-000123`): sigue al último `%BUF-%`, con o sin prefijo de nodo, y corre con el write-lock del motor (reintenta si choca).
+  - **`facturacion.configurar()` crea `venta_links`** (`crear_venta_links`): `registrar_venta` la lee al terminar toda venta cobrada. Idempotente; se crea sola en `dev` y `demo` al arrancar.
+  - Cambia por dentro: `unit_cost_snapshot` queda `NULL` sin costo cargado (antes `0`); los movimientos de stock llevan `source_type='venta'` y nota `Venta ID n`; `status_detail='cobrada'`.
+  - **No se mueve el cobro con QR** (`preparar_consumo` / `confirmar_consumo`): el motor no tiene cómo confirmar una venta pendiente sin pago; sigue siendo del central.
+  - Tests: `tests/test_buffet_registrar_venta.py` (vínculo de reserva y de mostrador, totales, caja, stock, factura conjunta, resumen, log, numeración, paso por `registrar_venta`, gancho + `con_outbox`, todo-o-nada, `venta_links`).
+
 - **Se va la variable del core: LibraClub es una sola base** (2026-10-22, addendum a ADR-020; sin migración ni cambios de API). `libracore-unir-bases` (ADR-078) unió `libraclub-dev` y `libraclub-demo`, y no hay clientes reales: no queda ninguna instancia con `libraclub_core`.
   - **Compose de dev**: sin `LIBRACLUB_LIBRACORE_DATABASE_URL` ni `LIBRACOMMERCE_MIGRAR_URL`. `Config.desde_entorno()` cae a `DATABASE_URL` y `libracommerce-migrar` migra la del dominio. `libracore-migrar --prefijo libraclub` sin la variable del core exige **libracore >= v1.190.1** (con `v1.190.0` falla con `SinURL`): el pin se sube en este mismo PR.
   - **Suite y CI**: la suite corre con una sola base; se retiró la de dos (`<base>_core`, plantilla `armada`, `LIBRACLUB_SUITE_UNA_BASE`) y el paso «Tests (una sola base)» del CI. El check protegido `test` no cambia de nombre. El código que soporta una variable del core con otra base se queda, y lo miden los tests de `tests/test_una_sola_base.py` sobre bases descartables.
