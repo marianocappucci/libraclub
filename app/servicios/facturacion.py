@@ -26,6 +26,7 @@ from __future__ import annotations
 from decimal import ROUND_HALF_UP, Decimal
 
 from libracommerce.db.schema import init_schema as init_commerce_schema
+from libracommerce.erp.schema import crear_venta_links
 from libracore import arca_facturacion, config_manager
 from libracore.db import arca_config as db_arca_config
 from libracore.db import caja as db_caja
@@ -153,6 +154,10 @@ def configurar(database_url: str | None, *, url_del_dominio: str | None = None) 
         # que la cancha. Separarlas obligaría a una transacción distribuida para
         # que una venta descuente stock y entre al turno a la vez.
         init_commerce_schema(conexion)
+        # 🔑 **`venta_links` la crea el producto**, después de los dos motores (sus FK apuntan a `sales`, `facturas`,
+        # `remitos` y `turnos_caja`; `libracommerce.erp.schema`). El buffet vende por `registrar_venta`, que al
+        # terminar una venta cobrada la lee (`obtener_venta`); sin la tabla la primera venta moriría. Idempotente.
+        crear_venta_links(conexion)
         # 🔴 **`cierres_diarios` no viene con `init_core_schema()`** — esa función
         # está congelada desde la `0001` (ver su propio docstring en LibraCore) y
         # las tablas del cierre diario son DDL de la `0009`. En el DEPLOY real

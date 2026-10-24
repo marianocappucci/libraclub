@@ -28,6 +28,8 @@ import sqlite3
 
 from libraauth.auditoria import registrador_dbapi
 from libracommerce.db.auditoria import (
+    CREAR,
+    Cambio,
     RepositorioAuditado,
     entidades_por_tabla,
     opciones_del_registrador,
@@ -54,3 +56,13 @@ def repositorio(conexion: sqlite3.Connection | None = None) -> RepositorioAudita
     """
     conn = conexion or libracore_core.get_connection()
     return RepositorioAuditado(SqliteCommerceRepository(conn), conn, _REGISTRADOR)
+
+
+def auditar_alta(conn, tabla: str, fila_id: int, valores: dict) -> None:
+    """Anota en `actividad_log`, con la `conn` que recibe, el alta de una fila que el motor escribió por SQL.
+
+    Para lo que NO pasa por `repositorio()`: `registrar_venta` del motor escribe la venta con SQL, fuera del
+    envoltorio auditado, y sin esto la venta del buffet dejaría de verse en `/logs`. No confirma: corre en la
+    transacción de quien la llama, así el alta y la fila quedan juntas o no queda ninguna.
+    """
+    _REGISTRADOR(conn, Cambio(tabla=tabla, accion=CREAR, id=fila_id, antes=None, despues=valores))

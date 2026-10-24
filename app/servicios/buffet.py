@@ -16,6 +16,23 @@ factura** con la cancha y el buffet como líneas separadas, que es el gate de F4
 Una venta **sin** reserva también existe —el que pasa y compra un agua— y es la
 misma `Sale` con `source_type="mostrador"`.
 
+## La venta nace por `registrar_venta` del motor (ADR-021)
+
+El consumo se registra con `libracommerce.erp.ventas.crear_venta_directa`, la misma
+puerta que usan ContaLibra, RestoLibra y VentaLibra, y no con un `save_sale` propio.
+Es lo que hace que, en un nodo de LibraEdge, el outbox la vea: el motor llama a
+`al_registrar_venta` y de ahí cuelga el encolado (`con_outbox`).
+
+El vínculo con la reserva lo pone **el gancho** (`_vincular`): `registrar_venta` crea
+la venta con `source_type='pos'` y el buffet la pasa a `'reserva'`/`'mostrador'` en
+su `al_registrar_venta`, que `con_outbox` corre **antes** de encolar, así el payload
+sale con el vínculo (ADR-072 de LibraCommerce). Los ganchos son por llamada
+(`ganchos_del_consumo`) y no una constante, porque el vínculo es de ESTA venta.
+
+La **caja no la escribe `registrar_venta`**: el buffet no le pasa pagos. La plata del
+mostrador sigue entrando por `servicios/caja.py`, con su concepto y su referencia
+`buffet-<id>`.
+
 ## El stock se descuenta al confirmar, y se permite quedar en negativo
 
 `confirm_sale(validar_stock=False)` es el default del motor y acá se respeta:
@@ -33,10 +50,12 @@ from decimal import Decimal
 from libracommerce.domain.catalog import CatalogItem, CatalogItemType, Unit
 from libracommerce.domain.inventory import Location, StockMovement, StockMovementType
 from libracommerce.domain.sales import Sale, SaleItem, SaleStatus
+from libracommerce.erp import Hooks
+from libracommerce.erp.ventas import crear_venta_directa
 from libracommerce.usecases.sales import confirm_sale
 from libracore.db import core as libracore_core
 
-from app.commerce import repositorio
+from app.commerce import auditar_alta, repositorio
 from app.tiempo import ahora
 
 #: La unidad de todo lo que vende un buffet. No hay balanza acá: se venden
@@ -224,12 +243,88 @@ def _numero_de_venta(conexion) -> str:
     comprobante fiscal**. El comprobante sale después y puede juntar varias
     ventas con la cancha, así que atarle la numeración fiscal a cada consumo
     quemaría números por cada gaseosa.
+
+    🔑 **Sigue al último `BUF-` aunque lleve prefijo de nodo** (`S02-BUF-000007`):
+    `con_outbox` le antepone al número del producto el prefijo del nodo, y una
+    venta que subió de un nodo llega al central con él. Buscar sólo `BUF-%`
+    volvería a numerar desde 1 en el nodo —y chocaría con la suya— y en el
+    central ignoraría lo que ya subió.
+
+    Es también el `numerador` del motor (corre con la conexión de la venta, con
+    el write-lock tomado): si dos ventas simultáneas eligen el mismo número,
+    `crear_venta_directa` reintenta la perdedora en una transacción nueva.
     """
     fila = conexion.execute(
-        "SELECT number FROM sales WHERE number LIKE 'BUF-%' ORDER BY id DESC LIMIT 1"
+        "SELECT number FROM sales WHERE number LIKE '%BUF-%' ORDER BY id DESC LIMIT 1"
     ).fetchone()
-    proximo = int(fila[0].split("-")[1]) + 1 if fila else 1
+    proximo = int(fila[0].rsplit("-", 1)[1]) + 1 if fila else 1
     return f"BUF-{proximo:06d}"
+
+
+def _sin_turno(conn, usuario_id):
+    """El buffet no ata sus ventas al turno por `venta_links`: la plata va por `servicios/caja.py`."""
+    return None
+
+
+#: Los ganchos del buffet sin el vínculo de ninguna venta: el numerador propio y nada de turno.
+#: Es lo que debe usar el **central** para aplicar lo que sube de un nodo (`registrar_en(...)`): ahí el
+#: vínculo ya viene en el payload, y un gancho que lo rehiciera lo pisaría.
+GANCHOS_PROPIOS = Hooks(numerador=_numero_de_venta, turno_para=_sin_turno)
+
+
+def _vincular(reserva_id: int | None):
+    """El `al_registrar_venta` del buffet para UNA venta: el vínculo y el alta en el log.
+
+    🔑 `registrar_venta` crea la venta con `source_type='pos'` y no recibe un origen (ADR-072 de
+    LibraCommerce: «el producto lo pone en su `al_registrar_venta`»). Acá se le pone `'reserva'` +
+    `source_id=<reserva>` o `'mostrador'`, que es lo que leen `consumos_de_reserva` y la factura conjunta.
+    Corre dentro de la transacción de la venta y, con `con_outbox`, **antes** de encolar: el payload que sube
+    ya trae el vínculo.
+
+    El alta en `actividad_log` también va acá: el repositorio auditado la dejaba al guardar la `Sale`, y
+    `registrar_venta` escribe por SQL, fuera de ese envoltorio. Misma conexión: o están las dos cosas o ninguna.
+    """
+    origen = "reserva" if reserva_id is not None else "mostrador"
+    id_origen = int(reserva_id) if reserva_id is not None else None
+
+    def al_registrar_venta(conn, venta) -> None:
+        conn.execute(
+            "UPDATE sales SET source_type = ?, source_id = ? WHERE id = ?", (origen, id_origen, venta["id"])
+        )
+        auditar_alta(conn, "sales", venta["id"], {
+            "number": venta["numero"], "status": venta["status"], "total": venta["total"],
+            "source_type": origen, "source_id": id_origen,
+        })
+
+    return al_registrar_venta
+
+
+def ganchos_del_consumo(reserva_id: int | None) -> Hooks:
+    """Los ganchos con los que se registra el consumo de `reserva_id` (o el de mostrador, con `None`).
+
+    Es el punto donde el nodo engancha el outbox: `con_outbox(ganchos_del_consumo(reserva_id), OUTBOX)`.
+    """
+    return replace(GANCHOS_PROPIOS, al_registrar_venta=_vincular(reserva_id))
+
+
+def _congelar_lineas(lineas: list[tuple[int, Decimal]]) -> list[tuple[CatalogItem, Decimal]]:
+    """Cada `(item_id, cantidad)` con su producto, validado. El precio se lee de ese producto, ahora.
+
+    Es lo que comparten los dos finales del consumo (el borrador del QR y la venta en el acto): duplicarlo
+    sería duplicar el congelamiento de precios, que es la parte que no se puede equivocar.
+    """
+    if not lineas:
+        raise VentaVacia("No hay nada cargado.")
+    repo = _repo()
+    resultado = []
+    for item_id, cantidad in lineas:
+        producto = repo.get_catalog_item(item_id)
+        if producto is None:
+            raise ProductoInexistente(f"No existe el producto {item_id}.")
+        if cantidad <= 0:
+            raise ValueError(f"La cantidad de {producto.name} tiene que ser positiva.")
+        resultado.append((producto, Decimal(cantidad)))
+    return resultado
 
 
 def _armar_venta(
@@ -237,61 +332,44 @@ def _armar_venta(
     sucursal_id: int,
     lineas: list[tuple[int, Decimal]],
     usuario_id: int | None,
-    reserva_id: int | None,
     cliente_nombre: str,
-) -> tuple[Sale, Location]:
-    """La venta en borrador, sin guardar y sin tocar stock.
+) -> Sale:
+    """La venta de mostrador en borrador, sin guardar y sin tocar stock.
 
-    Está separada porque hay **dos** finales posibles y comparten todo lo de
-    acá: `registrar_consumo` la confirma en el acto, y `preparar_consumo` la deja
-    en borrador esperando que alguien escanee el QR. Duplicar el armado sería
-    duplicar el congelamiento de precios, que es la parte que no se puede
-    equivocar.
+    Sólo la usa `preparar_consumo`: el borrador que espera que alguien escanee el QR. El consumo en el acto
+    (`registrar_consumo`) no pasa por acá: lo arma el motor.
     """
-    if not lineas:
-        raise VentaVacia("No hay nada cargado.")
-    repo = _repo()
-    ubicacion = ubicacion_de(sucursal_id)
-
-    items: list[SaleItem] = []
-    for item_id, cantidad in lineas:
-        producto = repo.get_catalog_item(item_id)
-        if producto is None:
-            raise ProductoInexistente(f"No existe el producto {item_id}.")
-        if cantidad <= 0:
-            raise ValueError(f"La cantidad de {producto.name} tiene que ser positiva.")
-        items.append(
-            SaleItem(
-                kind=CatalogItemType.PRODUCT,
-                description_snapshot=producto.name,
-                quantity=Decimal(cantidad),
-                unit_price=producto.default_sale_price,
-                item_id=producto.id,
-                unit_cost_snapshot=producto.default_cost,
-            )
+    items = [
+        SaleItem(
+            kind=CatalogItemType.PRODUCT,
+            description_snapshot=producto.name,
+            quantity=cantidad,
+            unit_price=producto.default_sale_price,
+            item_id=producto.id,
+            unit_cost_snapshot=producto.default_cost,
         )
-
+        for producto, cantidad in _congelar_lineas(lineas)
+    ]
     total = sum((i.quantity * i.unit_price for i in items), Decimal("0"))
     conexion = _conexion()
     try:
         numero = _numero_de_venta(conexion)
     finally:
         conexion.close()
-    venta = Sale(
+    return Sale(
         id=None,
         number=numero,
         items=tuple(items),
         status=SaleStatus.DRAFT,
         branch_id=sucursal_id,
-        source_type="reserva" if reserva_id is not None else "mostrador",
-        source_id=reserva_id,
+        source_type="mostrador",
+        source_id=None,
         subtotal=total,
         total=total,
         customer_name_snapshot=cliente_nombre,
         created_by=usuario_id,
         occurred_on=ahora().date().isoformat(),
     )
-    return venta, ubicacion
 
 
 def preparar_consumo(
@@ -315,11 +393,10 @@ def preparar_consumo(
     fiscal (ver `_numero_de_venta`), y la alternativa es numerar al confirmar, o
     sea que el número dependa del orden en que paguen dos clientes.
     """
-    venta, _ubicacion = _armar_venta(
+    venta = _armar_venta(
         sucursal_id=sucursal_id,
         lineas=lineas,
         usuario_id=usuario_id,
-        reserva_id=None,
         cliente_nombre=cliente_nombre,
     )
     return _repo().save_sale(venta)
@@ -370,14 +447,35 @@ def registrar_consumo(
     cobra cuando se cobra la reserva; el de mostrador, en la pantalla del buffet.
     Anotar la plata acá la contaría dos veces.
     """
-    venta, ubicacion = _armar_venta(
-        sucursal_id=sucursal_id,
-        lineas=lineas,
-        usuario_id=usuario_id,
-        reserva_id=reserva_id,
+    items = []
+    for producto, cantidad in _congelar_lineas(lineas):
+        items.append({
+            "producto_id": producto.id, "nombre": producto.name,
+            "qty": cantidad, "precio": producto.default_sale_price,
+        })
+    total = sum((i["qty"] * i["precio"] for i in items), Decimal("0"))
+    ubicacion = ubicacion_de(sucursal_id)
+    venta_id = crear_venta_directa(
+        libracore_core.get_connection,
+        fecha=ahora().date().isoformat(),
+        items=items,
+        subtotal=total,
+        descuento=Decimal("0"),
+        total=total,
+        cliente_id=None,
         cliente_nombre=cliente_nombre,
+        usuario_id=usuario_id,
+        observaciones="",
+        estado="cobrada",
+        # Sin pagos: la caja no la escribe el motor (ver el docstring de arriba).
+        pagos=[],
+        stock_habilitado=True,
+        hooks=ganchos_del_consumo(reserva_id),
+        # El depósito del buffet de ESA sucursal: de ahí sale el stock y de ahí sale `sales.branch_id`.
+        deposito_id=ubicacion.id,
+        guardar_costo=True,
     )
-    return confirm_sale(_repo(), venta, ubicacion.id, ahora())
+    return _repo().get_sale(venta_id)
 
 
 def consumos_de_reserva(reserva_id: int) -> list[Sale]:
