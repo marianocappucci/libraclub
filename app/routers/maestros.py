@@ -16,7 +16,7 @@ cuatro de los cinco.
 # Medido el 2026-08-20: cinco tests de API en rojo por esto, y el mensaje no
 # habla de anotaciones. Sin el import, la anotación se evalúa en el `def` y es
 # la clase de verdad.
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -42,6 +42,7 @@ from app.schemas.maestros import (
     TarifaEntrada,
     TarifaSalida,
 )
+from app.servicios import clientes_nodo
 
 
 def _traducir_integridad(exc: IntegrityError) -> HTTPException:
@@ -74,6 +75,8 @@ def construir_abm(
     salida: type[BaseModel],
     orden: Sequence,
     rol_escritura=require_admin,
+    agregar: Callable | None = None,
+    exigir_modificable: Callable[[int], None] | None = None,
 ) -> APIRouter:
     """Un ABM completo: listar, obtener, crear, editar y borrar.
 
@@ -86,6 +89,11 @@ def construir_abm(
 
     Lo que **no** se baja: sucursales, canchas, tarifas y feriados. Ahí el alta
     define plata y configuración, no operación.
+
+    `agregar(sesion, item)` es cómo se agrega un alta (por defecto, `sesion.add`): los
+    clientes lo cambian para darse de alta con id provisorio en un nodo (ADR-022).
+    `exigir_modificable(item_id)` corre antes de editar o borrar y levanta si no se puede
+    (en un nodo, los clientes son del central).
     """
     router = APIRouter(prefix=f"/api/{prefijo}", tags=[etiqueta])
 
@@ -114,8 +122,11 @@ def construir_abm(
         _: object = Depends(rol_escritura),
     ):
         item = modelo(**datos.model_dump())
-        sesion.add(item)
         try:
+            if agregar is None:
+                sesion.add(item)
+            else:
+                agregar(sesion, item)
             sesion.commit()
         except IntegrityError as exc:
             sesion.rollback()
@@ -133,6 +144,8 @@ def construir_abm(
         item = sesion.get(modelo, item_id)
         if item is None:
             raise HTTPException(404, f"No existe {etiqueta} con id {item_id}.")
+        if exigir_modificable is not None:
+            exigir_modificable(item_id)
         for campo, valor in datos.model_dump().items():
             setattr(item, campo, valor)
         try:
@@ -152,6 +165,8 @@ def construir_abm(
         item = sesion.get(modelo, item_id)
         if item is None:
             raise HTTPException(404, f"No existe {etiqueta} con id {item_id}.")
+        if exigir_modificable is not None:
+            exigir_modificable(item_id)
         try:
             sesion.delete(item)
             sesion.commit()
@@ -190,6 +205,9 @@ clientes = construir_abm(
     # El único maestro que un encargado puede dar de alta: es lo que hace posible
     # tomarle la reserva a alguien que llama por primera vez. Ver `construir_abm`.
     rol_escritura=require_staff,
+    # En un nodo el alta lleva id provisorio y sube; editar o borrar es del central (ADR-022).
+    agregar=clientes_nodo.agregar,
+    exigir_modificable=clientes_nodo.exigir_cliente_modificable,
 )
 
 feriados = construir_abm(
