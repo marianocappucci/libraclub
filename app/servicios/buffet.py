@@ -51,10 +51,12 @@ from libracommerce.domain.catalog import CatalogItem, CatalogItemType, Unit
 from libracommerce.domain.inventory import Location, StockMovement, StockMovementType
 from libracommerce.domain.sales import Sale, SaleItem, SaleStatus
 from libracommerce.erp import Hooks
+from libracommerce.erp.offline import con_outbox
 from libracommerce.erp.ventas import crear_venta_directa
 from libracommerce.usecases.sales import confirm_sale
 from libracore.db import core as libracore_core
 
+from app import offline
 from app.commerce import auditar_alta, repositorio
 from app.tiempo import ahora
 
@@ -64,7 +66,10 @@ UNIDAD = Unit(code="u", name="Unidad")
 
 
 class SinUbicacion(RuntimeError):
-    """La sucursal no tiene depósito de buffet todavía."""
+    """La sucursal no tiene depósito de buffet todavía.
+
+    En un nodo de LibraEdge (ADR-023) es lo que pasa si el central nunca abrió el buffet de esa sucursal: el depósito
+    se crea en el central y baja por el espejo, el nodo no lo inventa (su id chocaría con los del central)."""
 
 
 class ProductoInexistente(ValueError):
@@ -103,12 +108,21 @@ def ubicacion_de(sucursal_id: int) -> Location:
 
     Se crea sola porque el operador no tiene por qué saber que "ubicación" es un
     concepto: abre la pantalla del buffet y carga productos.
+
+    🔑 **En un nodo no se crea: tiene que venir espejado del central.** `locations` es una tabla de referencia (la
+    manda el central) y el id de una fila nueva saldría de la secuencia del nodo, que choca con los del central. Si
+    falta, `SinUbicacion`: se abre el buffet de esa sucursal una vez desde el central.
     """
     repo = _repo()
     nombre = f"Buffet #{sucursal_id}"
     existente = next((u for u in repo.list_locations() if u.name == nombre), None)
     if existente is not None:
         return existente
+    if offline.nodo() is not None:
+        raise SinUbicacion(
+            "El depósito del buffet de esta sucursal todavía no llegó del central: abrí el buffet desde la versión web "
+            "una vez y esperá a que sincronice."
+        )
     return repo.save_location(
         Location(
             id=None,
@@ -302,9 +316,11 @@ def _vincular(reserva_id: int | None):
 def ganchos_del_consumo(reserva_id: int | None) -> Hooks:
     """Los ganchos con los que se registra el consumo de `reserva_id` (o el de mostrador, con `None`).
 
-    Es el punto donde el nodo engancha el outbox: `con_outbox(ganchos_del_consumo(reserva_id), OUTBOX)`.
+    Con el outbox de LibraEdge (`app.offline.OUTBOX`): en un nodo la venta se encola (`venta.registrada`, con el vínculo
+    puesto por `_vincular`, que corre antes de encolar); fuera de un nodo es exactamente `replace(GANCHOS_PROPIOS,
+    ...)`.
     """
-    return replace(GANCHOS_PROPIOS, al_registrar_venta=_vincular(reserva_id))
+    return con_outbox(replace(GANCHOS_PROPIOS, al_registrar_venta=_vincular(reserva_id)), offline.OUTBOX)
 
 
 def _congelar_lineas(lineas: list[tuple[int, Decimal]]) -> list[tuple[CatalogItem, Decimal]]:

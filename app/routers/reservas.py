@@ -11,10 +11,12 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app import offline
 from app.auth import require_admin, require_staff
 from app.config import es_produccion
 from app.db import obtener_sesion
@@ -40,6 +42,7 @@ from app.servicios import facturacion as servicio_facturacion
 from app.servicios import pagos as servicio_pagos
 from app.servicios import reservas as servicio
 from app.servicios.caja import SinTurnoAbierto
+from app.servicios.factura_del_nodo import facturar_desde_el_nodo as servicio_facturar_desde_el_nodo
 from app.tiempo import TZ, a_local, ahora
 
 router = APIRouter(prefix="/api/reservas", tags=["reservas"])
@@ -359,7 +362,8 @@ def cobrar_turno(
         servicio_caja.registrar_ingreso(
             usuario, datos.monto, concepto, datos.medio_pago,
             referencia=servicio_caja.referencia_de_cobro(reserva.id),
-            factura_id=reserva.factura_id,
+            # En un nodo, el id de la factura que emitió el nodo (el `factura_id` que baja del central es de otra base).
+            factura_id=servicio_facturacion.factura_id_para_cobrar(reserva),
         )
     except servicio_caja.SinTurnoAbierto as e:
         raise HTTPException(409, str(e)) from e
@@ -368,21 +372,54 @@ def cobrar_turno(
     return _estado_de_cobro(reserva)
 
 
+def _facturar_en_el_nodo(reserva: Reserva, usuario: dict):
+    """`POST .../facturar` en un nodo de LibraEdge: la factura conjunta pasa por la cola de ARCA (ADR-023).
+
+    🔴 **No emite directo**: `facturar_reserva` numera con `get_next_numero_with_arca`, que sin ARCA cae a la
+    numeración local, y un número local choca con el de ARCA y con el del central (libracore ADR-074). Con conexión
+    sale en el momento y contesta **201** con la factura, igual que el central; sin conexión (o si se corta a mitad)
+    contesta **202** con `{"en_cola": true, "estado", "mensaje"}` y sale sola cuando vuelve."""
+    try:
+        resultado = servicio_facturar_desde_el_nodo(reserva, int(usuario["id"]))
+    except servicio_facturacion.FacturacionNoConfigurada as e:
+        raise HTTPException(503, str(e)) from e
+    except servicio_facturacion.ReservaYaFacturada as e:
+        raise HTTPException(409, str(e)) from e
+    except servicio_facturacion.SinPrecio as e:
+        raise HTTPException(422, str(e)) from e
+    if resultado["estado"] == "emitido":
+        factura = resultado["factura"]
+        return JSONResponse(status_code=201, content=FacturaSalida(
+            id=factura["id"], tipo=factura["tipo"], punto_venta=factura["punto_venta"],
+            numero=factura["numero"], fecha=str(factura["fecha"]),
+            total=float(factura["total"]), cae=factura.get("cae") or "",
+            cae_vto=factura.get("cae_vto") or "",
+        ).model_dump(mode="json"))
+    pedido = resultado["pedido"]
+    return JSONResponse(status_code=202, content={
+        "en_cola": True, "estado": pedido["estado"], "pedido_id": pedido["id"], "mensaje": resultado["mensaje"],
+    })
+
+
 @router.post("/{reserva_id}/facturar", response_model=FacturaSalida, status_code=201)
 def facturar(
     reserva_id: int,
     sesion: Session = Depends(obtener_sesion),
-    _: object = Depends(require_admin),
+    usuario: dict = Depends(require_admin),
 ):
     """Emite el comprobante de una reserva.
 
     🔑 **Admin y no staff.** El encargado de mostrador toma reservas y cobra; qué
     se le factura a quién es del dueño. Es la misma línea que separa el alta de
     canchas del alta de clientes en este producto.
+
+    En un nodo de LibraEdge no emite directo: ver `_facturar_en_el_nodo`.
     """
     reserva = sesion.get(Reserva, reserva_id)
     if reserva is None:
         raise HTTPException(404, "no existe esa reserva")
+    if offline.nodo() is not None:
+        return _facturar_en_el_nodo(reserva, usuario)
     cliente = sesion.get(Cliente, reserva.cliente_id) if reserva.cliente_id else None
     # El nombre de la cancha va a la línea del comprobante. Se resuelve acá y no
     # dentro del servicio para que `servicios/facturacion.py` no dependa del
@@ -503,7 +540,11 @@ def _reserva_y_cancha(sesion: Session, reserva_id: int) -> tuple[Reserva, str]:
     return reserva, (cancha.nombre if cancha else "cancha")
 
 
-@router.post("/{reserva_id}/mp-qr", response_model=QrPuesto, status_code=201)
+@router.post(
+    "/{reserva_id}/mp-qr", response_model=QrPuesto, status_code=201,
+    # El cobro con QR es del central: su pago vive en tablas que el nodo no sube (ADR-023).
+    dependencies=[Depends(offline.solo_en_el_central)],
+)
 def poner_en_el_qr(
     reserva_id: int,
     sesion: Session = Depends(obtener_sesion),
@@ -540,7 +581,7 @@ def poner_en_el_qr(
     return QrPuesto(referencia=pago.referencia, monto=float(pago.monto))
 
 
-@router.delete("/{reserva_id}/mp-qr", status_code=204)
+@router.delete("/{reserva_id}/mp-qr", status_code=204, dependencies=[Depends(offline.solo_en_el_central)])
 def bajar_del_qr(
     reserva_id: int,
     sesion: Session = Depends(obtener_sesion),
@@ -556,7 +597,9 @@ def bajar_del_qr(
     sesion.commit()
 
 
-@router.get("/{reserva_id}/mp-status", response_model=QrEstado)
+@router.get(
+    "/{reserva_id}/mp-status", response_model=QrEstado, dependencies=[Depends(offline.solo_en_el_central)],
+)
 def estado_del_qr(
     reserva_id: int,
     sesion: Session = Depends(obtener_sesion),
