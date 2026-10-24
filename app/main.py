@@ -321,6 +321,8 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
         app.add_exception_handler(excepcion, _contestar_409_de_nodo)
     # Las reservas que se dan en un nodo (PR 12, ADR-022) se enchufan al outbox. Fuera de un nodo no hacen nada.
     offline.configurar_reservas()
+    # Y los clientes que se dan de alta en el nodo (addendum de ADR-022).
+    offline.configurar_clientes()
     # El router de `libraauth` los lee de acá por nombre: sin estos dos, el login
     # devuelve 500 al primer request y no al arrancar.
     app.state.users = usuarios
@@ -409,7 +411,10 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
         app.include_router(build_demo_codigos_router())
 
     for router in maestros.TODOS:
-        app.include_router(router, dependencies=_DEL_CENTRAL)
+        # Los clientes se dan de alta en el nodo (id provisorio, `cliente_club.alta`): su router lleva sus propias
+        # guardas (editar y borrar son del central) y no la general de los maestros.
+        propias = [] if router in maestros.CON_ALTA_EN_NODO else _DEL_CENTRAL
+        app.include_router(router, dependencies=propias)
     # Los reincidentes de ausentismo. Vive bajo `/api/clientes` pero con dos
     # segmentos, así que no depende de ir antes o después del ABM de clientes.
     app.include_router(ausentismo_router.router, dependencies=_DEL_CENTRAL)

@@ -291,7 +291,6 @@ def test_fuera_de_un_nodo_el_outbox_no_se_toca(sesion):
 
 def test_las_altas_en_nodo_que_el_pr_11_suma_al_aprovisionamiento():
     assert clientes_nodo.ALTAS_EN_NODO == ("clientes",)
-    pytest.importorskip("libraedge", reason="libraedge todavía no es dependencia de LibraClub (lo suma el PR 11)")
     from libraedge.altas import AltaEnNodo, normalizar_altas
 
     assert clientes_nodo.altas_en_nodo() == [AltaEnNodo("clientes")]

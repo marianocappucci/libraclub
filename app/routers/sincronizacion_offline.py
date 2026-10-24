@@ -32,6 +32,7 @@ caja: el cobro del buffet y el de una reserva |
 | `cola.pedido` | LibraCore | el estado de un pedido de la cola de ARCA (la web consulta) |
 | `club.factura_conjunta` | LibraClub | la factura de una reserva con sus consumos, con su número y CAE |
 | `reserva.creada`, `reserva.estado` | LibraClub (PR 12, ADR-022) | las reservas que se dieron en el nodo |
+| `cliente_club.alta` | LibraClub (ADR-022, addendum) | los clientes del club dados de alta en el nodo |
 
 Lo que no tiene aplicador **no se marca aplicado**: va a revisión manual (`libraedge-central revision
 listar|reintentar|descartar`, con `LIBRAEDGE_DESPACHADOR=app.routers.sincronizacion_offline:despachador`).
@@ -61,9 +62,27 @@ def registrar_reservas(despachador) -> None:
     reservas_nodo.registrar_en(despachador)
 
 
+def registrar_clientes(despachador) -> None:
+    """Registra `cliente_club.alta` (ADR-022, addendum) en el despachador del central.
+
+    Lo escribe `servicios/clientes_nodo.py`: asigna el id definitivo, anota el mapeo `(nodo, 'clientes', id provisorio)
+    -> id` y no duplica a la misma persona (documento, cuit o email). Se registra **antes** que las reservas por
+    claridad, no por orden: el orden de aplicación lo da la secuencia del outbox del nodo. No es `cliente.alta` (ése es
+    de los `clients` de LibraCommerce y ya está registrado)."""
+    from app.servicios import clientes_nodo
+
+    clientes_nodo.registrar_en(despachador)
+
+
+def registrar_del_club(despachador) -> None:
+    """Las operaciones propias del club que se suman a las del motor: los clientes y las reservas."""
+    registrar_clientes(despachador)
+    registrar_reservas(despachador)
+
+
 def armar_despachador():
     """Las operaciones que el central de LibraClub sabe aplicar (ver el docstring del módulo)."""
-    return factura_del_nodo.armar_despachador(registrar_reservas)
+    return factura_del_nodo.armar_despachador(registrar_del_club)
 
 
 despachador = armar_despachador()

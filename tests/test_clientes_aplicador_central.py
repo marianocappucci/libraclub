@@ -12,14 +12,11 @@ garantiza).
 
 # Los fixtures se importan de otros módulos y se piden por nombre en cada test: ruff lo lee como «redefinición de un
 # import sin usar» (F811). La suite pone un `noqa` por test; acá, uno por archivo.
-# ruff: noqa: E402, F811
+# ruff: noqa: F811
 
 from __future__ import annotations
 
 import pytest
-
-pytest.importorskip("libraedge", reason="libraedge todavía no es dependencia de LibraClub (lo suma el PR 11)")
-
 from libracommerce.erp.offline import VinculoNoSincronizado
 from libraedge.mapeo import anotar_mapeo, traducir_id
 from libraedge.sync.despacho import Despachador

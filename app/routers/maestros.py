@@ -235,3 +235,6 @@ franjas = construir_abm(
 )
 
 TODOS = (sucursales, canchas, clientes, feriados, tarifas, franjas)
+
+#: Los maestros que además se dan de alta en un nodo de LibraEdge: su alta no es 409 `solo_en_el_central` (ADR-022).
+CON_ALTA_EN_NODO = (clientes,)

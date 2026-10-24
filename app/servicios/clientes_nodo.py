@@ -74,20 +74,17 @@ las filas con id negativo (ADR-019 de libraedge: cualquier otra da SQLSTATE `LE0
 - registrarse en el portal de jugadores: **409 `solo_en_el_central`** (el portal es público y no corre en el equipo del
   local).
 
-## Cómo lo cablea el producto (PR 11)
+## Cómo está cableado (PR 11, ADR-023)
 
-```python
-from app.servicios import clientes_nodo
-clientes_nodo.configurar(clientes_nodo.desde_el_outbox(OUTBOX))      # nodo y central, una vez al armar la app
-clientes_nodo.registrar_en(despachador)                               # sólo el central
-# y en el Aprovisionamiento del central:
-altas_en_nodo=[..., *clientes_nodo.ALTAS_EN_NODO]                     # ("clientes",): lo que `normalizar_altas` acepta
-```
+- `app/offline.configurar_clientes()` (la llama `crear_app`, en el nodo y en el central): `clientes_nodo.configurar(
+  clientes_nodo.desde_el_outbox(OUTBOX))`.
+- `app/routers/sincronizacion_offline.registrar_clientes(despachador)` (sólo el central): `clientes_nodo.registrar_en`.
+- `app/offline.ALTAS_EN_EL_NODO` suma `AltaEnNodo("clientes")` (`clientes_nodo.altas_en_nodo()`), y
+  `clientes` ya no está en `TABLAS_SOLO_LECTURA`: el nodo escribe ahí las filas con id negativo.
+- `app/main.py` no le pone a los clientes la guarda general de los maestros (`maestros.CON_ALTA_EN_NODO`): su alta es la
+  de este módulo y las demás guardas, las de arriba.
 
-`ALTAS_EN_NODO` son nombres y no `AltaEnNodo(...)` para no importar `libraedge` al cargar el módulo (todavía no es
-dependencia de este producto); `libraedge.altas.AltaEnNodo("clientes")` es lo mismo y `clientes_nodo.altas_en_nodo()`
-lo arma (con el import diferido). Sin `configurar()`, o con un `nodo()` que devuelve `None` (el central, una
-instalación común), nada de esto hace nada.
+Sin `configurar()`, o con un `nodo()` que devuelve `None` (el central, una instalación común), nada de esto hace nada.
 """
 
 from __future__ import annotations

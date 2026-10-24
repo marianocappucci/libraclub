@@ -3,9 +3,7 @@
 Igual que `reservas_nodo_apoyo`: ninguno levanta el nodo real, se ejercitan las piezas con las tablas de LibraEdge
 (`local_sequences`, `sync_outbox`, `libraedge_mapeo`) creadas sobre la base de la suite.
 
-🔑 `libraedge` no es dependencia de este producto todavía (la suma el PR 11): este módulo no lo importa al cargarse.
-Los tests que lo necesitan se saltean donde no está; el resto (la guarda, el id provisorio y el encolado con un doble)
-corre en cualquier entorno.
+`libraedge` es dependencia desde el PR 11 (ADR-023): este módulo igual lo importa recién al armar una operación.
 """
 
 from __future__ import annotations
