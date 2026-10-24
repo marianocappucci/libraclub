@@ -647,7 +647,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "libraauth", extras = ["migrations"], git = "https://github.com/marianocappucci/libraauth.git?rev=v0.55.0" },
-    { name = "libracommerce", git = "https://github.com/marianocappucci/libracommerce.git?rev=v0.72.1" },
+    { name = "libracommerce", git = "https://github.com/marianocappucci/libracommerce.git?rev=v0.73.0" },
     { name = "libracore", git = "https://github.com/marianocappucci/libracore.git?rev=v1.191.0" },
     { name = "libragenda", git = "https://github.com/marianocappucci/libragenda.git?rev=v0.11.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
@@ -664,8 +664,8 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "libracommerce"
-version = "0.72.1"
-source = { git = "https://github.com/marianocappucci/libracommerce.git?rev=v0.72.1#115658c6da01a7b4bd3b491513ce4177e07e1921" }
+version = "0.73.0"
+source = { git = "https://github.com/marianocappucci/libracommerce.git?rev=v0.73.0#802d0f926068ce6f523a920b3ff5e27d8823abbe" }
 
 [[package]]
 name = "libracore"
