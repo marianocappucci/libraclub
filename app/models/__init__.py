@@ -21,7 +21,7 @@ from app.models.enums import (
     TipoAviso,
 )
 from app.models.maestros import Cancha, Cliente, Feriado, Sucursal
-from app.models.reservas import WHERE_OCUPA, Reserva, Serie
+from app.models.reservas import WHERE_OCUPA, WHERE_OCUPA_CENTRAL, WHERE_OCUPA_NODO, Reserva, Serie
 from app.models.tarifas import Tarifa
 from app.models.torneos import (
     Competidor,
@@ -62,4 +62,6 @@ __all__ = [
     "Torneo",
     "Zona",
     "WHERE_OCUPA",
+    "WHERE_OCUPA_CENTRAL",
+    "WHERE_OCUPA_NODO",
 ]

@@ -10,7 +10,8 @@ from __future__ import annotations
 import logging
 import os
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse
 from libraauth.auditoria import (
     AuditoriaBase,
     AuditoriaRepository,
@@ -18,7 +19,7 @@ from libraauth.auditoria import (
     build_logs_router,
     configurar_auditoria,
 )
-from libraauth.auth_events import AuthEventRepository
+from libraauth.auth_events import AuthEventRepository, ip_del_request
 from libraauth.bootstrap import ensure_default_admin, ensure_demo_user
 from libraauth.demo_codigos import DemoCodigoRepository
 from libraauth.migrar import exigir_schema_al_dia
@@ -31,27 +32,33 @@ from libraauth.session_auth import (
 )
 from libraauth.smtp_settings import SmtpSettingsRepository
 from libraauth.terminos import TerminosRepository, build_terminos_router
+from libracommerce.erp import offline_stock
 from libracore import config_manager as _lc_config_manager
 from libracore.arca_router import build_arca_router
 from libracore.caja_router import build_cierre_diario_router
 from libracore.candados import una_vez_al_arrancar
+from libracore.cola_arca import pedidos_a_emitir
+from libracore.cola_arca_router import build_cola_del_nodo_router
 from libracore.config_router import (
     build_backup_router,
     build_empresa_admin_router,
     build_empresa_router,
 )
 from libracore.consultar_cuit_router import build_consultar_cuit_router
+from libracore.db.core import get_connection as lc_get_connection
 from libracore.docs_api import cerrar_docs_de_la_api
 from libracore.errores import instalar_registro_de_errores
 from libracore.estado_del_sistema import build_estado_del_sistema_router
 from libracore.mp_config_router import build_mp_config_router
+from libracore.nodo_offline import SinConexion, SoloEnElCentral
 from libracore.resguardo_enlace import build_resguardo_enlace_router
 from libracore.respaldo import Instancia
 from libracore.security_headers import CSP_SPA, SecurityHeadersMiddleware
 from libracore.smtp_router import build_smtp_probe_router
 from libracore.tema_router import build_tema_admin_router, build_tema_router
+from libraedge.pantalla_del_central import create_canje_router, create_nodos_router
 
-from app import db
+from app import db, offline
 from app.addons import require_addon
 from app.auth import (
     UserRepository,
@@ -63,7 +70,7 @@ from app.auth import (
 )
 from app.config import Config, misma_base
 from app.models.maestros import Sucursal
-from app.routers import admin, disponibilidad, maestros, reservas, salud, torneos
+from app.routers import admin, conflictos, disponibilidad, maestros, reservas, salud, sincronizacion_offline, torneos
 from app.routers import ausentismo as ausentismo_router
 from app.routers import auth as auth_router
 from app.routers import buffet as buffet_router
@@ -80,6 +87,7 @@ from app.routers import resumen as resumen_router
 # sin el alias el import queda pisado.
 from app.routers import usuarios as usuarios_router
 from app.routers.facturacion import exigir_base
+from app.servicios import buffet as servicio_buffet
 from app.servicios import caja as servicio_caja
 from app.servicios import cierre_diario as servicio_cierre_diario
 from app.servicios import facturacion
@@ -189,6 +197,20 @@ def migrar_secretos() -> dict:
     return informe
 
 
+async def _contestar_409_de_nodo(request: Request, exc: SinConexion | SoloEnElCentral) -> JSONResponse:
+    return JSONResponse({"detail": exc.detalle()}, status_code=409)
+
+
+async def _contestar_409_sin_ubicacion(request: Request, exc: servicio_buffet.SinUbicacion) -> JSONResponse:
+    """En un nodo, el depósito del buffet tiene que venir del central: si falta, 409 con lo que hay que hacer."""
+    return JSONResponse({"detail": str(exc)}, status_code=409)
+
+
+#: Los routers cuyos datos manda el central: en un nodo se leen del espejo y se escriben sólo en el central (409
+#: `solo_en_el_central`). Lo mismo en el central: no hace nada. Ver `app/offline.py`.
+_DEL_CENTRAL = [Depends(offline.escritura_solo_en_el_central)]
+
+
 def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> FastAPI:
     # Se resuelve acá y no adentro de `db.inicializar` porque el router de backup
     # necesita la MISMA config: la URL para el dump y el directorio de datos para
@@ -292,6 +314,15 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
         version="0.1.0",
     )
     cerrar_docs_de_la_api(app)
+    # Lo que un nodo de LibraEdge contesta con un 409 y no con un 500 (ADR-022): una guarda de las reservas que
+    # levanta desde un servicio al que no llega ninguna traducción por ruta (torneos, series). El mismo cuerpo que
+    # los routers del motor: `{"detail": {"codigo", "mensaje"}}`.
+    for excepcion in (SinConexion, SoloEnElCentral):
+        app.add_exception_handler(excepcion, _contestar_409_de_nodo)
+    # Las reservas que se dan en un nodo (PR 12, ADR-022) se enchufan al outbox. Fuera de un nodo no hacen nada.
+    offline.configurar_reservas()
+    # Y los clientes que se dan de alta en el nodo (addendum de ADR-022).
+    offline.configurar_clientes()
     # El router de `libraauth` los lee de acá por nombre: sin estos dos, el login
     # devuelve 500 al primer request y no al arrancar.
     app.state.users = usuarios
@@ -332,8 +363,29 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # `DATA_DIR/errores/errores.jsonl` y responde con un `ref`; monta `POST /api/errores-cliente` para los errores del
     # navegador. Una sola línea, **al construir la app**: Starlette no deja sumar handlers después.
     instalar_registro_de_errores(app, "libraclub")
+    # El central se niega a mover el stock de una sucursal con nodo (libracommerce ADR-071):
+    # `DepositoDeSucursalConNodo` no es un `ValueError` (los routers los pasan a 422) y acá es un 409
+    # `deposito_de_sucursal_con_nodo`. Una vez, al construir.
+    offline_stock.instalar_manejador_409(app)
+    app.add_exception_handler(servicio_buffet.SinUbicacion, _contestar_409_sin_ubicacion)
 
     app.include_router(salud.router)
+    # La sincronización del nodo offline (LibraEdge, ADR-023): `/sync/v1/push`, `/pull`, `/ticket-arca` y
+    # `/carga-inicial`. Se monta siempre: sin un nodo registrado no hay ningún secreto válido y todo contesta 401. La
+    # autenticación es el secreto del nodo, no la sesión: por eso no lleva guarda de rol (en la matriz son rutas
+    # «PÚBLICA, secreto del nodo»).
+    app.include_router(sincronizacion_offline.router)
+    # «Sucursal sin internet» (libraedge ADR-011 y ADR-014): el admin da de alta el nodo de una sucursal y se lleva la
+    # dirección y un código de vinculación, ve los nodos y los da de baja. Toda la lógica es de LibraEdge; acá sólo la
+    # guarda (cambia la estructura de la instancia: sólo admin) y el aprovisionamiento de `app/offline.py`.
+    app.include_router(
+        create_nodos_router(offline.aprovisionamiento, lc_get_connection),
+        dependencies=[Depends(require_admin)],
+    )
+    # El canje del código (libraedge ADR-014): `POST /sync/v1/vinculacion`. **Sin guarda a propósito**: lo llama el
+    # instalador del nodo, que no tiene sesión; lo protegen el código (un solo uso, 15 minutos) y el límite de
+    # intentos del motor. La IP real detrás del proxy es la de libraauth.
+    app.include_router(create_canje_router(offline.aprovisionamiento, lc_get_connection, ip_del_request=ip_del_request))
     # `construir_router()` y no un `router` de módulo: lee `DEMO_MODE` al
     # construirse, y a nivel de módulo quedaría congelado en el primer import.
     # Ver el docstring de `app/routers/auth.py`.
@@ -359,18 +411,24 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
         app.include_router(build_demo_codigos_router())
 
     for router in maestros.TODOS:
-        app.include_router(router)
+        # Los clientes se dan de alta en el nodo (id provisorio, `cliente_club.alta`): su router lleva sus propias
+        # guardas (editar y borrar son del central) y no la general de los maestros.
+        propias = [] if router in maestros.CON_ALTA_EN_NODO else _DEL_CENTRAL
+        app.include_router(router, dependencies=propias)
     # Los reincidentes de ausentismo. Vive bajo `/api/clientes` pero con dos
     # segmentos, así que no depende de ir antes o después del ABM de clientes.
-    app.include_router(ausentismo_router.router)
+    app.include_router(ausentismo_router.router, dependencies=_DEL_CENTRAL)
     app.include_router(reservas.router)
+    # Las reservas en conflicto (ADR-022). Prefijo propio y no `/api/reservas/conflictos`: `GET /api/reservas/{id}`
+    # lo leería como un id.
+    app.include_router(conflictos.router)
     # Los torneos. Sin `dependencies`: definir y sortear son de admin —cambian
     # lo que el complejo se comprometió a jugar— e inscribir, programar y cargar
     # resultados son de mostrador. Cada endpoint declara el suyo.
-    app.include_router(torneos.router)
+    app.include_router(torneos.router, dependencies=_DEL_CENTRAL)
     app.include_router(disponibilidad.router)
-    app.include_router(usuarios_router.router)
-    app.include_router(admin.router)
+    app.include_router(usuarios_router.router, dependencies=_DEL_CENTRAL)
+    app.include_router(admin.router, dependencies=_DEL_CENTRAL)
 
     # Los dos logs —actividad y accesos— para la pantalla compartida. El router
     # no se gatea a sí mismo: el vocabulario de roles es del producto.
@@ -428,7 +486,7 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
         build_arca_router(
             prefix="/config/arca", empresa_por_defecto=servicio_facturacion.EMPRESA,
         ),
-        dependencies=[Depends(require_admin), Depends(exigir_base)],
+        dependencies=[Depends(require_admin), Depends(exigir_base), *_DEL_CENTRAL],
     )
 
     # Consulta de CUIT en el padrón de ARCA (`GET /api/consultar-cuit/{cuit}`): el router del motor, el que usan
@@ -463,13 +521,17 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # un error de conexión de psycopg en vez del 503 que nombra la variable que
     # falta. Lo agarró `test_sin_base_de_libracore_el_listado_lo_DICE`, que se
     # escribió para el listado hecho a mano y sobrevivió al reemplazo.
+    #
+    # 🔴 En un nodo se leen y no se escriben: emitir, autorizar o anular a mano numeraría con
+    # `get_next_numero_with_arca`, y sin red eso cae a la numeración local (libracore ADR-074). La factura de una
+    # reserva sale por la cola de ARCA (`POST /api/reservas/{id}/facturar`, ADR-023).
     app.include_router(
         facturas_router.comprobantes,
-        dependencies=[Depends(require_admin), Depends(exigir_base)],
+        dependencies=[Depends(require_admin), Depends(exigir_base), *_DEL_CENTRAL],
     )
     app.include_router(
         facturas_router.router,
-        dependencies=[Depends(require_admin), Depends(exigir_base)],
+        dependencies=[Depends(require_admin), Depends(exigir_base), *_DEL_CENTRAL],
     )
 
     # `GET`/`PUT /api/config/mercadopago`: con qué cuenta cobra el QR del
@@ -499,7 +561,7 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # v1.62.0.
     app.include_router(
         build_mp_config_router(campo_auto_facturar="mp_auto_facturar_reservas"),
-        dependencies=[Depends(require_admin)],
+        dependencies=[Depends(require_admin), *_DEL_CENTRAL],
     )
 
     # La bandeja de MercadoPago: conciliar lo que entró y facturarlo. Es la
@@ -511,7 +573,15 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # 503 que nombra la variable y no un error de conexión de psycopg.
     app.include_router(
         mp_bandeja_router.router,
-        dependencies=[Depends(require_admin), Depends(exigir_base)],
+        dependencies=[Depends(require_admin), Depends(exigir_base), *_DEL_CENTRAL],
+    )
+
+    # La cola de comprobantes de ARCA del nodo (libracore ADR-079): lo que quedó esperando sin conexión, para avisarlo
+    # y para que alguien resuelva lo que quedó a revisar. Staff mira y pide emitir; reintentar, descartar y marcar
+    # emitido deciden sobre un documento fiscal: sólo admin. Fuera de un nodo contesta `es_nodo: false` y no hace nada.
+    app.include_router(
+        build_cola_del_nodo_router(cola=offline.cola(), usuario_actual=require_staff, resolver_con=require_admin),
+        dependencies=[Depends(exigir_base)],
     )
 
     # La caja por turno. Sin `dependencies` acá: cada endpoint declara su rol —
@@ -523,7 +593,7 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # Las cajas: los mostradores de cada sucursal. Cada endpoint declara su
     # rol — el listado lo lee el mostrador para elegir dónde abrir el turno;
     # el alta, la edición y la baja son de admin.
-    app.include_router(cajas_router.router)
+    app.include_router(cajas_router.router, dependencies=_DEL_CENTRAL)
 
     # El cierre diario por sucursal (F1 del motor, ADR-011): vista previa,
     # cerrar, listar y los dos tickets de 80 mm. `require_staff` en las dos
@@ -544,6 +614,8 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
             usuario_actual=require_staff,
             resolver_sucursal_nombre=servicio_cierre_diario.resolver_sucursal_nombre,
             autorizar_cierre=Depends(require_staff),
+            # En un nodo el cierre del día sube al central (libracore ADR-076); fuera de un nodo no hace nada.
+            ganchos_de_caja=offline.GANCHOS_DE_CAJA,
         ),
         dependencies=[Depends(exigir_base)],
     )
@@ -552,11 +624,11 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # —el encargado tiene que poder contestarle al jugador que llama— y el
     # reintento, de admin: mover plata hacia afuera es del dueño. Cada endpoint
     # declara su rol adentro.
-    app.include_router(devoluciones_router.router)
+    app.include_router(devoluciones_router.router, dependencies=_DEL_CENTRAL)
 
     # La cuenta corriente. Mismo criterio que la caja: el mostrador fía y cobra
     # —es quien está frente al cliente—, y la lista de deudores es de admin.
-    app.include_router(cuenta_corriente_router.router)
+    app.include_router(cuenta_corriente_router.router, dependencies=_DEL_CENTRAL)
 
     # El buffet. Sin `dependencies`: el catálogo y el alta de producto son de
     # admin —definen precio—, y vender y reponer son de mostrador.
@@ -677,7 +749,11 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # último respaldo, en una consulta. La abre cualquier rol de la instancia; lo que ve cada uno lo decide el motor
     # (ARCA y respaldo, sólo admin).
     app.include_router(
-        build_estado_del_sistema_router(usuario_actual=get_current_user, backups_dir=backups_dir),
+        build_estado_del_sistema_router(
+            usuario_actual=get_current_user, backups_dir=backups_dir, conexion=offline.CONEXION,
+            # La barra del pie: el nodo con las facturas que esperan su conexión, o los nodos del central.
+            a_facturar=lambda: pedidos_a_emitir(offline.cola()), nodos_del_central=offline.nodos_del_central,
+        ),
         dependencies=[Depends(require_staff)],
     )
 
@@ -696,4 +772,18 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
         build_resguardo_enlace_router(backups_dir, carpeta="Resguardo LibraClub"),
         dependencies=[Depends(require_admin), Depends(require_addon("resguardo_externo"))],
     )
+
+    # En un nodo, un hilo emite lo que quedó en la cola de ARCA cuando vuelve la conexión (libracore ADR-079). Fuera de
+    # un nodo no arranca nada. Con varios workers cada uno arranca el suyo: el candado por pedido evita la doble
+    # emisión.
+    def _arrancar_la_cola() -> None:
+        app.state.parar_la_cola = offline.arrancar_cola()
+
+    def _parar_la_cola() -> None:
+        parar = getattr(app.state, "parar_la_cola", None)
+        if parar is not None:
+            parar.set()
+
+    app.router.add_event_handler("startup", _arrancar_la_cola)
+    app.router.add_event_handler("shutdown", _parar_la_cola)
     return app

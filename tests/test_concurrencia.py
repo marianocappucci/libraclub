@@ -17,20 +17,17 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from app.models.enums import EstadoReserva, OrigenReserva
-from app.models.reservas import Reserva
+from app.models.reservas import WHERE_OCUPA_CENTRAL, Reserva
 from app.servicios import reservas as servicio
 from app.tiempo import TZ
 
 CONSTRAINT = "ex_reservas_sin_superposicion"
 
-#: La definición, **igual que en la migración**. Se repite acá porque el test que
-#: la saca tiene que poder reponerla exactamente; si divergieran, la suite
-#: seguiría después con un constraint distinto del que hay en producción.
-DEFINICION = (
-    "EXCLUDE USING gist (cancha_id WITH =, periodo WITH &&) "
-    "WHERE (estado IN ('provisoria', 'pendiente_pago', 'confirmada', "
-    "'jugada', 'bloqueo'))"
-)
+#: La definición, **igual que en la migración** (`0013`: desde ADR-022 cubre sólo `id > 0`; la de `id < 0` es otra
+#: exclusión que este test no toca). Se repite acá porque el test que la saca tiene que poder reponerla exactamente;
+#: si divergieran, la suite seguiría después con un constraint distinto del que hay en producción. Con la de antes de
+#: la `0013` (sin `id > 0`) los tests de `test_exclusion_partida.py` que corrían después en el mismo worker daban rojo.
+DEFINICION = f"EXCLUDE USING gist (cancha_id WITH =, periodo WITH &&) WHERE ({WHERE_OCUPA_CENTRAL})"
 
 #: Tope para el DDL. Un `ALTER TABLE` que pide ACCESS EXCLUSIVE y no lo consigue
 #: espera **para siempre** por defecto: la suite se cuelga en vez de fallar, y un

@@ -24,6 +24,13 @@ devolverlo por API dejaría el arqueo descuadrado, con la plata saliendo por un
 lado que la caja no ve. Esa devolución es un **egreso de la caja del turno
 abierto** de quien cancela.
 
+**Una reserva en conflicto devuelve siempre la seña entera** (ADR-022, addendum del
+2026-10-24). La política de la sucursal premia el aviso con anticipación; en un conflicto del
+nodo nadie avisó tarde ni dejó de venir: la cancha la tenía otra reserva que llegó antes al
+central. Cobrarle la seña a quien la perdió sin culpa es una decisión que el humano descartó.
+Por eso `cancelar` mira el estado **antes** de cancelar y, si era `en_conflicto`, se salta la
+ventana y devuelve por el camino de siempre (MercadoPago o caja, según el canal del pago).
+
 🔴 Hasta el 2026-09-11 esto último se **decía** y no se hacía: el resultado
 anunciaba «la devolución se hace desde la caja» y no registraba nada. El pago
 seguía `aprobado` y la plata que se le devolvía al jugador salía del cajón como
@@ -250,6 +257,27 @@ def _intentar(
 #: arreglo: abrir la caja y reintentar.
 SIN_CAJA_ABIERTA = "Falta devolver la seña desde la caja: se canceló sin un turno de caja abierto."
 
+#: El motivo con el que queda cancelada una reserva que estaba `en_conflicto`. Es la **auditoría** de por qué la
+#: seña se devolvió entera sin mirar la política: queda en `reservas.motivo`, en el concepto del egreso de caja y
+#: en el detalle del resultado. Todo motivo de una cancelación de conflicto empieza con esto (`es_de_conflicto`).
+MOTIVO_CONFLICTO_DEL_NODO = "Conflicto de reserva del nodo"
+
+
+def _motivo_de_conflicto(motivo: str | None) -> str:
+    """`Conflicto de reserva del nodo: <lo que escribió quien cancela>`, sin pasar de los 200 caracteres de la
+    columna. Si ya empieza así (un reintento, otro camino que lo puso), no se repite."""
+    if not motivo:
+        return MOTIVO_CONFLICTO_DEL_NODO
+    if motivo.startswith(MOTIVO_CONFLICTO_DEL_NODO):
+        return motivo[:200]
+    return f"{MOTIVO_CONFLICTO_DEL_NODO}: {motivo}"[:200]
+
+
+def es_de_conflicto(reserva: Reserva) -> bool:
+    """Si la reserva se canceló al resolver un conflicto (por su motivo). Lo usa la devolución por caja, que también
+    corre en un reintento, cuando la reserva ya no está `en_conflicto`."""
+    return (reserva.motivo or "").startswith(MOTIVO_CONFLICTO_DEL_NODO)
+
 
 def _devolver_por_caja(
     pago: PagoDeReserva, reserva: Reserva, usuario: dict | None
@@ -290,6 +318,7 @@ def _devolver_por_caja(
         f"Turno {a_local(reserva.comienza_at):%d-%m-%Y %H:%M}"
         f" — {cancha.nombre if cancha else 'cancha'}"
         f"{f' — {cliente.nombre}' if cliente else ''}"
+        f"{f' — {MOTIVO_CONFLICTO_DEL_NODO}' if es_de_conflicto(reserva) else ''}"
     )
     try:
         servicio_caja.registrar_devolucion(
@@ -342,14 +371,21 @@ def cancelar(
     El orden importa: **primero se cancela** y después se mira la plata. Al
     revés, un error de MercadoPago dejaría el turno sin cancelar y la cancha
     ocupada por alguien que ya avisó que no viene.
+
+    🔑 **Una reserva `en_conflicto` devuelve siempre la seña entera** (ADR-022): se
+    ignora la política de la sucursal y el motivo queda como `Conflicto de reserva del
+    nodo: ...`. Se lee el estado ANTES de cancelar, porque `cambiar_estado` limpia el
+    conflicto.
     """
     reserva = sesion.get(Reserva, reserva_id)
     if reserva is None:
         raise servicio_reservas.ReservaInvalida("No existe esa reserva.")
 
+    en_conflicto = reserva.estado is EstadoReserva.EN_CONFLICTO
     politica = politica_de(sesion, reserva, momento)
     reserva = servicio_reservas.cambiar_estado(
-        sesion, reserva_id, EstadoReserva.CANCELADA, motivo=motivo
+        sesion, reserva_id, EstadoReserva.CANCELADA,
+        motivo=_motivo_de_conflicto(motivo) if en_conflicto else motivo,
     )
 
     pago = _pago_devolvible(sesion, reserva_id)
@@ -359,23 +395,27 @@ def cancelar(
     # 🔑 La política va **antes** que el canal, para los dos. Hasta el
     # 2026-09-11 el cobro de mostrador se desviaba primero y la política ni se
     # miraba: daba igual, porque tampoco se devolvía. Ahora que se devuelve,
-    # tiene que ganarse la devolución como cualquier otro.
-    if not politica.hay_politica:
-        return Resultado(
-            reserva, politica, pago, None,
-            "La sucursal no tiene política de cancelación cargada: la seña no se devuelve.",
-        )
+    # tiene que ganarse la devolución como cualquier otro. **Salvo un conflicto**:
+    # ahí no hay nada que ganarse, la seña vuelve entera.
+    if not en_conflicto:
+        if not politica.hay_politica:
+            return Resultado(
+                reserva, politica, pago, None,
+                "La sucursal no tiene política de cancelación cargada: la seña no se devuelve.",
+            )
 
-    if not politica.a_tiempo:
-        return Resultado(
-            reserva, politica, pago, None,
-            f"Se canceló con menos de {politica.horas} horas: la seña no se devuelve.",
-        )
+        if not politica.a_tiempo:
+            return Resultado(
+                reserva, politica, pago, None,
+                f"Se canceló con menos de {politica.horas} horas: la seña no se devuelve.",
+            )
 
     estado, detalle = _devolver(pago, reserva, pasarela=pasarela, usuario=usuario)
     pago.estado = estado
     pago.detalle_devolucion = None if estado is EstadoPago.DEVUELTO else detalle
     sesion.flush()
+    if en_conflicto:
+        detalle = f"{MOTIVO_CONFLICTO_DEL_NODO}: la seña se devuelve entera, sin mirar la política. {detalle}"
     return Resultado(reserva, politica, pago, estado, detalle)
 
 

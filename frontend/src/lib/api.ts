@@ -5,6 +5,8 @@
  * y no toca la API.
  */
 
+import type { RespuestaEnCola } from 'libra-ui/cola-del-nodo'
+
 export class ErrorDeApi extends Error {
   // Campo declarado y asignado a mano, no una "parameter property"
   // (`constructor(readonly status: number)`): con `erasableSyntaxOnly` —que
@@ -37,7 +39,11 @@ async function pedir<T>(ruta: string, init?: RequestInit): Promise<T> {
       ? detalle.map((d: { msg?: string }) => d.msg ?? '').join('; ')
       : typeof detalle === 'string'
         ? detalle
-        : `Error ${respuesta.status}`
+        // Los 409 de un nodo sin conexión (`sin_conexion`, `solo_en_el_central`) vienen como
+        // `{ codigo, mensaje }`: el motor los contesta así en toda la familia (ADR-022).
+        : typeof detalle?.mensaje === 'string'
+          ? detalle.mensaje
+          : `Error ${respuesta.status}`
     throw new ErrorDeApi(respuesta.status, mensaje)
   }
   return cuerpo as T
@@ -307,6 +313,37 @@ export const agenda = {
     api.post(`/api/reservas/${id}/estado`, { estado, motivo }),
 }
 
+/** Una reserva que se dio en el club sin conexión y chocó con otra que llegó antes al central (ADR-022). */
+export interface ConflictoDeReserva {
+  reserva: Reserva & { conflicto_con_id: number | null; estado_previo: string | null }
+  cancha_nombre: string | null
+  cliente_nombre: string | null
+  /** La reserva que se quedó con la cancha. `null` si ya no se encuentra. */
+  ganadora: {
+    id: number
+    estado: string
+    origen: string
+    comienza_at: string
+    termina_at: string
+    cliente_nombre: string | null
+  } | null
+  /** `false` en el equipo del local: ahí el conflicto se ve pero se resuelve desde el central. */
+  se_puede_resolver: boolean
+}
+
+export const conflictos = {
+  listar: (sucursalId?: number) =>
+    api.get<ConflictoDeReserva[]>(
+      '/api/reservas-en-conflicto' + (sucursalId ? `?sucursal_id=${sucursalId}` : ''),
+    ),
+  /** `mover` lleva la reserva a otro horario o cancha libres (sin datos, intenta el original);
+   *  `cancelar` la cancela y devuelve siempre la seña entera. */
+  mover: (id: number, cuerpo: { comienza_at?: string; cancha_id?: number }) =>
+    api.post<Reserva>(`/api/reservas-en-conflicto/${id}/resolver`, { accion: 'mover', ...cuerpo }),
+  cancelar: (id: number, motivo?: string) =>
+    api.post<Reserva>(`/api/reservas-en-conflicto/${id}/resolver`, { accion: 'cancelar', motivo }),
+}
+
 /** El comprobante de una reserva. Los importes viajan como número porque los
  *  arma el motor de facturación, no este producto. */
 export interface Factura {
@@ -465,7 +502,11 @@ export const facturacion = {
   // 🔑 Emitir es de admin: el mostrador toma reservas y cobra, pero qué se le
   // factura a quién es del dueño. Si el rol no alcanza, el backend contesta 403
   // — la pantalla esconde el botón para no ofrecer lo que va a fallar.
-  emitir: (reservaId: number) => api.post<Factura>(`/api/reservas/${reservaId}/facturar`, {}),
+  //
+  // 🔴 En un nodo sin conexión contesta **202** con `{ en_cola: true, estado, pedido_id, mensaje }` y no la factura (libraclub ADR-023):
+  // quien llama pregunta `registrar(respuesta)` de `useAvisoDeEnCola` antes de tratarla como `Factura`.
+  emitir: (reservaId: number) =>
+    api.post<Factura | RespuestaEnCola>(`/api/reservas/${reservaId}/facturar`, {}),
   /** El PDF del comprobante. Es una URL y no un `fetch`: la abre un `<a
    *  target="_blank">`, y la cookie de sesión —`SameSite=Lax`— viaja en una
    *  navegación GET de nivel superior. Con `fetch` habría que armar un blob

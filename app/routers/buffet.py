@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app import offline
 from app.auth import require_admin, require_staff
 from app.config import es_produccion
 from app.db import obtener_sesion
@@ -101,7 +102,11 @@ def productos(sucursal_id: int, _: object = Depends(require_staff)):
             for f in servicio.stock_de(sucursal_id)]
 
 
-@router.post("/productos", response_model=ProductoSalida, status_code=201)
+@router.post(
+    "/productos", response_model=ProductoSalida, status_code=201,
+    # El catálogo lo manda el central (ADR-023): en un nodo se lee del espejo y no se escribe.
+    dependencies=[Depends(offline.solo_en_el_central)],
+)
 def crear_producto(
     datos: ProductoEntrada, sucursal_id: int, _: object = Depends(require_admin)
 ):
@@ -114,7 +119,7 @@ def crear_producto(
     return _fila(sucursal_id, item.id)
 
 
-@router.put("/productos/{item_id}", response_model=ProductoSalida)
+@router.put("/productos/{item_id}", response_model=ProductoSalida, dependencies=[Depends(offline.solo_en_el_central)])
 def editar_producto(
     item_id: int,
     datos: ProductoEntrada,
@@ -248,7 +253,11 @@ class VentaConQr(BaseModel):
     monto: float
 
 
-@router.post("/ventas/qr", response_model=VentaConQr, status_code=201)
+@router.post(
+    "/ventas/qr", response_model=VentaConQr, status_code=201,
+    # El cobro con QR es del central: el borrador no sube desde un nodo (ADR-021 y ADR-023).
+    dependencies=[Depends(offline.solo_en_el_central)],
+)
 def poner_venta_en_el_qr(
     datos: ConsumoEntrada,
     sucursal_id: int,
@@ -303,7 +312,7 @@ def poner_venta_en_el_qr(
     )
 
 
-@router.delete("/ventas/{venta_id}/mp-qr", status_code=204)
+@router.delete("/ventas/{venta_id}/mp-qr", status_code=204, dependencies=[Depends(offline.solo_en_el_central)])
 def bajar_venta_del_qr(
     venta_id: int,
     sesion: Session = Depends(obtener_sesion),
@@ -320,7 +329,10 @@ def bajar_venta_del_qr(
     sesion.commit()
 
 
-@router.get("/ventas/{venta_id}/mp-status", response_model=EstadoDelQr)
+@router.get(
+    "/ventas/{venta_id}/mp-status", response_model=EstadoDelQr,
+    dependencies=[Depends(offline.solo_en_el_central)],
+)
 def estado_del_qr_de_la_venta(
     venta_id: int,
     sesion: Session = Depends(obtener_sesion),

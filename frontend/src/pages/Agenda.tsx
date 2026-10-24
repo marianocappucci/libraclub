@@ -5,6 +5,7 @@ import { diaYMes, hora, lunesDeLaSemana, nombreDelDia, pesos } from '@/lib/fecha
 import { useSucursal } from '@/context/SucursalContext'
 import { DialogoDeReserva } from '@/components/DialogoDeReserva'
 import { DetalleDeReserva } from '@/components/DetalleDeReserva'
+import { AvisoDeConflictos } from '@/components/AvisoDeConflictos'
 import { buttonVariants } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { iconoDeDeporte } from '@/lib/deportes'
@@ -12,6 +13,8 @@ import { AvisoDeError } from '@/components/listado'
 import { sumarDiasISO } from 'libra-ui/fechas'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 import { ICONOS } from 'libra-ui/iconos-identidad'
+import { EtiquetasDeReservaDelNodo } from 'libra-ui/EtiquetasDeReserva'
+import { ETIQUETA_EN_CONFLICTO, ETIQUETA_SIN_SUBIR, esReservaProvisoria, estaEnConflicto } from 'libra-ui/reservas-del-nodo'
 
 /** Los colores por estado. Un solo lugar, para que la leyenda y la grilla no
  *  puedan decir cosas distintas.
@@ -203,6 +206,10 @@ export function Agenda() {
 
       <AvisoDeError mensaje={error} />
 
+      {/* Las reservas que se dieron en el club sin conexión y chocaron (ADR-022). No ocupan la cancha, así que la
+          grilla no las dibuja: sin este aviso quedarían invisibles. Sin conflictos no dibuja nada. */}
+      <AvisoDeConflictos sucursalId={actual} onResuelto={recargar} />
+
       {/*
         🔴 Se distingue "no hay canchas" de "no hay turnos". Una pantalla vacía
         sin explicación se lee como un error del sistema, y lo que falta es una
@@ -298,6 +305,9 @@ function Casillero({ turno, onElegir }: { turno: Turno; onElegir: () => void }) 
   const color = turno.cobrado
     ? COBRADO
     : COLOR[turno.estado ?? ''] ?? 'bg-muted border-border'
+  // Lo que dice el nodo de esta reserva (libra-ui ADR-094): dada en el club sin conexión y todavía sin subir (id negativo), o en conflicto.
+  const sinSubir = esReservaProvisoria(turno.reserva_id)
+  const enConflicto = estaEnConflicto(turno.estado)
   return (
     <button
       type="button"
@@ -305,11 +315,22 @@ function Casillero({ turno, onElegir }: { turno: Turno; onElegir: () => void }) 
       // 🔑 El estado va también en el nombre accesible. El color y el punto no
       // los lee un lector de pantalla, y el que opera con uno necesita saber
       // qué turno ya está cerrado tanto como el que mira la grilla.
-      aria-label={turno.cobrado ? `${etiqueta}, cobrado` : etiqueta}
+      aria-label={[
+        etiqueta,
+        turno.cobrado && 'cobrado',
+        sinSubir && ETIQUETA_SIN_SUBIR.toLowerCase(),
+        enConflicto && ETIQUETA_EN_CONFLICTO.toLowerCase(),
+      ].filter(Boolean).join(', ')}
       className={`w-full rounded-md border px-2 py-1 text-left text-xs hover:brightness-95 ${color}`}
     >
       <div className="font-medium">{hora(turno.comienza_at)}</div>
       <div className="truncate">{turno.cliente ?? turno.motivo ?? 'Ocupado'}</div>
+      {/* 🔴 «Sin subir al central» y NO «Provisoria»: `provisoria` es el turno retenido esperando el pago del portal. Sin nodo no dibuja nada. */}
+      <EtiquetasDeReservaDelNodo
+        id={turno.reserva_id}
+        estado={turno.estado}
+        className="mt-0.5 flex flex-wrap items-center gap-1"
+      />
       {/* 🔴 **El punto Y la palabra, las dos cosas.** Es la misma decisión que
           los movimientos anulados del 2026-08-28: sólo el color se pierde en
           una impresión en blanco y negro y no lo lee un lector de pantalla;

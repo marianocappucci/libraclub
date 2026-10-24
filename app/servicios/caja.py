@@ -18,6 +18,7 @@ fallar**. Es el mismo caso que VentaLibra, y por eso el motor tiene la variante
 
 from __future__ import annotations
 
+import re
 import secrets
 from collections.abc import Sequence
 from decimal import Decimal
@@ -30,6 +31,7 @@ from libracore.db import core as libracore_core
 from libracore.db import reportes as db_reportes
 from libracore.db import turnos as db_turnos
 
+from app import offline
 from app.tiempo import hoy
 
 #: Los medios que ofrece este producto. Es un **subconjunto deliberado** de los
@@ -148,7 +150,10 @@ def abrir_turno(usuario: dict, monto_inicial: Decimal, notas: str = "",
     if db_turnos.get_turno_activo(usuario_id) is not None:
         raise TurnoYaAbierto("Ya tenés una caja abierta.")
     try:
-        tid = db_turnos.create_turno(usuario_id, float(monto_inicial), notas, caja_id=caja_id)
+        # `ganchos`: en un nodo el turno que se abre sube al central; fuera de un nodo no hace nada (app/offline.py).
+        tid = db_turnos.create_turno(
+            usuario_id, float(monto_inicial), notas, caja_id=caja_id, ganchos=offline.GANCHOS_DE_CAJA,
+        )
     except db_cierre_diario.DiaCerradoError as e:
         raise DiaCerradoError(str(e)) from e
     return db_turnos.get_turno(tid)
@@ -189,6 +194,9 @@ def registrar_movimiento(usuario: dict, tipo: str, monto: Decimal, concepto: str
         referencia=referencia, factura_id=factura_id,
         usuario_id=int(usuario["id"]), medio_pago=medio_pago, turno_id=turno["id"],
         caja_id=turno.get("caja_id"), conn=conn,
+        # En un nodo cada cobro, egreso y devolución sube como `caja.movimiento` (el del buffet y el de una reserva
+        # también: ninguno viaja con la venta). Fuera de un nodo no hace nada.
+        ganchos=offline.GANCHOS_DE_CAJA,
     )
 
 
@@ -332,7 +340,7 @@ def anular_movimiento(usuario: dict, movimiento_id: int) -> dict:
             "Ese movimiento no es de tu turno abierto: sólo se puede anular lo "
             "que se cargó en la caja que está abierta ahora."
         )
-    db_caja.anular_caja_movimiento(movimiento_id)
+    db_caja.anular_caja_movimiento(movimiento_id, ganchos=offline.GANCHOS_DE_CAJA)
     return db_turnos.get_resumen_turno_caja(turno["id"])
 
 
@@ -392,7 +400,9 @@ def cerrar_turno(turno_id: int, monto_declarado: Decimal, notas: str = "") -> di
     dato —faltó plata, sobró, alguien no cargó un cobro— y ajustarlo al número
     esperado borraría justamente lo que hay que mirar.
     """
-    return db_turnos.cerrar_turno_caja(turno_id, float(monto_declarado), notas)
+    return db_turnos.cerrar_turno_caja(
+        turno_id, float(monto_declarado), notas, ganchos=offline.GANCHOS_DE_CAJA,
+    )
 
 
 def turno_por_id(turno_id: int) -> dict | None:
@@ -450,6 +460,39 @@ def referencia_de_cobro(reserva_id: int) -> str:
     return f"{PREFIJO_COBRO_DE_RESERVA}{reserva_id}-{secrets.token_hex(4)}"
 
 
+def _ids_equivalentes(reserva_ids: Sequence[int]) -> dict[int, list[int]]:
+    """Cada id de reserva con **todos los ids con los que se la nombró** en la referencia de sus cobros.
+
+    Fuera de un nodo es el id solo.
+
+    🔑 **En un nodo, una reserva que se dio sin conexión nace con un id provisorio negativo y el central le asigna
+    el definitivo** (ADR-022). Los cobros que se hicieron antes de que llegara el definitivo llevan en la `referencia`
+    el provisorio (`reserva--3-ab12`) y esa columna es un texto: LibraEdge reapunta las claves foráneas y las columnas
+    enteras, pero no puede reescribir un texto. Sin esto, la reserva figuraría impaga en el nodo en cuanto bajara su id
+    definitivo. El mapa `provisorio -> definitivo` está en `libraedge_mapeo` (baja del central con el espejo)."""
+    ids = [int(x) for x in reserva_ids]
+    equivalentes = {i: [i] for i in ids}
+    node_id = offline.nodo()
+    definitivos = [i for i in ids if i > 0]
+    if node_id is None or not definitivos:
+        return equivalentes
+    marcas = ",".join("?" * len(definitivos))
+    conexion = libracore_core.get_connection()
+    try:
+        filas = conexion.execute(
+            f"SELECT id_central, id_nodo FROM libraedge_mapeo WHERE node_id = ? AND tabla = 'reservas' "
+            f"AND id_central IN ({marcas})",
+            (node_id, *definitivos),
+        ).fetchall()
+    except Exception:  # noqa: BLE001 - un nodo sin la tabla del mapeo (todavía) no tiene provisorios que buscar
+        return equivalentes
+    finally:
+        conexion.close()
+    for definitivo, provisorio in filas:
+        equivalentes[int(definitivo)].append(int(provisorio))
+    return equivalentes
+
+
 def _patrones_de_reserva(reserva_id: int) -> tuple[str, str]:
     """Los dos `LIKE` que matchean la plata de esta reserva y de ninguna otra.
 
@@ -460,6 +503,11 @@ def _patrones_de_reserva(reserva_id: int) -> tuple[str, str]:
         f"{PREFIJO_COBRO_DE_RESERVA}{reserva_id}-%",
         f"{PREFIJO_COBRO_POR_QR}{reserva_id}-%",
     )
+
+
+def _patrones_de(ids: Sequence[int]) -> list[str]:
+    """Los `LIKE` de todos los ids con los que se nombró una reserva (ver `_ids_equivalentes`)."""
+    return [patron for i in ids for patron in _patrones_de_reserva(i)]
 
 
 def cobros_de_reserva(reserva_id: int) -> list[dict]:
@@ -475,15 +523,15 @@ def cobros_de_reserva(reserva_id: int) -> list[dict]:
     # `cobrado_de_reservas`—. Filtrar en una sola deja al detalle de la reserva
     # y al listado del mostrador diciendo números distintos sobre el mismo turno,
     # que es peor que no filtrar en ninguna: ahí al menos coinciden.
-    mostrador, qr = _patrones_de_reserva(reserva_id)
+    patrones = _patrones_de(_ids_equivalentes([reserva_id])[int(reserva_id)])
+    donde = " OR ".join("referencia LIKE ?" for _ in patrones)
     conexion = libracore_core.get_connection()
     try:
         filas = conexion.execute(
             "SELECT * FROM caja_movimientos"
-            " WHERE tipo='ingreso' AND anulado=0"
-            " AND (referencia LIKE ? OR referencia LIKE ?)"
+            f" WHERE tipo='ingreso' AND anulado=0 AND ({donde})"
             " ORDER BY id",
-            (mostrador, qr),
+            tuple(patrones),
         ).fetchall()
     finally:
         conexion.close()
@@ -509,42 +557,49 @@ def cobrado_de_reservas(reserva_ids: Sequence[int]) -> dict[int, Decimal]:
     peso es `_id_de_referencia`: con los patrones flojos entran filas de más y el
     parseo igual se las atribuye a su reserva. Si alguna vez hay que aflojar uno
     de los dos, que sea el `LIKE`.
+
+    En un nodo, el id que se parsea puede ser el provisorio de la reserva: se suma a la reserva
+    a la que `_ids_equivalentes` lo asigna.
     """
     ids = [int(x) for x in reserva_ids]
     if not ids:
         return {}
-    condiciones, parametros = [], []
-    for reserva_id in ids:
-        mostrador, qr = _patrones_de_reserva(reserva_id)
-        condiciones.append("referencia LIKE ? OR referencia LIKE ?")
-        parametros.extend([mostrador, qr])
-    donde = " OR ".join(f"({c})" for c in condiciones)
+    equivalentes = _ids_equivalentes(ids)
+    de_quien: dict[int, int] = {}
+    for reserva_id, nombres in equivalentes.items():
+        for nombre in nombres:
+            de_quien[nombre] = reserva_id
+    patrones = _patrones_de([nombre for nombres in equivalentes.values() for nombre in nombres])
+    donde = " OR ".join("referencia LIKE ?" for _ in patrones)
     conexion = libracore_core.get_connection()
     try:
         filas = conexion.execute(
             "SELECT referencia, monto FROM caja_movimientos"
             f" WHERE tipo='ingreso' AND anulado=0 AND ({donde})",
-            tuple(parametros),
+            tuple(patrones),
         ).fetchall()
     finally:
         conexion.close()
     totales: dict[int, Decimal] = {}
     for fila in filas:
-        reserva_id = _id_de_referencia(fila[0])
-        if reserva_id is None:
+        nombre = _id_de_referencia(fila[0])
+        if nombre is None or nombre not in de_quien:
             continue
+        reserva_id = de_quien[nombre]
         totales[reserva_id] = totales.get(reserva_id, Decimal("0")) + Decimal(str(fila[1]))
     return totales
 
 
 def _id_de_referencia(referencia: str | None) -> int | None:
-    """El id de reserva que hay adentro de `reserva-12-ab3f` o `lc-12-ab3f`."""
+    """El id de reserva que hay adentro de `reserva-12-ab3f` o `lc-12-ab3f`.
+
+    En un nodo puede ser el provisorio, negativo: `reserva--3-ab3f` es el id `-3`."""
     if not referencia:
         return None
     for prefijo in (PREFIJO_COBRO_DE_RESERVA, PREFIJO_COBRO_POR_QR):
         if referencia.startswith(prefijo):
-            resto = referencia[len(prefijo):].split("-", 1)[0]
-            return int(resto) if resto.isdigit() else None
+            m = re.match(r"-?\d+(?=-)", referencia[len(prefijo):])
+            return int(m.group()) if m else None
     return None
 
 
@@ -556,7 +611,7 @@ def total_cobrado(reserva_id: int) -> Decimal:
     )
 
 
-def vincular_cobros_a_factura(reserva_id: int, factura_id: int) -> int:
+def vincular_cobros_a_factura(reserva_id: int, factura_id: int, *, conn=None) -> int:
     """Ata a la factura los cobros de esa reserva que todavía no lo estén.
 
     🔑 **Existe porque en un mostrador se cobra antes de facturar tan seguido
@@ -571,29 +626,33 @@ def vincular_cobros_a_factura(reserva_id: int, factura_id: int) -> int:
     falla, el cobro por QR se registra igual **sin atar**, y hasta ahora quedaba
     así para siempre. Al emitir la factura en el reintento, este vínculo lo
     alcanza.
+
+    Con `conn` escribe en la transacción de quien llama, que confirma (el central lo usa al aplicar la factura que subió
+    un nodo, dentro de la transacción del receptor de LibraEdge).
     """
-    mostrador, qr = _patrones_de_reserva(reserva_id)
-    conexion = libracore_core.get_connection()
+    patrones = _patrones_de(_ids_equivalentes([reserva_id])[int(reserva_id)])
+    donde = " OR ".join("referencia LIKE ?" for _ in patrones)
+    conexion = conn or libracore_core.get_connection()
     try:
         ids = [f[0] for f in conexion.execute(
             "SELECT id FROM caja_movimientos"
-            " WHERE factura_id IS NULL AND tipo='ingreso'"
-            " AND (referencia LIKE ? OR referencia LIKE ?)",
-            (mostrador, qr),
+            f" WHERE factura_id IS NULL AND tipo='ingreso' AND ({donde})",
+            tuple(patrones),
         ).fetchall()]
         cursor = conexion.execute(
             "UPDATE caja_movimientos SET factura_id=?"
-            " WHERE factura_id IS NULL AND tipo='ingreso'"
-            " AND (referencia LIKE ? OR referencia LIKE ?)",
-            (factura_id, mostrador, qr),
+            f" WHERE factura_id IS NULL AND tipo='ingreso' AND ({donde})",
+            (factura_id, *patrones),
         )
         # Un cobro a cuenta corriente con factura es deuda: va al libro de clientes
         # del motor, en esta transacción (ADR-027 de LibraCore).
         db_caja.al_libro_de_clientes(conexion, ids)
-        conexion.commit()
+        if conn is None:
+            conexion.commit()
         return cursor.rowcount or 0
     finally:
-        conexion.close()
+        if conn is None:
+            conexion.close()
 
 
 # ── Las cajas, como mostradores de una sucursal ────────────────────────────

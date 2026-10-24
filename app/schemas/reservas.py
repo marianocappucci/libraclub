@@ -54,6 +54,9 @@ class ReservaSalida(BaseModel):
     vence_at: datetime | None
     motivo: str | None
     observaciones: str | None
+    #: Sólo en una reserva `en_conflicto` (ADR-022): contra cuál chocó y a qué estado vuelve al resolverse.
+    conflicto_con_id: int | None = None
+    estado_previo: EstadoReserva | None = None
 
 
 class SerieEntrada(BaseModel):

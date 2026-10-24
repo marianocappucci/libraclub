@@ -18,6 +18,7 @@ import { FacturaDetalle } from '@/pages/FacturaDetalle'
 import { FacturaNueva } from '@/pages/FacturaNueva'
 import { Facturas } from '@/pages/Facturas'
 import { Clientes } from '@/pages/Clientes'
+import { Cola } from '@/pages/Cola'
 import { Login } from '@/pages/Login'
 import { ForgotPassword, ResetPassword } from '@/pages/PasswordReset'
 import { Logs } from '@/pages/Logs'
@@ -132,6 +133,8 @@ function Backoffice() {
             element={<CuentaCorrienteDetalle />}
           />
           <Route path="/facturas" element={<Facturas />} />
+          {/* La cola de ARCA del nodo (libra-ui ADR-094). El menú la ofrece sólo en un nodo; fuera de uno la pantalla lo dice. */}
+          <Route path="/cola" element={<Cola />} />
           {/* Al lado del listado y no anidado, mismo criterio que el
               detalle de torneo y el de cuenta corriente: no comparten nada
               salvo el camino. */}

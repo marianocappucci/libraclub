@@ -28,6 +28,7 @@ import { useAuth } from '@/context/AuthContext'
 import { AvisoDeError } from '@/components/listado'
 import { Button } from '@/components/ui/button'
 import { fechaHora, pesos } from '@/lib/fechas'
+import { numeroDeReserva } from '@/lib/reservas'
 
 export function Devoluciones() {
   const { user } = useAuth()
@@ -72,7 +73,8 @@ export function Devoluciones() {
     {
       accessorKey: 'reserva_id',
       header: sortableHeader('Turno'),
-      cell: ({ row }) => `#${row.original.reserva_id}`,
+      // Una reserva dada en el nodo y todavía sin subir tiene id negativo: no se muestra como número (`numeroDeReserva`).
+      cell: ({ row }) => numeroDeReserva(row.original.reserva_id),
     },
     {
       accessorKey: 'monto',

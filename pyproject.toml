@@ -98,7 +98,9 @@ dependencies = [
     # v1.188.0 -> v1.189.0 (2026-10-21): altas de clientes en un nodo: id provisorio y gancho al crear (ADR-077). Sin migracion.
     # v1.189.0 -> v1.190.0 (2026-10-22): libracore-unir-bases para unir la base core dentro de la del dominio (ADR-078). Sin migracion.
     # v1.190.0 -> v1.190.1 (2026-10-22): LibraCargo y LibraClub en _UNA_SOLA_BASE (ADR-078). Sin migracion.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.190.1",
+    # v1.190.1 -> v1.191.0 (2026-10-23): cola de comprobantes del nodo offline (cola_arca, ADR-079). Migracion 0029 aditiva.
+    # v1.191.0 -> v1.192.0 (2026-10-24): costuras de caja: corregir, extra y gancho del central (ADR-080). Sin migracion.
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.192.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
@@ -119,7 +121,13 @@ dependencies = [
     # v0.71.0 -> v0.72.0 (2026-10-22): en un nodo de LibraEdge el deposito por defecto es el de su sucursal. Migracion 0009 aditiva (nodo_local); fuera de un nodo no cambia nada.
     # v0.72.0 -> v0.72.1 (2026-10-22): la carga inicial lleva a cero los depositos ajenos del nodo (PC que cambia de sucursal). Sin migracion.
     # 2026-10-22 (ADR-020): el deploy corre ahora `libracommerce-migrar upgrade --prefijo libraclub` (`scripts/panel_admin.py`), asi que la cadena de Alembic del motor corre ENTERA, la capa ERP incluida (0002 a 0009), que antes no corria: son tablas aditivas que este producto no usa. Sin cambio de pin.
-    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.72.1",
+    # v0.72.1 -> v0.73.0 (2026-10-23): el vinculo del producto viaja con la venta del nodo (ADR-072). Migracion 0010 aditiva (venta_origen_nodo).
+    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.73.0",
+    # libraedge v0.22.0 (2026-10-24, ADR-025 parte B): el nodo offline de LibraClub (ADR-023 de este producto). Dependencia NORMAL y
+    # no extra, como en VentaLibra y RestoLibra: el central monta `/sync/v1/*` (push, pull y el ticket de ARCA prestado) aunque
+    # no tenga nodos. El repo es publico: no hace falta deploy key ni en el CI ni en el build del VPS.
+    # 1d7ab0a -> v0.22.0 (2026-10-24): ticket de ARCA por servicio y LibraCargo/LibraClub en el instalador (ADR-025). Sin migracion.
+    "libraedge @ git+https://github.com/marianocappucci/libraedge.git@v0.22.0",
 ]
 
 [project.optional-dependencies]
