@@ -18,6 +18,10 @@ import { AvisoDeError } from '@/components/listado'
 import { SeccionDeCobroConQr } from '@/components/CobroConQr'
 import { buttonVariants } from '@/components/ui/button'
 import { DialogoDeConsumo } from '@/components/DialogoDeConsumo'
+import { AvisoEnCola } from 'libra-ui/AvisosDeLaCola'
+import { useAvisoDeEnCola } from 'libra-ui/cola-del-nodo'
+import { EtiquetasDeReservaDelNodo } from 'libra-ui/EtiquetasDeReserva'
+import { estaEnConflicto } from 'libra-ui/reservas-del-nodo'
 
 /**
  * Las transiciones que se ofrecen según el estado actual.
@@ -166,8 +170,13 @@ export function DetalleDeReserva({
               </span>
               <span className="text-muted-foreground">·</span>
               <span className="text-muted-foreground">
-                {turno.cliente ?? turno.motivo ?? '—'} · {NOMBRE[estado] ?? estado}
+                {turno.cliente ?? turno.motivo ?? '—'}
+                {/* «En conflicto» lo dice la etiqueta de abajo, con su explicación: repetirlo acá en texto sería leer lo mismo dos veces. */}
+                {!estaEnConflicto(estado) && <> · {NOMBRE[estado] ?? estado}</>}
               </span>
+              {/* Las del nodo (libra-ui ADR-094), al lado del estado: «Sin subir al central» (id negativo, dada en el club sin conexión)
+                  y «En conflicto». 🔴 **No es «Provisoria»**: `provisoria` es el turno retenido esperando el pago del portal. */}
+              <EtiquetasDeReservaDelNodo id={turno.reserva_id} estado={estado} />
             </div>
           </div>
 
@@ -439,10 +448,14 @@ function SeccionDeFactura(
   const [cargando, setCargando] = useState(false)
   const [emitiendo, setEmitiendo] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // El 202 `en_cola` de un nodo sin conexión (libraclub ADR-023, libra-ui ADR-094): la factura no existe todavía, queda en la cola y
+  // sale sola al volver la conexión. Se muestra como lo que es y no como una factura emitida.
+  const { aviso, registrar, cerrar } = useAvisoDeEnCola()
 
   useEffect(() => {
     if (!abierto || reservaId === null) return
     setError(null)
+    cerrar()
     setCargando(true)
     facturacion
       .ver(reservaId)
@@ -451,7 +464,7 @@ function SeccionDeFactura(
       // que mostrar: es que este complejo no factura, y la sección no aparece.
       .catch(() => setFactura(null))
       .finally(() => setCargando(false))
-  }, [abierto, reservaId])
+  }, [abierto, reservaId, cerrar])
 
   if (reservaId === null || cargando) return null
 
@@ -499,13 +512,20 @@ function SeccionDeFactura(
     setError(null)
     setEmitiendo(true)
     try {
-      setFactura(await facturacion.emitir(reservaId))
+      const respuesta = await facturacion.emitir(reservaId)
+      // 🔴 Antes que nada: un 202 `en_cola` NO es una factura (no trae `tipo`, `numero` ni `cae`), y dibujarlo como una saldría
+      // «Factura undefined 0000-NaN». Queda el aviso, que dice que se emite al volver la conexión.
+      if (registrar(respuesta)) return
+      setFactura(respuesta as Factura)
     } catch (e) {
       setError((e as Error).message)
     } finally {
       setEmitiendo(false)
     }
   }
+
+  // En cola, el aviso ocupa el lugar del botón: pedirla otra vez no apura nada y el pedido ya está guardado.
+  if (aviso) return <AvisoEnCola aviso={aviso} onCerrar={cerrar} />
 
   return (
     <div className="space-y-2">
