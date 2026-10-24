@@ -42,6 +42,26 @@ from app.models.enums import ESTADOS_QUE_OCUPAN, EstadoReserva, OrigenReserva
 _ESTADOS_SQL = ", ".join(f"'{estado.value}'" for estado in ESTADOS_QUE_OCUPAN)
 WHERE_OCUPA = f"estado IN ({_ESTADOS_SQL})"
 
+#: 🔑 **La exclusión está partida por el signo del id** (ADR-022).
+#:
+#: Una reserva que se da en un nodo de LibraEdge sin conexión nace con un **id provisorio
+#: negativo** (`libraedge.mapeo`, ADR-021 de libraedge) y el central le asigna el definitivo.
+#: Mientras tanto la base del nodo tiene las dos cosas: la reserva provisoria y lo que el
+#: espejo trae del central, que puede ocupar la misma cancha a la misma hora (la web la tomó
+#: mientras el club estaba sin internet). Con una sola exclusión, el espejo no podría
+#: insertar esa fila y trabaría todo el ciclo de sincronización. Partida:
+#:
+#: - **`id > 0`** (el central y todo lo que el nodo espeja): se excluyen entre sí como
+#:   siempre. Es la garantía de siempre y en el central no cambia nada: ahí no hay ids
+#:   negativos.
+#: - **`id < 0`** (lo que se dio en este nodo): se excluyen entre sí. El club no puede dar
+#:   dos veces la misma cancha estando sin conexión.
+#:
+#: Lo que cruza los dos lados (una provisoria contra el espejo) no lo mira la base: lo
+#: resuelve el central cuando recibe `reserva.creada` (`servicios/reservas_nodo.py`).
+WHERE_OCUPA_CENTRAL = f"{WHERE_OCUPA} AND id > 0"
+WHERE_OCUPA_NODO = f"{WHERE_OCUPA} AND id < 0"
+
 
 class Serie(Base, Auditable, Anotable):
     """Una reserva fija recurrente: "los martes a las 20:00, la cancha 3".
@@ -163,6 +183,23 @@ class Reserva(Base, Auditable, Anotable):
     #: cualquiera escriba.
     factura_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    #: Sólo en una reserva `en_conflicto`: la reserva que ganó la cancha y contra la que
+    #: chocó (ADR-022). Sin FK a propósito: es un dato para mostrar, y el espejo del nodo
+    #: no garantiza el orden en que llegan las filas (una FK trabaría la sincronización si
+    #: la ganadora bajara después).
+    conflicto_con_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: Sólo en una reserva `en_conflicto`: el estado que tenía al darse en el nodo
+    #: (`confirmada` o `pendiente_pago`), al que vuelve cuando se resuelve el conflicto.
+    estado_previo: Mapped[EstadoReserva | None] = mapped_column(
+        Enum(
+            EstadoReserva,
+            name="estado_reserva",
+            values_callable=lambda e: [m.value for m in e],
+            create_type=False,
+        ),
+        nullable=True,
+    )
+
     cancha = relationship("Cancha")
     cliente = relationship("Cliente")
 
@@ -222,12 +259,22 @@ class Reserva(Base, Auditable, Anotable):
         # un mensaje decente— sino que la respalda en el único caso que la
         # aplicación no puede cubrir: dos transacciones simultáneas que leen las
         # dos "está libre" y escriben las dos.
+        #
+        # Partida por el signo del id (ADR-022): ésta es la del central (`id > 0`), con el
+        # nombre de siempre; la de abajo es la de las reservas que se dan en un nodo.
         ExcludeConstraint(
             ("cancha_id", "="),
             ("periodo", "&&"),
             name="ex_reservas_sin_superposicion",
             using="gist",
-            where=text(WHERE_OCUPA),
+            where=text(WHERE_OCUPA_CENTRAL),
+        ),
+        ExcludeConstraint(
+            ("cancha_id", "="),
+            ("periodo", "&&"),
+            name="ex_reservas_del_nodo_sin_superposicion",
+            using="gist",
+            where=text(WHERE_OCUPA_NODO),
         ),
         Index("ix_reservas_cancha_comienza", "cancha_id", "comienza_at"),
         Index("ix_reservas_cliente", "cliente_id"),

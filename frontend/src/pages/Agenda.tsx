@@ -5,6 +5,7 @@ import { diaYMes, hora, lunesDeLaSemana, nombreDelDia, pesos } from '@/lib/fecha
 import { useSucursal } from '@/context/SucursalContext'
 import { DialogoDeReserva } from '@/components/DialogoDeReserva'
 import { DetalleDeReserva } from '@/components/DetalleDeReserva'
+import { AvisoDeConflictos } from '@/components/AvisoDeConflictos'
 import { buttonVariants } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { iconoDeDeporte } from '@/lib/deportes'
@@ -202,6 +203,10 @@ export function Agenda() {
       </div>
 
       <AvisoDeError mensaje={error} />
+
+      {/* Las reservas que se dieron en el club sin conexión y chocaron (ADR-022). No ocupan la cancha, así que la
+          grilla no las dibuja: sin este aviso quedarían invisibles. Sin conflictos no dibuja nada. */}
+      <AvisoDeConflictos sucursalId={actual} onResuelto={recargar} />
 
       {/*
         🔴 Se distingue "no hay canchas" de "no hay turnos". Una pantalla vacía

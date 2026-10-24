@@ -45,6 +45,17 @@ class EstadoReserva(enum.Enum):
     #: esta tabla —y no en una propia— para que el constraint de exclusión lo
     #: cubra; un bloqueo en otra tabla no puede impedir una reserva.
     BLOQUEO = "bloqueo"
+    #: Una reserva que se dio en el club **sin conexión** y que, al llegar al central,
+    #: chocó con otra que ya estaba (ADR-022). Gana la que llegó primero al central; ésta
+    #: se guarda igual, para no perder la plata ni el nombre de quien reservó, pero **no
+    #: ocupa la cancha**: no está en `ESTADOS_QUE_OCUPAN`, así que ni la grilla la pinta
+    #: ni el constraint de exclusión la mira. Sale de este estado resolviéndola
+    #: (`servicios/conflictos.py`): mover de horario o de cancha, o cancelar.
+    #:
+    #: ⚠️ **No tiene nada que ver con `PROVISORIA`**, que es el turno retenido mientras se
+    #: espera el pago del portal. Y tampoco es el «id provisorio» del nodo (un id
+    #: negativo): una reserva `en_conflicto` ya tiene su id definitivo.
+    EN_CONFLICTO = "en_conflicto"
 
 
 #: Los estados que **ocupan** la cancha. Es la fuente de la cláusula `WHERE` del

@@ -19,6 +19,11 @@ import { DialogoDePublicar } from '@/portal/DialogoDePublicar'
  */
 function comoSeCuenta(r: ReservaDelJugador): { texto: string; tono: string } {
   if (r.estado === 'cancelada') return { texto: 'Cancelada', tono: 'text-muted-foreground' }
+  // Se dio en el club sin conexión y chocó con otra que llegó antes (ADR-022): el complejo tiene que llamarlo. No es
+  // «falta pagar»: el jugador no tiene nada que hacer, y el estado crudo no le dice nada.
+  if (r.estado === 'en_conflicto') {
+    return { texto: 'En revisión: el complejo te va a contactar', tono: 'text-amber-700 dark:text-amber-500' }
+  }
   if (r.estado === 'confirmada' || r.estado === 'jugada') {
     return { texto: 'Confirmada', tono: 'text-exito' }
   }

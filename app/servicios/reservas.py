@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.models.enums import ESTADOS_QUE_OCUPAN, EstadoReserva, OrigenReserva
 from app.models.maestros import Cancha
 from app.models.reservas import Reserva, Serie
-from app.servicios import horarios, tarifario
+from app.servicios import horarios, reservas_nodo, tarifario
 from app.tiempo import TZ, a_local, ahora
 
 #: Cuánto vive una reserva provisoria sin confirmarse. Entra en juego de verdad
@@ -61,18 +61,23 @@ class TransicionInvalida(Exception):
     """Ese estado no se puede alcanzar desde donde está la reserva."""
 
 
-#: El nombre de la constraint, tal cual está en el modelo y en la migración.
-#: 🔴 Se compara contra esto y **no se hace `grep` sobre el texto del error**: el
+#: Los nombres de las constraints, tal cual están en el modelo y en la migración.
+#: 🔴 Se comparan contra esto y **no se hace `grep` sobre el texto del error**: el
 #: mensaje de PostgreSQL cambia entre versiones y se traduce con el locale del
 #: servidor. Un `if "overlap" in str(exc)` funciona en el runner en inglés y deja
 #: de funcionar en un servidor en español, devolviendo un 500 donde iba un 409.
+#:
+#: Son dos desde la `0013` (ADR-022): la exclusión está partida por el signo del
+#: id, la del central (`id > 0`) y la de lo que se da en un nodo (`id < 0`).
 CONSTRAINT_SUPERPOSICION = "ex_reservas_sin_superposicion"
+CONSTRAINT_SUPERPOSICION_DEL_NODO = "ex_reservas_del_nodo_sin_superposicion"
+_CONSTRAINTS_DE_SUPERPOSICION = (CONSTRAINT_SUPERPOSICION, CONSTRAINT_SUPERPOSICION_DEL_NODO)
 
 
 def _es_superposicion(exc: IntegrityError) -> bool:
     original = getattr(exc, "orig", None)
     diag = getattr(original, "diag", None)
-    return getattr(diag, "constraint_name", None) == CONSTRAINT_SUPERPOSICION
+    return getattr(diag, "constraint_name", None) in _CONSTRAINTS_DE_SUPERPOSICION
 
 
 #: SQLSTATE `deadlock_detected`. Por código y no por el texto del mensaje, por la
@@ -213,7 +218,16 @@ def crear(
     serie_id: int | None = None,
     observaciones: str | None = None,
 ) -> Reserva:
-    """Una reserva nueva. El precio se congela ahora, no se resuelve al leer."""
+    """Una reserva nueva. El precio se congela ahora, no se resuelve al leer.
+
+    🔑 **En un nodo de LibraEdge** (ADR-022) la reserva nace con un **id provisorio negativo** y la operación
+    `reserva.creada` se encola en la misma transacción; el central le asigna el definitivo y, si chocó con otra
+    que llegó antes, la deja `en_conflicto`. Fuera de un nodo no cambia nada."""
+    en_el_nodo = reservas_nodo.en_un_nodo()
+    if en_el_nodo and serie_id is not None:
+        reservas_nodo.exigir_central()
+    if en_el_nodo and estado not in reservas_nodo.ESTADOS_DEL_NODO:
+        raise ReservaInvalida("Sin conexión sólo se dan reservas confirmadas o pendientes de pago.")
     cancha = sesion.get(Cancha, cancha_id)
     if cancha is None:
         raise ReservaInvalida("No existe esa cancha.")
@@ -235,26 +249,31 @@ def crear(
         # eligió. Si hace falta seña sobre un precio manual, se pide explícita.
         sena = None
 
-    return _guardar(
-        sesion,
-        Reserva(
-            cancha_id=cancha_id,
-            cliente_id=cliente_id,
-            serie_id=serie_id,
-            estado=estado,
-            origen=origen,
-            comienza_at=comienza_at,
-            termina_at=termina_at,
-            precio=precio,
-            sena=sena,
-            vence_at=(
-                ahora() + VENCIMIENTO_PROVISORIA
-                if estado is EstadoReserva.PROVISORIA
-                else None
-            ),
-            observaciones=observaciones,
+    reserva = Reserva(
+        cancha_id=cancha_id,
+        cliente_id=cliente_id,
+        serie_id=serie_id,
+        estado=estado,
+        origen=origen,
+        comienza_at=comienza_at,
+        termina_at=termina_at,
+        precio=precio,
+        sena=sena,
+        vence_at=(
+            ahora() + VENCIMIENTO_PROVISORIA
+            if estado is EstadoReserva.PROVISORIA
+            else None
         ),
+        observaciones=observaciones,
     )
+    if not en_el_nodo:
+        return _guardar(sesion, reserva)
+
+    conn = reservas_nodo.conexion_de_la_sesion(sesion)
+    reserva.id = reservas_nodo.siguiente_id(conn)
+    _guardar(sesion, reserva)
+    reservas_nodo.avisar_creada(conn, reserva)
+    return reserva
 
 
 def crear_bloqueo(
@@ -271,6 +290,8 @@ def crear_bloqueo(
     cubra en las dos direcciones: un bloqueo no se puede poner encima de una
     reserva, y una reserva no se puede poner encima de un bloqueo.
     """
+    # En un nodo el id saldría de la secuencia local y chocaría con los del central (ADR-022).
+    reservas_nodo.exigir_central()
     if termina_at <= comienza_at:
         raise ReservaInvalida("El bloqueo tiene que terminar después de empezar.")
     if not motivo.strip():
@@ -307,6 +328,9 @@ TRANSICIONES: dict[EstadoReserva, frozenset[EstadoReserva]] = {
     EstadoReserva.CANCELADA: frozenset(),
     EstadoReserva.AUSENTE: frozenset(),
     EstadoReserva.BLOQUEO: frozenset({EstadoReserva.CANCELADA}),
+    # Desde un conflicto sólo se cancela por acá. Volver a confirmarla pide verificar que la cancha esté libre y es
+    # `servicios/conflictos.resolver`; a `en_conflicto` no llega nadie por acá (lo pone el aplicador del central).
+    EstadoReserva.EN_CONFLICTO: frozenset({EstadoReserva.CANCELADA}),
 }
 
 
@@ -316,6 +340,8 @@ def cambiar_estado(
     reserva = sesion.get(Reserva, reserva_id)
     if reserva is None:
         raise ReservaInvalida("No existe esa reserva.")
+    # Antes de todo, y antes de que cancelar toque la plata: en un nodo, lo que no se dio acá espera a la conexión.
+    reservas_nodo.exigir_reserva_modificable(reserva.id)
     if nuevo not in TRANSICIONES[reserva.estado]:
         raise TransicionInvalida(
             f"Una reserva {reserva.estado.value} no puede pasar a {nuevo.value}."
@@ -325,7 +351,14 @@ def cambiar_estado(
         reserva.motivo = motivo
     if nuevo is not EstadoReserva.PROVISORIA:
         reserva.vence_at = None
+    # Sale de un conflicto: ya no hay contra qué chocó ni a qué volver.
+    reserva.conflicto_con_id = None
+    reserva.estado_previo = None
     sesion.flush()
+    if reservas_nodo.en_un_nodo() and reservas_nodo.es_del_nodo(reserva.id):
+        reservas_nodo.avisar_estado(
+            reservas_nodo.conexion_de_la_sesion(sesion), reserva.id, nuevo, motivo
+        )
     return reserva
 
 
@@ -392,6 +425,8 @@ def materializar_serie(
     revisa el horario, y si fue por superposición le avisa al cliente. Sin el
     motivo tiene que ir a buscar cada fecha a la grilla.
     """
+    # Las ocurrencias de una serie saldrían con ids de la secuencia del nodo (ADR-022).
+    reservas_nodo.exigir_central()
     tope = hasta or (a_local(ahora()).date() + HORIZONTE_SERIE)
     if serie.hasta is not None:
         tope = min(tope, serie.hasta)

@@ -35,7 +35,7 @@ from app.schemas.reservas import (
 from app.servicios import buffet as servicio_buffet
 from app.servicios import caja as servicio_caja
 from app.servicios import cancelacion as servicio_cancelacion
-from app.servicios import cobro_qr, devoluciones, disponibilidad, tarifario
+from app.servicios import cobro_qr, devoluciones, disponibilidad, reservas_nodo, tarifario
 from app.servicios import facturacion as servicio_facturacion
 from app.servicios import pagos as servicio_pagos
 from app.servicios import reservas as servicio
@@ -589,7 +589,12 @@ def estado_del_qr(
     return QrEstado(**estado)
 
 
-@router.post("/series", response_model=SerieCreada, status_code=201)
+@router.post(
+    "/series",
+    response_model=SerieCreada,
+    status_code=201,
+    dependencies=[Depends(reservas_nodo.solo_en_el_central)],
+)
 def crear_serie(
     datos: SerieEntrada,
     hasta: date | None = Query(default=None),
@@ -664,7 +669,11 @@ def listar_series(
     return salida
 
 
-@router.post("/series/{serie_id}/extender", response_model=SerieCreada)
+@router.post(
+    "/series/{serie_id}/extender",
+    response_model=SerieCreada,
+    dependencies=[Depends(reservas_nodo.solo_en_el_central)],
+)
 def extender_serie(
     serie_id: int,
     hasta: date | None = Query(default=None),
@@ -705,7 +714,11 @@ class BajaDeSerie(BaseModel):
     motivo: str = Field(default="", max_length=200)
 
 
-@router.post("/series/{serie_id}/baja", response_model=dict)
+@router.post(
+    "/series/{serie_id}/baja",
+    response_model=dict,
+    dependencies=[Depends(reservas_nodo.solo_en_el_central)],
+)
 def dar_de_baja_serie(
     serie_id: int,
     datos: BajaDeSerie,

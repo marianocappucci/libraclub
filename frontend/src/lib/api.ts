@@ -37,7 +37,11 @@ async function pedir<T>(ruta: string, init?: RequestInit): Promise<T> {
       ? detalle.map((d: { msg?: string }) => d.msg ?? '').join('; ')
       : typeof detalle === 'string'
         ? detalle
-        : `Error ${respuesta.status}`
+        // Los 409 de un nodo sin conexión (`sin_conexion`, `solo_en_el_central`) vienen como
+        // `{ codigo, mensaje }`: el motor los contesta así en toda la familia (ADR-022).
+        : typeof detalle?.mensaje === 'string'
+          ? detalle.mensaje
+          : `Error ${respuesta.status}`
     throw new ErrorDeApi(respuesta.status, mensaje)
   }
   return cuerpo as T
@@ -305,6 +309,37 @@ export const agenda = {
   }) => api.post<Reserva>('/api/reservas', cuerpo),
   cambiarEstado: (id: number, estado: string, motivo?: string) =>
     api.post(`/api/reservas/${id}/estado`, { estado, motivo }),
+}
+
+/** Una reserva que se dio en el club sin conexión y chocó con otra que llegó antes al central (ADR-022). */
+export interface ConflictoDeReserva {
+  reserva: Reserva & { conflicto_con_id: number | null; estado_previo: string | null }
+  cancha_nombre: string | null
+  cliente_nombre: string | null
+  /** La reserva que se quedó con la cancha. `null` si ya no se encuentra. */
+  ganadora: {
+    id: number
+    estado: string
+    origen: string
+    comienza_at: string
+    termina_at: string
+    cliente_nombre: string | null
+  } | null
+  /** `false` en el equipo del local: ahí el conflicto se ve pero se resuelve desde el central. */
+  se_puede_resolver: boolean
+}
+
+export const conflictos = {
+  listar: (sucursalId?: number) =>
+    api.get<ConflictoDeReserva[]>(
+      '/api/reservas-en-conflicto' + (sucursalId ? `?sucursal_id=${sucursalId}` : ''),
+    ),
+  /** `mover` lleva la reserva a otro horario o cancha libres (sin datos, intenta el original);
+   *  `cancelar` la cancela con la política de cancelación de siempre. */
+  mover: (id: number, cuerpo: { comienza_at?: string; cancha_id?: number }) =>
+    api.post<Reserva>(`/api/reservas-en-conflicto/${id}/resolver`, { accion: 'mover', ...cuerpo }),
+  cancelar: (id: number, motivo?: string) =>
+    api.post<Reserva>(`/api/reservas-en-conflicto/${id}/resolver`, { accion: 'cancelar', motivo }),
 }
 
 /** El comprobante de una reserva. Los importes viajan como número porque los

@@ -221,6 +221,16 @@ describe('portal: mis reservas', () => {
     expect(screen.queryByText('provisoria')).not.toBeInTheDocument()
   })
 
+  it('una reserva en conflicto se cuenta como «en revisión», no como «falta pagar»', async () => {
+    // Se dio en el club sin conexión y chocó con otra (ADR-022): el jugador no tiene que pagar nada.
+    yo.mockResolvedValue({ id: 1, nombre: 'Juan', email: 'j@x.com' })
+    misReservas.mockResolvedValue([{ ...BASE, id: 1, estado: 'en_conflicto', pago: null }])
+    montar(<MisReservas />)
+    expect(await screen.findByText(/En revisión/)).toBeInTheDocument()
+    expect(screen.queryByText('Falta pagar')).not.toBeInTheDocument()
+    expect(screen.queryByText('en_conflicto')).not.toBeInTheDocument()
+  })
+
   it('no ofrece cancelar una reserva que ya pasó', async () => {
     yo.mockResolvedValue({ id: 1, nombre: 'Juan', email: 'j@x.com' })
     misReservas.mockResolvedValue([

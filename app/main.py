@@ -10,7 +10,8 @@ from __future__ import annotations
 import logging
 import os
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse
 from libraauth.auditoria import (
     AuditoriaBase,
     AuditoriaRepository,
@@ -45,6 +46,7 @@ from libracore.docs_api import cerrar_docs_de_la_api
 from libracore.errores import instalar_registro_de_errores
 from libracore.estado_del_sistema import build_estado_del_sistema_router
 from libracore.mp_config_router import build_mp_config_router
+from libracore.nodo_offline import SinConexion, SoloEnElCentral
 from libracore.resguardo_enlace import build_resguardo_enlace_router
 from libracore.respaldo import Instancia
 from libracore.security_headers import CSP_SPA, SecurityHeadersMiddleware
@@ -63,7 +65,7 @@ from app.auth import (
 )
 from app.config import Config, misma_base
 from app.models.maestros import Sucursal
-from app.routers import admin, disponibilidad, maestros, reservas, salud, torneos
+from app.routers import admin, conflictos, disponibilidad, maestros, reservas, salud, torneos
 from app.routers import ausentismo as ausentismo_router
 from app.routers import auth as auth_router
 from app.routers import buffet as buffet_router
@@ -189,6 +191,10 @@ def migrar_secretos() -> dict:
     return informe
 
 
+async def _contestar_409_de_nodo(request: Request, exc: SinConexion | SoloEnElCentral) -> JSONResponse:
+    return JSONResponse({"detail": exc.detalle()}, status_code=409)
+
+
 def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> FastAPI:
     # Se resuelve acá y no adentro de `db.inicializar` porque el router de backup
     # necesita la MISMA config: la URL para el dump y el directorio de datos para
@@ -292,6 +298,11 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
         version="0.1.0",
     )
     cerrar_docs_de_la_api(app)
+    # Lo que un nodo de LibraEdge contesta con un 409 y no con un 500 (ADR-022): una guarda de las reservas que
+    # levanta desde un servicio al que no llega ninguna traducción por ruta (torneos, series). El mismo cuerpo que
+    # los routers del motor: `{"detail": {"codigo", "mensaje"}}`.
+    for excepcion in (SinConexion, SoloEnElCentral):
+        app.add_exception_handler(excepcion, _contestar_409_de_nodo)
     # El router de `libraauth` los lee de acá por nombre: sin estos dos, el login
     # devuelve 500 al primer request y no al arrancar.
     app.state.users = usuarios
@@ -364,6 +375,9 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # segmentos, así que no depende de ir antes o después del ABM de clientes.
     app.include_router(ausentismo_router.router)
     app.include_router(reservas.router)
+    # Las reservas en conflicto (ADR-022). Prefijo propio y no `/api/reservas/conflictos`: `GET /api/reservas/{id}`
+    # lo leería como un id.
+    app.include_router(conflictos.router)
     # Los torneos. Sin `dependencies`: definir y sortear son de admin —cambian
     # lo que el complejo se comprometió a jugar— e inscribir, programar y cargar
     # resultados son de mostrador. Cada endpoint declara el suyo.
