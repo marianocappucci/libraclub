@@ -120,6 +120,19 @@ def _secreto_de_sesion(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _reservas_del_nodo_sin_configurar():
+    """`crear_app()` enchufa las reservas del nodo al outbox (`offline.configurar_reservas`), y esa configuración es
+    un global del proceso: la de la app de un test no puede quedar puesta para el siguiente. Cada test arranca sin ella
+    (los de `test_reservas_en_el_nodo.py` miden justamente el servicio sin configurar) y la arma él, o su
+    `crear_app()`."""
+    from app.servicios import reservas_nodo
+
+    reservas_nodo.configurar(None)
+    yield
+    reservas_nodo.configurar(None)
+
+
+@pytest.fixture(autouse=True)
 def _sin_almacen_de_secretos_colgado():
     """El almacen de secretos de `config_manager` no se filtra entre tests.
 

@@ -23,6 +23,7 @@ que la separación es al revés — pero la conclusión es la misma: dos bases.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
 from libracommerce.db.schema import init_schema as init_commerce_schema
@@ -35,6 +36,7 @@ from libracore.db import core as libracore_core
 from libracore.db import facturas as db_facturas
 from libracore.db.schema import init_core_schema
 
+from app import offline
 from app.config import misma_base
 from app.servicios import buffet, caja
 from app.tiempo import a_local, hoy
@@ -341,6 +343,53 @@ def punto_de_venta(de_la_sucursal: int | None, arca: dict | None) -> int:
     return arca["punto_venta"] if arca else 1
 
 
+@dataclass(frozen=True)
+class Comprobante:
+    """Lo que se va a emitir por una reserva, ya calculado: todo menos el número, la fecha y el CAE."""
+
+    tipo: int
+    lineas: list[dict]
+    neto: Decimal
+    iva: Decimal
+    total: Decimal
+    punto_venta: int
+
+
+def comprobante_de(
+    reserva, cliente, cancha_nombre: str, punto_venta_de_la_sucursal: int | None,
+) -> Comprobante:
+    """El comprobante de una reserva **con su consumo de buffet** adentro, sin numerar ni emitir.
+
+    Es lo que comparten las dos formas de emitirlo: `facturar_reserva` (en el central, numera con
+    `get_next_numero_with_arca`) y el emisor de la cola de ARCA del nodo (`servicios/factura_del_nodo.py`, que numera
+    con el ticket prestado y nunca local). Mismas validaciones, mismas líneas, mismo total: la factura es la misma sin
+    importar desde dónde se pida. Levanta `FacturacionNoConfigurada`, `SinPrecio` y `ReservaYaFacturada`.
+    """
+    if not hay_base():
+        raise FacturacionNoConfigurada(
+            "Falta LIBRACLUB_LIBRACORE_DATABASE_URL en esta instancia."
+        )
+    if reserva.precio is None or Decimal(str(reserva.precio)) <= 0:
+        raise SinPrecio("La reserva no tiene precio cargado.")
+    if reserva.factura_id is not None:
+        raise ReservaYaFacturada(f"La reserva {reserva.id} ya tiene comprobante.")
+
+    empresa = config_manager.load()
+    tipo = tipo_de_comprobante(empresa.get("empresa_iva_condition"))
+    lineas = lineas_de_la_reserva(reserva, cancha_nombre, tipo)
+    # 🔴 **El total se suma DESDE las líneas, no desde `reserva.precio`.** Es la
+    # diferencia entre un comprobante que cierra y uno que no: si el total
+    # saliera del precio de la cancha, el buffet aparecería detallado en el
+    # cuerpo y ausente del importe, y ARCA autorizaría un CAE por menos plata de
+    # la que se cobró.
+    total = Decimal(str(reserva.precio)) + buffet.total_consumido(reserva.id)
+    neto, iva = importes(total, tipo)
+
+    arca = obtener_config_arca()
+    punto_venta = punto_de_venta(punto_venta_de_la_sucursal, arca)
+    return Comprobante(tipo, lineas, neto, iva, total, punto_venta)
+
+
 async def facturar_reserva(
     reserva, cliente, cancha_nombre: str = "cancha", *,
     punto_venta_de_la_sucursal: int | None,
@@ -365,28 +414,8 @@ async def facturar_reserva(
     ⚠️ **No registra movimiento de caja.** El cobro se registra en la caja del
     turno, que es donde el arqueo lo va a contar — ver `servicios/caja.py`.
     """
-    if not hay_base():
-        raise FacturacionNoConfigurada(
-            "Falta LIBRACLUB_LIBRACORE_DATABASE_URL en esta instancia."
-        )
-    if reserva.precio is None or Decimal(str(reserva.precio)) <= 0:
-        raise SinPrecio("La reserva no tiene precio cargado.")
-    if reserva.factura_id is not None:
-        raise ReservaYaFacturada(f"La reserva {reserva.id} ya tiene comprobante.")
-
-    empresa = config_manager.load()
-    tipo = tipo_de_comprobante(empresa.get("empresa_iva_condition"))
-    lineas = lineas_de_la_reserva(reserva, cancha_nombre, tipo)
-    # 🔴 **El total se suma DESDE las líneas, no desde `reserva.precio`.** Es la
-    # diferencia entre un comprobante que cierra y uno que no: si el total
-    # saliera del precio de la cancha, el buffet aparecería detallado en el
-    # cuerpo y ausente del importe, y ARCA autorizaría un CAE por menos plata de
-    # la que se cobró.
-    total = Decimal(str(reserva.precio)) + buffet.total_consumido(reserva.id)
-    neto, iva = importes(total, tipo)
-
-    arca = obtener_config_arca()
-    punto_venta = punto_de_venta(punto_venta_de_la_sucursal, arca)
+    c = comprobante_de(reserva, cliente, cancha_nombre, punto_venta_de_la_sucursal)
+    tipo, lineas, neto, iva, total, punto_venta = c.tipo, c.lineas, c.neto, c.iva, c.total, c.punto_venta
 
     numero, ta, arca_usado = await arca_facturacion.get_next_numero_with_arca(
         punto_venta, tipo
@@ -433,8 +462,53 @@ async def facturar_reserva(
     return factura
 
 
+def observacion_de_reserva(reserva_id: int) -> str:
+    """La marca con la que el nodo deja dicho de qué reserva es una factura (`facturas.observaciones`).
+
+    🔑 **Es el vínculo del nodo, y no `reservas.factura_id`.** En un nodo `reservas` es una tabla que el central
+    manda (`AltaEnNodo`): la base del nodo rechaza escribirle a una fila que no se dio ahí, y el `factura_id` que baja
+    del central es **un id del central**, que en la base del nodo no es esa factura (cada base numera las suyas). Por
+    eso el nodo nunca escribe `reservas.factura_id` ni lo lee como un id suyo: busca su factura por esta marca. Es
+    también lo que hace idempotente al emisor de la cola (ADR-079): si el proceso murió entre «ARCA emitió» y «el nodo
+    anotó», la factura ya está creada y se la encuentra por acá en vez de emitir otra."""
+    return f"Reserva {int(reserva_id)}"
+
+
+def factura_del_nodo_de(reserva_id: int) -> dict | None:
+    """La factura que emitió **este nodo** por esa reserva (la primera, por la marca de `observacion_de_reserva`), o
+    `None`."""
+    if not hay_base():
+        return None
+    conexion = libracore_core.get_connection()
+    try:
+        fila = conexion.execute(
+            "SELECT id FROM facturas WHERE observaciones = ? ORDER BY id LIMIT 1",
+            (observacion_de_reserva(reserva_id),),
+        ).fetchone()
+    finally:
+        conexion.close()
+    return db_facturas.get_factura(fila[0]) if fila else None
+
+
+def factura_id_para_cobrar(reserva) -> int | None:
+    """El `factura_id` que lleva un cobro de esa reserva: el de la factura **de esta base**.
+
+    En el central y fuera de un nodo es `reserva.factura_id`, como siempre. En un nodo, el id de la factura que emitió
+    el nodo (o `None` si no hay): el `factura_id` de una reserva que bajó del central es de otra base y, como
+    `caja_movimientos.factura_id` es una clave foránea, un cobro con él fallaría con una violación de clave."""
+    if offline.nodo() is None:
+        return reserva.factura_id
+    factura = factura_del_nodo_de(reserva.id)
+    return factura["id"] if factura else None
+
+
 def factura_de_reserva(reserva) -> dict | None:
-    """El comprobante de una reserva, o `None` si todavía no se facturó."""
-    if not hay_base() or reserva.factura_id is None:
+    """El comprobante de una reserva, o `None` si todavía no se facturó (en un nodo: si todavía no la facturó ESTE
+    nodo)."""
+    if not hay_base():
+        return None
+    if offline.nodo() is not None:
+        return factura_del_nodo_de(reserva.id)
+    if reserva.factura_id is None:
         return None
     return db_facturas.get_factura(reserva.factura_id)
