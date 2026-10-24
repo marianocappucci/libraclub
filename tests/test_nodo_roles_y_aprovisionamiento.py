@@ -159,7 +159,6 @@ def test_las_de_salud_piden_el_token_de_monitoreo(clientes):
 
 @pytest.mark.parametrize(("metodo", "ruta", "cuerpo"), [
     ("POST", "/api/sucursales", {"nombre": "Otra"}),
-    ("POST", "/api/clientes", {"nombre": "Alguien"}),
     ("POST", "/api/buffet/productos?sucursal_id=1", {"nombre": "x", "precio": "1"}),
     ("POST", "/api/buffet/ventas/qr?sucursal_id=1", {"lineas": [{"item_id": 1, "cantidad": "1"}]}),
     ("POST", "/api/reservas/1/mp-qr", {}),
@@ -256,8 +255,16 @@ def test_el_aprovisionamiento_espeja_lo_que_el_nodo_necesita():
     assert necesarias <= offline.aprovisionamiento.nombres
 
 
+def test_las_reservas_y_los_clientes_se_dan_en_el_nodo():
+    """`clientes` (ADR-022, addendum) se da de alta en el nodo con id provisorio; sus referencias tienen FK y las lee
+    LibraEdge del catálogo, así que no declara ninguna."""
+    cliente, reserva = offline.aprovisionamiento.altas
+    assert cliente.tabla == "clientes" and cliente.referencias == ()
+    assert [reserva.tabla] == ["reservas"]
+
+
 def test_las_reservas_se_dan_en_el_nodo_y_se_reapunta_el_vinculo_del_buffet():
-    (alta,) = offline.aprovisionamiento.altas
+    _, alta = offline.aprovisionamiento.altas
     assert alta.tabla == "reservas"
     assert [(r.tabla, r.columna, r.donde) for r in alta.referencias] == [
         ("sales", "source_id", (("source_type", "reserva"),))]
@@ -265,9 +272,9 @@ def test_las_reservas_se_dan_en_el_nodo_y_se_reapunta_el_vinculo_del_buffet():
 
 def test_los_maestros_son_de_solo_lectura_en_el_nodo():
     solo_lectura = offline.aprovisionamiento.solo_lectura
-    assert {"sucursales", "canchas", "clientes", "tarifas", "catalog_items", "locations"} <= solo_lectura
-    # Lo que el nodo sí escribe: las reservas que da, y el espejo del usuario del cajero.
-    assert not ({"reservas", "usuarios", "cajas"} & solo_lectura)
+    assert {"sucursales", "canchas", "tarifas", "catalog_items", "locations"} <= solo_lectura
+    # Lo que el nodo sí escribe: las reservas y los clientes que da, y el espejo del usuario del cajero.
+    assert not ({"reservas", "clientes", "usuarios", "cajas"} & solo_lectura)
 
 
 def test_toda_tabla_de_referencia_existe_y_se_puede_publicar(engine, base_de_libracore):
@@ -286,6 +293,7 @@ def test_se_puede_registrar_un_nodo_de_una_sucursal(engine, base_de_libracore, s
         alta = registrar(conn, offline.aprovisionamiento, NODO, str(sucursal.id), salida=lambda *_: None)
     assert alta.sucursal.nombre == "Complejo Centro"
     assert "reservas" in alta.espejo and "libraedge_mapeo" in alta.espejo
+    assert "clientes" in alta.espejo and "clientes" not in alta.solo_lectura
     assert set(alta.solo_lectura) >= {"sucursales", "canchas"}
 
 

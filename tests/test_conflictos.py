@@ -186,7 +186,8 @@ def test_cancelar_resuelve_el_conflicto(api_staff, sesion, conflicto):
     )
     assert respuesta.status_code == 200, respuesta.text
     assert respuesta.json()["estado"] == "cancelada"
-    assert respuesta.json()["motivo"] == "El cliente prefiere otro día"
+    # Lo que escribió quien cancela se conserva, con el prefijo que audita por qué la seña vuelve entera.
+    assert respuesta.json()["motivo"] == "Conflicto de reserva del nodo: El cliente prefiere otro día"
     assert respuesta.json()["conflicto_con_id"] is None
     assert api_staff.get(URL).json() == []
     assert sesion.get(Reserva, ganadora.id).estado is EstadoReserva.CONFIRMADA, "la ganadora no se toca"

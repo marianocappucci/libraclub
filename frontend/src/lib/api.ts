@@ -335,7 +335,7 @@ export const conflictos = {
       '/api/reservas-en-conflicto' + (sucursalId ? `?sucursal_id=${sucursalId}` : ''),
     ),
   /** `mover` lleva la reserva a otro horario o cancha libres (sin datos, intenta el original);
-   *  `cancelar` la cancela con la política de cancelación de siempre. */
+   *  `cancelar` la cancela y devuelve siempre la seña entera. */
   mover: (id: number, cuerpo: { comienza_at?: string; cancha_id?: number }) =>
     api.post<Reserva>(`/api/reservas-en-conflicto/${id}/resolver`, { accion: 'mover', ...cuerpo }),
   cancelar: (id: number, motivo?: string) =>

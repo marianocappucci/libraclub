@@ -11,8 +11,10 @@ pasa a `cancelada` sin que una persona lo decida.
 - **mover**: la pasa a otro horario y/o otra cancha libres (`comienza_at`, `cancha_id`; la duración se conserva) y
   vuelve al estado que tenía (`estado_previo`: `confirmada` o `pendiente_pago`). Sin ningún dato lo intenta en el
   horario original: sirve cuando la que ganó se canceló y la cancha se liberó.
-- **cancelar**: la cancela por la política de cancelación de siempre (`servicios/cancelacion.py`): la seña se
-  devuelve o no según la ventana de la sucursal.
+- **cancelar**: la cancela por `servicios/cancelacion.py`, que **devuelve siempre la seña entera** sin mirar la
+  política de la sucursal (decisión del humano, 2026-10-24: el conflicto no es culpa del jugador). Sale por donde
+  entró: MercadoPago si la seña se pagó por ahí, la caja si fue en efectivo. Queda auditado en el motivo de la
+  reserva (`Conflicto de reserva del nodo: ...`) y en el concepto del egreso de caja.
 
 Ninguna se hace en un nodo (409 `solo_en_el_central`): el nodo ve el conflicto, que le llega por el espejo, pero
 sus filas del central son de sólo lectura y no tiene cómo subir el cambio.
@@ -121,13 +123,14 @@ def cancelar(
     pasarela: devoluciones.Pasarela,
     usuario: dict | None = None,
 ) -> cancelacion.Resultado:
-    """Resuelve el conflicto cancelando la reserva, con la política de cancelación de siempre. No commitea."""
+    """Resuelve el conflicto cancelando la reserva y devolviendo la seña entera, sea cual sea la política de la
+    sucursal (`cancelacion.cancelar` lo decide por el estado `en_conflicto`). No commitea."""
     reservas_nodo.exigir_central(reservas_nodo.MENSAJE_CONFLICTO_SOLO_EN_EL_CENTRAL)
     _en_conflicto(sesion, reserva_id)
     return cancelacion.cancelar(
         sesion,
         reserva_id,
-        motivo=motivo or "Cancelada al resolver un conflicto de reservas",
+        motivo=motivo or "Cancelada al resolver el conflicto",
         pasarela=pasarela,
         usuario=usuario,
     )

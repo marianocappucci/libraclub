@@ -29,7 +29,7 @@ from app.models.enums import EstadoReserva, OrigenReserva
 from app.models.maestros import Cancha, Cliente, CuentaDeJugador
 from app.models.reservas import EstadoPago, PagoDeReserva, Reserva
 from app.servicios import cancelacion as servicio_cancelacion
-from app.servicios import devoluciones, tarifario
+from app.servicios import clientes_nodo, devoluciones, tarifario
 from app.servicios import reservas as servicio_reservas
 from app.tiempo import ahora
 
@@ -70,7 +70,12 @@ def registrar(
     mail ya está registrado" convertiría el formulario en un verificador de
     quién es cliente del complejo, que es información de sus clientes y no de
     quien pregunta.
+
+    En un nodo de LibraEdge no se registra nadie (409 `solo_en_el_central`): el
+    `Cliente` saldría con un id de la secuencia local, que chocaría con el del
+    central (ADR-022).
     """
+    clientes_nodo.exigir_central_para_el_portal()
     email = _normalizar(email)
     if len(password) < 8:
         raise RegistroInvalido("La contraseña tiene que tener al menos 8 caracteres.")

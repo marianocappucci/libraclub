@@ -20,8 +20,8 @@ VentaLibra.
 El central es la autoridad de los **maestros** (sucursales, canchas, tarifas, feriados, horarios, clientes, usuarios,
 el catálogo del buffet, `arca_config`): bajan al nodo por el espejo y el nodo no los escribe. El **nodo** es la
 autoridad de lo que genera sin red: ventas del buffet, stock de su sucursal, caja, facturas y la cola de ARCA
-(`cola_arca`): suben como operaciones y no se espejan. Las **reservas** son de los dos (`AltaEnNodo`): bajan, y el
-nodo da las suyas con un id provisorio negativo (PR 12, ADR-022).
+(`cola_arca`): suben como operaciones y no se espejan. Las **reservas** y los **clientes** son de los dos
+(`AltaEnNodo`): bajan, y el nodo da los suyos con un id provisorio negativo (PR 12, ADR-022 y su addendum).
 
 ## Identidad: `LIBRAEDGE_NODE_ID` (y `LIBRACLUB_EDGE_NODE_ID`, por la regla del motor)
 
@@ -60,6 +60,8 @@ from libracore.nodo_offline import (
 from libraedge.altas import AltaEnNodo, Referencia
 from libraedge.identidad import nodo_actual, prefijo_actual
 
+from app.servicios import clientes_nodo
+
 #: El prefijo de las variables del producto (`LIBRACLUB_DATABASE_URL`, `LIBRACLUB_EDGE_NODE_ID`).
 PREFIJO = "LIBRACLUB"
 
@@ -93,10 +95,10 @@ TABLAS_DE_REFERENCIA = frozenset({
 
 #: Los maestros que el nodo **no escribe**: LibraEdge les instala una guarda en la base del nodo y un intento de
 #: escribirlos da un error claro en vez de pisarse con el espejo en el próximo ciclo. No están `usuarios`
-#: (`espejar_usuario` hace un upsert idempotente), `cajas` (el arranque asegura una por sucursal) ni `reservas` (se
-#: dan en el nodo).
+#: (`espejar_usuario` hace un upsert idempotente), `cajas` (el arranque asegura una por sucursal), `reservas` ni
+#: `clientes` (se dan de alta en el nodo, con id provisorio: ADR-022 y su addendum).
 TABLAS_SOLO_LECTURA = frozenset({
-    "sucursales", "canchas", "clientes", "tarifas", "feriados", "franjas_de_atencion", "series",
+    "sucursales", "canchas", "tarifas", "feriados", "franjas_de_atencion", "series",
     "branches", "locations", "units", "categories", "catalog_items", "item_variants", "item_codes", "price_lists",
     "item_prices", "commerce_settings", "arca_config", "modulos",
 })
@@ -106,7 +108,13 @@ TABLAS_SOLO_LECTURA = frozenset({
 #: (`sales.source_id` cuando `source_type='reserva'`). Las claves foráneas (`avisos`, `pagos_de_reserva`) se
 #: encuentran solas en el catálogo de la base. La referencia de los cobros de caja es un texto
 #: (`reserva-<id>-<azar>`): no se puede reapuntar, y `servicios/caja.py` la lee con las dos formas del id.
+#:
+#: Los **clientes** del club (`clientes`, no los `clients` de LibraCore) también se dan de alta en el nodo: quien llama
+#: por primera vez se anota ahí para tomarle el turno. No declara referencias: `reservas.cliente_id`,
+#: `series.cliente_id` y `cuentas_de_jugador.cliente_id` tienen clave foránea y `libraedge` las lee del catálogo
+#: (`tests/test_clientes_en_el_nodo.py` ata que no haya otra columna de cliente sin FK).
 ALTAS_EN_EL_NODO = (
+    *clientes_nodo.altas_en_nodo(),
     AltaEnNodo("reservas", referencias=(Referencia("sales", "source_id", (("source_type", "reserva"),)),)),
 )
 
@@ -193,6 +201,14 @@ def configurar_reservas() -> None:
     from app.servicios import reservas_nodo
 
     reservas_nodo.configurar(reservas_nodo.desde_el_outbox(OUTBOX))
+
+
+def configurar_clientes() -> None:
+    """Enchufa el alta de clientes en el nodo (ADR-022, addendum) al `OUTBOX`: igual que `configurar_reservas`, en el
+    nodo y en el central, una vez al armar la app, y sin efecto fuera de un nodo. El registro de `cliente_club.alta` en
+    el despachador del central es `app/routers/sincronizacion_offline.registrar_clientes`; su `AltaEnNodo`,
+    `ALTAS_EN_EL_NODO`."""
+    clientes_nodo.configurar(clientes_nodo.desde_el_outbox(OUTBOX))
 
 
 # ── Encolar una operación propia ────────────────────────────────────────────────────────────────────────────────────
