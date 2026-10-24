@@ -5,6 +5,8 @@
  * y no toca la API.
  */
 
+import type { RespuestaEnCola } from 'libra-ui/cola-del-nodo'
+
 export class ErrorDeApi extends Error {
   // Campo declarado y asignado a mano, no una "parameter property"
   // (`constructor(readonly status: number)`): con `erasableSyntaxOnly` —que
@@ -500,7 +502,11 @@ export const facturacion = {
   // 🔑 Emitir es de admin: el mostrador toma reservas y cobra, pero qué se le
   // factura a quién es del dueño. Si el rol no alcanza, el backend contesta 403
   // — la pantalla esconde el botón para no ofrecer lo que va a fallar.
-  emitir: (reservaId: number) => api.post<Factura>(`/api/reservas/${reservaId}/facturar`, {}),
+  //
+  // 🔴 En un nodo sin conexión contesta **202** con `{ en_cola: true, estado, pedido_id, mensaje }` y no la factura (libraclub ADR-023):
+  // quien llama pregunta `registrar(respuesta)` de `useAvisoDeEnCola` antes de tratarla como `Factura`.
+  emitir: (reservaId: number) =>
+    api.post<Factura | RespuestaEnCola>(`/api/reservas/${reservaId}/facturar`, {}),
   /** El PDF del comprobante. Es una URL y no un `fetch`: la abre un `<a
    *  target="_blank">`, y la cookie de sesión —`SameSite=Lax`— viaja en una
    *  navegación GET de nivel superior. Con `fetch` habría que armar un blob

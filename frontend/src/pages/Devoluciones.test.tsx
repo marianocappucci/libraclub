@@ -59,6 +59,15 @@ describe('devoluciones pendientes', () => {
     expect(screen.getByText(/no tiene MercadoPago configurado/i)).toBeInTheDocument()
   })
 
+  it('🔴 una reserva dada en el nodo y todavía sin subir no se muestra con su id negativo', async () => {
+    // El id negativo es del nodo (`libraedge.mapeo`): no es un número que el jugador ni el mostrador hayan oído nunca.
+    pendientes = [{ ...PENDIENTE, reserva_id: -48213 }]
+    abrir()
+
+    expect(await screen.findByText('sin número todavía')).toBeInTheDocument()
+    expect(document.body.textContent).not.toMatch(/-48213/)
+  })
+
   it('reintentar muestra el resultado y saca la fila de la lista', async () => {
     abrir()
     await screen.findByText(/#42/)

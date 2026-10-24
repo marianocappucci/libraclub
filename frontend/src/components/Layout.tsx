@@ -13,6 +13,8 @@
 import { Outlet } from 'react-router-dom'
 import { createLayout } from 'libra-ui/Layout'
 import { ICONOS } from 'libra-ui/iconos-identidad'
+import { RUTA_COLA_DEL_NODO, TITULO_COLA } from 'libra-ui/cola-del-nodo'
+import { TEXTO_CARTEL_SIN_CONEXION_CON_COLA, useConexionDelNodo } from 'libra-ui/nodo-offline'
 import { CalendarClock, CupSoda, LayoutGrid, Repeat, Trophy, Undo2 } from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
@@ -20,7 +22,7 @@ import { useSucursal } from '@/context/SucursalContext'
 import { SelectorDeSucursal } from '@/components/SelectorDeSucursal'
 import { WORDMARK } from '@/branding'
 
-type Usuario = { role?: string; name?: string; username?: string; sucursal?: string }
+type Usuario = { role?: string; name?: string; username?: string; sucursal?: string; esNodo?: boolean }
 
 /** La sesión, más el nombre de la sucursal activa.
  *
@@ -38,10 +40,14 @@ function useAuthConSucursal() {
     logout: () => Promise<void>
   }
   const { sucursales, actual } = useSucursal()
+  // Si esta instalación es el nodo del club (LibraEdge). Lo sabe el cartel de `conexionDelNodo`, que consulta; acá sólo se lee.
+  // Es lo que deja que el menú muestre «Cola de comprobantes» únicamente en un nodo (`hideFor` más abajo): `navSections` es un array
+  // de módulo y no puede preguntar por hooks, pero `useAuth` sí corre dentro del sidebar.
+  const { esNodo } = useConexionDelNodo()
   const elegida = sucursales.find((s) => s.id === actual)
   return {
     ...sesion,
-    user: sesion.user ? { ...sesion.user, sucursal: elegida?.nombre } : null,
+    user: sesion.user ? { ...sesion.user, sucursal: elegida?.nombre, esNodo } : null,
   }
 }
 
@@ -154,6 +160,11 @@ const Cascaron = createLayout<Usuario>({
         // puede usar es peor que no ofrecerlo. La factura de SU turno la
         // sigue viendo desde la Agenda, que es de mostrador.
         { to: '/facturas', label: 'Comprobantes', icon: ICONOS.comprobantes, adminOnly: true },
+        // La cola de ARCA del nodo (libra-ui ADR-094, libraclub ADR-023): las facturas pedidas sin conexión que salen solas al volver.
+        // **Sólo se ve en un nodo** (`hideFor`): en el central y en una instancia común no hay cola y el menú queda como siempre.
+        // Sin `adminOnly`: el mostrador la mira (`GET /api/nodo/cola` es de staff); reintentar, descartar y marcar emitido son de admin
+        // y la pantalla los esconde por su cuenta (`puedeResolver`).
+        { to: '/cola', label: TITULO_COLA, icon: ICONOS.comprobantesAFacturar, hideFor: (u) => !u.esNodo },
         // Debajo de Comprobantes y no al lado de Caja: la bandeja es plata
         // que YA entró a la cuenta de MercadoPago y que hay que conciliar y
         // facturar — el mismo trabajo mensual que el registro fiscal, no el
@@ -190,6 +201,12 @@ const Cascaron = createLayout<Usuario>({
   // La barra de estado del pie (libra-ui ADR-083, libracore ADR-075): usuario y sucursal, ARCA, respaldo y versión, de
   // `GET /api/estado-del-sistema` al cargar y cada pocos minutos. La sucursal es la del selector (vive en el navegador).
   barraDeEstado: { useSucursal: useSucursalActiva },
+  // El cartel «Sin conexión» arriba del contenido, sólo en un nodo y sólo sin conexión (libra-ui ADR-077/ADR-094). Con la frase de los
+  // productos que encolan en vez de vender: las facturas quedan en cola y salen solas al volver.
+  // 🔑 `ruta` es la de la cola y no la `/api/nodo/conexion` de siempre: LibraClub no monta esa (es del punto de venta de ContaLibra y
+  // RestoLibra), y la cola contesta lo mismo que el cartel lee (`es_nodo`, `en_linea`, `node_id`). `limite=1` porque acá sólo importa
+  // la cabecera. Fuera de un nodo contesta `es_nodo: false`, el cartel deja de consultar y no se dibuja nada.
+  conexionDelNodo: { ruta: `${RUTA_COLA_DEL_NODO}?limite=1`, texto: TEXTO_CARTEL_SIN_CONEXION_CON_COLA },
   useAuth: useAuthConSucursal,
 })
 
