@@ -29,6 +29,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from libracommerce.db.schema import init_schema as init_commerce_schema
 from libracommerce.erp.schema import crear_venta_links
 from libracore import arca_facturacion, config_manager
+from libracore.candados import una_vez_al_arrancar
 from libracore.db import arca_config as db_arca_config
 from libracore.db import caja as db_caja
 from libracore.db import cierre_diario as db_cierre_diario
@@ -142,6 +143,30 @@ def configurar(database_url: str | None, *, url_del_dominio: str | None = None) 
     if url_del_dominio is None or not misma_base(url_del_dominio, database_url):
         _crear_base_si_falta(database_url)
     libracore_core.configure(database_url)
+    # 🔴 **De a un arranque por vez, y las dos transacciones del esquema adentro** (medido en la demo el 2026-10-24, con
+    # `WEB_CONCURRENCY=2`: un worker murió con `TimeoutError: 'libracommerce.esquema' ... 120 s`). Los candados por
+    # transacción del motor (`init_core_schema`, `init_commerce_schema`) no alcanzan: esto son **dos** transacciones —la
+    # 1ª toma el candado del core y después el de LibraCommerce y los suelta al commitear; la 2ª (`crear_venta_links` y
+    # `crear_tablas` del cierre diario) toma sólo el de LibraCommerce— y la 2ª pide, con el `CREATE TABLE ... REFERENCES
+    # turnos_caja`, una tabla del core que la 1ª del otro worker tiene tomada. Cada uno espera lo del otro, y como el
+    # candado se reintenta con `pg_try_advisory_xact_lock` PostgreSQL no ve el ciclo: dura hasta que el que espera el
+    # candado se rinde a los 120 s y su worker muere. Sólo pasa en el primer arranque tras un release que suma una
+    # tabla con FK al core (la ventana es de milisegundos), y por eso en dev, con un solo worker, no se ve.
+    # `una_vez_al_arrancar` (conexión propia, candado de sesión) hace que el segundo worker espere a que el primero
+    # termine **todo** y corra después sobre lo que dejó: cada paso sigue siendo idempotente y pregunta adentro.
+    # Es lo que hacen VentaLibra (`ventalibra-esquema-core`) y Contalibra (`contalibra-arranque`). Cubre también la
+    # caja por defecto del final, que es otro «si no existe, crear».
+    with una_vez_al_arrancar("libraclub-esquema-core", destino=database_url):
+        _armar_el_esquema()
+    _hay_base = True
+    return True
+
+
+def _armar_el_esquema() -> None:
+    """El esquema de LibraCore y del buffet, las tablas propias que cuelgan de los dos y la caja por defecto.
+
+    Sólo la llama `configurar()`, adentro de `una_vez_al_arrancar`: dos procesos no la corren a la vez.
+    """
     conexion = libracore_core.get_connection()
     try:
         init_core_schema(conexion)
@@ -181,8 +206,6 @@ def configurar(database_url: str | None, *, url_del_dominio: str | None = None) 
             "Caja del complejo", "", list(db_caja.MEDIOS_PAGO_LABELS),
         )
         db_caja.set_default_caja(caja_id)
-    _hay_base = True
-    return True
 
 
 #: Si esta instancia tiene base de LibraCore. Lo fija `configurar()` al arrancar.
