@@ -31,24 +31,25 @@ def test_constraint_coincide_con_el_enum(engine):
     ata las dos: alguien que agregue un estado que ocupa la cancha y se olvide de
     la migración lo ve acá, y no el día que una cancha se reserva dos veces.
     """
-    with engine.connect() as conexion:
-        definicion = conexion.execute(
-            text(
-                "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
-                "WHERE conname = 'ex_reservas_sin_superposicion'"
-            )
-        ).scalar_one()
+    # Son dos desde la `0013` (ADR-022): la exclusión está partida por el signo del id, y las dos
+    # tienen que cubrir exactamente los mismos estados.
+    for nombre in ("ex_reservas_sin_superposicion", "ex_reservas_del_nodo_sin_superposicion"):
+        with engine.connect() as conexion:
+            definicion = conexion.execute(
+                text("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = :n"),
+                {"n": nombre},
+            ).scalar_one()
 
-    # Los valores que PostgreSQL imprime en el WHERE, con o sin el cast
-    # `::estado_reserva` que agrega al normalizar la expresión.
-    en_la_base = set(re.findall(r"'([a-z_]+)'::estado_reserva|'([a-z_]+)'", definicion))
-    encontrados = {a or b for a, b in en_la_base}
-    esperados = {estado.value for estado in ESTADOS_QUE_OCUPAN}
+        # Los valores que PostgreSQL imprime en el WHERE, con o sin el cast
+        # `::estado_reserva` que agrega al normalizar la expresión.
+        en_la_base = set(re.findall(r"'([a-z_]+)'::estado_reserva|'([a-z_]+)'", definicion))
+        encontrados = {a or b for a, b in en_la_base}
+        esperados = {estado.value for estado in ESTADOS_QUE_OCUPAN}
 
-    assert encontrados == esperados, (
-        f"el constraint cubre {sorted(encontrados)} y el enum dice "
-        f"{sorted(esperados)}: uno de los dos quedó atrás"
-    )
+        assert encontrados == esperados, (
+            f"{nombre} cubre {sorted(encontrados)} y el enum dice "
+            f"{sorted(esperados)}: uno de los dos quedó atrás"
+        )
 
 
 def test_todos_los_estados_estan_clasificados():
@@ -59,7 +60,8 @@ def test_todos_los_estados_estan_clasificados():
     la cancha, y la cancha se reserva dos veces.
     """
     ocupan = set(ESTADOS_QUE_OCUPAN)
-    liberan = {EstadoReserva.CANCELADA, EstadoReserva.AUSENTE}
+    # `en_conflicto` (ADR-022) no ocupa la cancha: se guardó justamente porque otra la tenía.
+    liberan = {EstadoReserva.CANCELADA, EstadoReserva.AUSENTE, EstadoReserva.EN_CONFLICTO}
     assert ocupan | liberan == set(EstadoReserva), (
         "hay estados sin clasificar: "
         f"{sorted(e.value for e in set(EstadoReserva) - ocupan - liberan)}"

@@ -42,6 +42,8 @@ const ACCIONES: Record<string, { estado: string; texto: string; peligro?: boolea
     { estado: 'cancelada', texto: 'Cancelar', peligro: true },
   ],
   bloqueo: [{ estado: 'cancelada', texto: 'Quitar bloqueo', peligro: true }],
+  // Desde un conflicto sólo se cancela por acá; moverla de horario es de `AvisoDeConflictos` (ADR-022).
+  en_conflicto: [{ estado: 'cancelada', texto: 'Cancelar', peligro: true }],
   jugada: [],
   cancelada: [],
   ausente: [],
@@ -55,6 +57,7 @@ const NOMBRE: Record<string, string> = {
   cancelada: 'Cancelada',
   ausente: 'No vino',
   bloqueo: 'Bloqueo',
+  en_conflicto: 'En conflicto',
 }
 
 export function DetalleDeReserva({
