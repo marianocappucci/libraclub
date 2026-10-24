@@ -126,9 +126,8 @@ dependencies = [
     # libraedge v0.22.0 (2026-10-24, ADR-025 parte B): el nodo offline de LibraClub (ADR-023 de este producto). Dependencia NORMAL y
     # no extra, como en VentaLibra y RestoLibra: el central monta `/sync/v1/*` (push, pull y el ticket de ARCA prestado) aunque
     # no tenga nodos. El repo es publico: no hace falta deploy key ni en el CI ni en el build del VPS.
-    # TEMPORAL: v0.22.0 todavia no tiene tag, asi que se pinea al commit de `origin/develop` de libraedge (merge de #164).
-    # Antes del merge de este PR se cambia por `@v0.22.0`.
-    "libraedge @ git+https://github.com/marianocappucci/libraedge.git@1d7ab0aff1b14c6217ffedb98f90818d6b6d3d35",
+    # 1d7ab0a -> v0.22.0 (2026-10-24): ticket de ARCA por servicio y LibraCargo/LibraClub en el instalador (ADR-025). Sin migracion.
+    "libraedge @ git+https://github.com/marianocappucci/libraedge.git@v0.22.0",
 ]
 
 [project.optional-dependencies]
