@@ -16,7 +16,7 @@ import {
 const SRC = join(process.cwd(), 'src')
 
 /** Las pantallas con KPI o reportes cuyo nombre no lo dice. */
-const PANTALLAS_DE_INDICADORES = ['pages/CajaPorMedio.tsx']
+const PANTALLAS_DE_INDICADORES = ['pages/CajaPorMedio.tsx', 'pages/PanelDelDueno.tsx']
 
 describe('los reportes y tableros usan el catálogo de íconos', () => {
   const r = auditarIndicadores(SRC, {

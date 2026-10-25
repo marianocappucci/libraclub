@@ -1565,3 +1565,66 @@ export const devoluciones = {
       `/api/devoluciones/${pagoId}/reintentar`, {},
     ),
 }
+
+// ── Panel del dueño (F5, ADR-027) ─────────────────────────────────────────
+
+/** Una celda del mapa de calor: el día de la semana (0 = lunes … 6 = domingo), la hora local de inicio y el porcentaje de
+ *  las horas abiertas que estuvieron reservadas. Las celdas cerradas **no vienen**: no hay nada que ocupar. */
+export interface FranjaDeOcupacion {
+  dia: number
+  hora: number
+  ocupacion_pct: number | null
+}
+
+/** Lo cobrado y vendido de una sucursal en el período (ver `servicios/panel_del_dueno.py`). */
+export interface IngresosDelPanel {
+  /** Cobrado de los turnos que ya se jugaron. */
+  reservas: number
+  /** Cobrado de los turnos que todavía no se jugaron, y lo retenido de los cancelados (neto de devoluciones). */
+  senas: number
+  /** Vendido (confirmado) en el buffet. */
+  buffet: number
+  total: number
+  /** El total del período de igual largo inmediatamente anterior. */
+  total_periodo_anterior: number
+}
+
+export interface SucursalDelPanel {
+  sucursal_id: number
+  sucursal: string
+  ocupacion_pct: number | null
+  franjas: FranjaDeOcupacion[]
+  horas_abiertas: number
+  horas_reservadas: number
+  /** `null` si la instancia no puede medir la plata (sin la base de LibraCore): no es lo mismo que cero. */
+  ingresos: IngresosDelPanel | null
+  canceladas: number
+  ausentes: number
+  reservas: number
+  /** Una clave por cada valor del enum de origen (`mostrador`, `telefono`, `whatsapp`, `portal`, `serie`). */
+  origen: Record<string, number>
+}
+
+export interface PanelDelDueno {
+  desde: string
+  hasta: string
+  por_sucursal: SucursalDelPanel[]
+  top_ausentes: { cliente_id: number; nombre: string; ausentes: number }[]
+  /** Todas las sucursales de la respuesta juntas, ponderadas por sus horas. */
+  total: { ocupacion_pct: number | null; franjas: FranjaDeOcupacion[] }
+}
+
+export const panelDelDueno = {
+  /** De admin. `canchaId` acota sólo la ocupación; el resto es de la sucursal entera. */
+  obtener: ({ desde, hasta, sucursalId, canchaId }: {
+    desde: string
+    hasta: string
+    sucursalId?: number
+    canchaId?: number
+  }) => {
+    const consulta = new URLSearchParams({ desde, hasta })
+    if (sucursalId) consulta.set('sucursal_id', String(sucursalId))
+    if (canchaId) consulta.set('cancha_id', String(canchaId))
+    return api.get<PanelDelDueno>(`/api/admin/panel-del-dueno?${consulta}`)
+  },
+}

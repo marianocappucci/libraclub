@@ -26,6 +26,7 @@ import { ForgotPassword, ResetPassword } from '@/pages/PasswordReset'
 import { Logs } from '@/pages/Logs'
 import { Devoluciones } from '@/pages/Devoluciones'
 import { MpBandeja } from '@/pages/MpBandeja'
+import { PanelDelDueno } from '@/pages/PanelDelDueno'
 import { Sucursales } from '@/pages/Sucursales'
 import { Tarifas } from '@/pages/Tarifas'
 import { Evento } from '@/pages/Evento'
@@ -163,6 +164,8 @@ function Backoffice() {
               porque son la misma clase de trabajo: plata de MercadoPago que
               hay que terminar de resolver, no el arqueo del mostrador. */}
           <Route path="/devoluciones" element={<Devoluciones />} />
+          {/* El panel del dueño (F5, ADR-027): ocupación, ingresos, cancelaciones y origen, abiertos por sucursal. */}
+          <Route path="/panel-del-dueno" element={<PanelDelDueno />} />
           <Route path="/configuracion" element={<Configuracion />} />
           <Route path="/logs" element={<Logs />} />
           {/* Las rutas no llevan guarda de rol: el permiso lo decide el

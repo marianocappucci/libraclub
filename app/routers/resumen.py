@@ -14,6 +14,9 @@ Ver `wiki/analyses/panel-del-dueno-multisucursal.md`.
 
 from __future__ import annotations
 
+from datetime import date
+
+from fastapi import HTTPException
 from libraauth.session_auth import json_api_require_panel_o_admin
 from libracommerce.db.repository import SqliteCommerceRepository
 from libracore import config_manager
@@ -23,7 +26,7 @@ from sqlalchemy import select
 
 from app import db
 from app.models.maestros import Sucursal
-from app.servicios import facturacion
+from app.servicios import facturacion, panel_del_dueno
 from app.servicios.resumen_agenda import resumen_agenda
 
 
@@ -70,6 +73,23 @@ def _agenda(desde: str, hasta: str) -> dict:
         return resumen_agenda(sesion, desde, hasta)
 
 
+def _club(desde: str, hasta: str) -> dict:
+    """El panel del dueño abierto por sucursal. Ver `servicios/panel_del_dueno.py`.
+
+    🔑 Es la clave `club` que lee `libra-panel` para armar «cinco filas, no dos»
+    (F5): cada instancia contesta con **todas** sus sucursales y el panel las
+    junta. El período es el que el panel pidió (`?desde=&hasta=`); la factory del
+    motor lo completa con el mes en curso si no vino.
+    """
+    try:
+        with db.fabrica_de_sesiones()() as sesion:
+            return panel_del_dueno.calcular(
+                sesion, date.fromisoformat(desde), date.fromisoformat(hasta)
+            )
+    except panel_del_dueno.PeriodoInvalido as e:
+        raise HTTPException(422, str(e)) from e
+
+
 def construir_router():
     """El router, armado en el arranque. `None` si esta instancia no puede
     contestarle al panel.
@@ -104,5 +124,7 @@ def construir_router():
         # 🔑 LibraClub es el primero que manda los TRES: núcleo, comercio y
         # agenda. `comercio` lo puede contestar porque el buffet vive en la
         # misma base de LibraCore que se acaba de verificar.
-        bloques={"comercio": _comercio, "agenda": _agenda},
+        # `club` (F5, ADR-027) es la apertura por sucursal de todo lo anterior:
+        # ocupación por franja, ingresos, cancelaciones y origen.
+        bloques={"comercio": _comercio, "agenda": _agenda, "club": _club},
     )

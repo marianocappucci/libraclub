@@ -540,6 +540,35 @@ def consumido_de_reservas(reserva_ids: Sequence[int]) -> dict[int, Decimal]:
     return {int(f[0]): Decimal(str(f[1] or 0)) for f in filas}
 
 
+def vendido_por_sucursal(desde: str, hasta: str) -> dict[int, Decimal]:
+    """Lo vendido en el buffet de cada sucursal entre dos días (ISO, inclusivos).
+
+    Es el buffet del panel del dueño (`servicios/panel_del_dueno.py`): las ventas
+    **confirmadas** —un borrador que espera el QR todavía no es plata— por la
+    fecha de negocio de la venta (`occurred_on`), abiertas por la sucursal del
+    depósito de donde salió (`branch_id`). Cuenta lo que se cargó a un turno y lo
+    que se vendió suelto en el mostrador: las dos son buffet.
+
+    🔑 **Es lo vendido y no lo cobrado**, y por eso `servicios/caja.py` no le
+    suma al buffet lo que un cliente pagó contra su turno: el consumo ya está
+    acá, y contarlo en los dos lugares lo duplicaría.
+
+    Una venta sin sucursal (`branch_id` nulo) no se atribuye a ninguna: no hay a
+    quién sumársela, y repartirla por las bajas sería inventar.
+    """
+    conexion = _conexion()
+    try:
+        filas = conexion.execute(
+            "SELECT branch_id, COALESCE(SUM(total), 0) FROM sales"
+            " WHERE status = ? AND branch_id IS NOT NULL AND occurred_on BETWEEN ? AND ?"
+            " GROUP BY branch_id",
+            (SaleStatus.CONFIRMED.value, desde, hasta),
+        ).fetchall()
+    finally:
+        conexion.close()
+    return {int(sucursal): Decimal(str(total or 0)) for sucursal, total in filas}
+
+
 def lineas_para_factura(reserva_id: int) -> list[SaleItem]:
     """Las líneas de buffet de una reserva, aplanadas para el comprobante."""
     return [linea for venta in consumos_de_reserva(reserva_id) for linea in venta.items]
