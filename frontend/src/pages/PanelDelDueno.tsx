@@ -270,8 +270,8 @@ export function PanelDelDueno() {
                     {filas.map((s) => (
                       <tr key={s.sucursal_id} className="border-b last:border-0">
                         <td className="py-2 pr-3">{s.sucursal}</td>
-                        <td className="py-2 pr-3 text-right tabular-nums">{s.horas_abiertas}</td>
-                        <td className="py-2 pr-3 text-right tabular-nums">{s.horas_reservadas}</td>
+                        <td className="py-2 pr-3 text-right tabular-nums">{s.horas_abiertas.toLocaleString('es-AR')}</td>
+                        <td className="py-2 pr-3 text-right tabular-nums">{s.horas_reservadas.toLocaleString('es-AR')}</td>
                         <td className="py-2 text-right font-medium tabular-nums">{porcentaje(s.ocupacion_pct)}</td>
                       </tr>
                     ))}
