@@ -1,7 +1,7 @@
 /** La grilla de doble entrada de una zona, como se hace en un americano de club.
  *
  * Las parejas de la zona van en las filas y en las columnas; la diagonal —una
- * pareja no juega contra sí misma— queda tachada en rojo; y cada casillero dice
+ * pareja no juega contra sí misma— queda rellena de rojo; y cada casillero dice
  * cómo le fue a **la pareja de la fila** contra la de la columna. Al costado
  * están las columnas de la tabla de posiciones, así que la hoja entera se puede
  * imprimir y pegar en la pared.
@@ -16,7 +16,7 @@ import { Printer, Trophy } from 'lucide-react'
 
 import type { PartidoDeTorneo, TablaDeZona, Torneo } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { comoSeJuega, tituloDelTorneo } from '@/components/torneo'
+import { comoSeJuega, sujetoDelDeporte, tituloDelTorneo } from '@/components/torneo'
 import { fecha, hora } from '@/lib/fechas'
 import { cn } from '@/lib/utils'
 
@@ -64,6 +64,7 @@ export function GrillaDeZona({
   terminaEnZonas,
   onAbrir,
   paraPapel = false,
+  deporte,
 }: {
   tabla: TablaDeZona
   /** Los partidos de grupos **de esta zona**. */
@@ -74,7 +75,10 @@ export function GrillaDeZona({
   onAbrir: (partido: PartidoDeTorneo) => void
   /** Sin botones, para la hoja que se imprime. */
   paraPapel?: boolean
+  /** Para nombrar a quienes juegan. Sin él, una tabla con sets son parejas. */
+  deporte?: string
 }) {
+  const sujeto = sujetoDelDeporte(deporte ?? (tabla.con_sets ? 'padel' : undefined))
   // Las parejas en el orden en que se inscribieron, y no por la tabla: si las
   // filas se reordenaran con cada resultado, la hoja pegada en la pared no
   // coincidiría con la de ayer.
@@ -90,8 +94,8 @@ export function GrillaDeZona({
       <div className={cn('rounded-lg border', !paraPapel && 'overflow-x-auto')}>
         <table className="grilla-de-zona w-full border-collapse text-sm">
           <caption className="sr-only">
-            {tabla.nombre ?? 'Todos contra todos'}: resultado de cada pareja de la fila
-            contra la de la columna
+            {tabla.nombre ?? 'Todos contra todos'}: resultado de cada {sujeto.nombre} de
+            la fila contra {sujeto.articulo} de la columna
           </caption>
           <thead className="bg-muted/50 text-xs">
             <tr>
@@ -107,8 +111,16 @@ export function GrillaDeZona({
                   {pareja.nombre}
                 </th>
               ))}
-              <th scope="col" className="border-l p-2 text-center font-medium" title="Partidos ganados">
-                PG
+              {/* 🔑 La tabla de fútbol se ordena por puntos (ganar 3, empatar 1),
+                  no por partidos ganados: con PG se vería un equipo de 0 PG
+                  arriba de uno con 1 PG. Misma regla que `TablaDePosiciones`:
+                  con sets, PG; sin sets, Pts. */}
+              <th
+                scope="col"
+                className="border-l p-2 text-center font-medium"
+                title={conSets ? 'Partidos ganados' : 'Puntos'}
+              >
+                {conSets ? 'PG' : 'Pts'}
               </th>
               {conSets && (
                 <th scope="col" className="p-2 text-center font-medium" title="Diferencia de sets">
@@ -164,7 +176,9 @@ export function GrillaDeZona({
                       </td>
                     )
                   })}
-                  <td className="border-l p-2 text-center">{conLugar ? fila.ganados : ''}</td>
+                  <td className="border-l p-2 text-center">
+                    {conLugar ? (conSets ? fila.ganados : fila.puntos) : ''}
+                  </td>
                   {conSets && (
                     <td className="p-2 text-center">{conLugar ? conSigno(fila.diferencia_sets) : ''}</td>
                   )}
@@ -274,6 +288,7 @@ export function GrillasDelTorneo({
   const claveDe = (t: TablaDeZona) => String(t.zona_id ?? 'unica')
   const deLaZona = (t: TablaDeZona) => grupos.filter((p) => p.zona_id === t.zona_id)
   const titulo = tituloDelTorneo(torneo)
+  const sujeto = sujetoDelDeporte(torneo.deporte)
   const elegidas = tablas.filter((t) => aImprimir === 'todas' || aImprimir === claveDe(t))
 
   return (
@@ -282,8 +297,8 @@ export function GrillasDelTorneo({
         <div>
           <h2 className="text-base font-semibold uppercase tracking-wide">{titulo}</h2>
           <p className="text-xs text-muted-foreground">
-            Cada casillero es el resultado de la pareja de la fila contra la de la
-            columna. Tocalo para cargarlo o corregirlo.
+            Cada casillero es el resultado {sujeto.de} de la fila contra{' '}
+            {sujeto.articulo} de la columna. Tocalo para cargarlo o corregirlo.
           </p>
         </div>
         {tablas.length > 0 && (
@@ -302,6 +317,7 @@ export function GrillasDelTorneo({
             clasifican={torneo.clasifican_por_zona}
             terminaEnZonas={torneo.termina_en_zonas}
             onAbrir={onAbrir}
+            deporte={torneo.deporte}
           />
           {tablas.length > 1 && (
             <Button
@@ -364,6 +380,7 @@ export function HojaDeGrillas({
             terminaEnZonas={torneo.termina_en_zonas}
             onAbrir={onAbrir}
             paraPapel
+            deporte={torneo.deporte}
           />
         </section>
       ))}
