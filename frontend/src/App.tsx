@@ -18,6 +18,8 @@ import { FacturaDetalle } from '@/pages/FacturaDetalle'
 import { FacturaNueva } from '@/pages/FacturaNueva'
 import { Facturas } from '@/pages/Facturas'
 import { Clientes } from '@/pages/Clientes'
+import { ClientesEnConflicto } from '@/pages/ClientesEnConflicto'
+import { ResolverConflictoDeCliente } from '@/pages/ResolverConflictoDeCliente'
 import { Cola } from '@/pages/Cola'
 import { Login } from '@/pages/Login'
 import { ForgotPassword, ResetPassword } from '@/pages/PasswordReset'
@@ -117,6 +119,9 @@ function Backoffice() {
           <Route path="/torneos/eventos/:id" element={<Evento />} />
           <Route path="/horarios" element={<Horarios />} />
           <Route path="/clientes" element={<Clientes />} />
+          {/* Los cambios de clientes cargados en la PC del club que chocan con la web (ADR-022, tercer addendum). */}
+          <Route path="/clientes/conflictos" element={<ClientesEnConflicto />} />
+          <Route path="/clientes/conflictos/:operacionId" element={<ResolverConflictoDeCliente />} />
           <Route path="/sucursales" element={<Sucursales />} />
           <Route path="/usuarios" element={<Usuarios />} />
           <Route path="/caja" element={<Caja />} />

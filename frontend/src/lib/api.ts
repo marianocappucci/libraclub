@@ -344,6 +344,46 @@ export const conflictos = {
     api.post<Reserva>(`/api/reservas-en-conflicto/${id}/resolver`, { accion: 'cancelar', motivo }),
 }
 
+/** Un dato de un cliente que se cargó en la PC del club mientras alguien lo cambiaba en la web (ADR-022, tercer addendum). */
+export interface CampoDeEdicionDeCliente {
+  campo: string
+  etiqueta: string
+  /** `conflicto`: hay que elegir. `se_aplica`: la web no cambió, se pone lo de la PC. `igual`: la web ya lo tiene. */
+  estado: 'conflicto' | 'se_aplica' | 'igual'
+  /** Lo que había cuando se corrigió en la PC. */
+  antes: string | boolean | null
+  /** Lo que hay hoy en la web. */
+  web: string | boolean | null
+  /** Lo que se cargó en la PC. */
+  pc: string | boolean | null
+}
+
+export interface EdicionDeClienteEnConflicto {
+  operacion_id: string
+  cliente_id: number
+  cliente_nombre: string
+  recibida_at: string | null
+  campos: CampoDeEdicionDeCliente[]
+  en_conflicto: number
+  se_puede_resolver: boolean
+}
+
+export const edicionesDeClientes = {
+  listar: () => api.get<EdicionDeClienteEnConflicto[]>('/api/clientes-en-conflicto'),
+  ver: (id: string) =>
+    api.get<EdicionDeClienteEnConflicto>(`/api/clientes-en-conflicto/${encodeURIComponent(id)}`),
+  /** `elecciones`: por cada campo en conflicto, `web` o `pc`. `vistos`: lo que la pantalla mostró de la web en cada campo
+   *  (si ya no es eso, el servidor contesta 409 y no pisa nada). */
+  resolver: (
+    id: string,
+    cuerpo: { elecciones: Record<string, 'web' | 'pc'>; vistos: Record<string, string | boolean | null> },
+  ) =>
+    api.post<{ aplicados: string[] }>(
+      `/api/clientes-en-conflicto/${encodeURIComponent(id)}/resolver`,
+      cuerpo,
+    ),
+}
+
 /** El comprobante de una reserva. Los importes viajan como número porque los
  *  arma el motor de facturación, no este producto. */
 export interface Factura {
