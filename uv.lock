@@ -650,7 +650,7 @@ requires-dist = [
     { name = "libraauth", extras = ["migrations"], git = "https://github.com/marianocappucci/libraauth.git?rev=v0.55.0" },
     { name = "libracommerce", git = "https://github.com/marianocappucci/libracommerce.git?rev=v0.73.1" },
     { name = "libracore", git = "https://github.com/marianocappucci/libracore.git?rev=v1.194.0" },
-    { name = "libraedge", git = "https://github.com/marianocappucci/libraedge.git?rev=v0.23.0" },
+    { name = "libraedge", git = "https://github.com/marianocappucci/libraedge.git?rev=v0.24.1" },
     { name = "libragenda", git = "https://github.com/marianocappucci/libragenda.git?rev=v0.11.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.9" },
@@ -690,8 +690,8 @@ dependencies = [
 
 [[package]]
 name = "libraedge"
-version = "0.23.0"
-source = { git = "https://github.com/marianocappucci/libraedge.git?rev=v0.23.0#a6e94771d73e792bab6c482746f67ab2ea79144f" }
+version = "0.24.1"
+source = { git = "https://github.com/marianocappucci/libraedge.git?rev=v0.24.1#6a3f7c01c8fe6a4c3e548adf99ab57663aedede8" }
 
 [[package]]
 name = "libragenda"
