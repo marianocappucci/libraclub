@@ -53,6 +53,31 @@ export const MODALIDADES_DE_PARTIDO = [
 /** Los deportes que se juegan por sets y games; en el resto, un parcial son goles o puntos. */
 export const DEPORTES_DE_SETS = ['padel', 'tenis']
 
+/** Cómo se llama lo que juega, para los textos que lo nombran.
+ *
+ * 🔑 Depende del deporte y no del formato: en pádel y tenis (dobles) juegan
+ * parejas; en fútbol, básquet, vóley y hockey, equipos. Ante la duda
+ * —«otro», o un deporte que todavía no conocemos— «competidor», que no se
+ * equivoca en ningún caso. El género importa porque los textos llevan
+ * artículo: «de la pareja … contra la de la columna», «del equipo … contra el
+ * de la columna». */
+export function sujetoDelDeporte(deporte: string | null | undefined): {
+  /** «pareja», «equipo», «competidor». */
+  nombre: string
+  /** «de la pareja», «del equipo», «del competidor». */
+  de: string
+  /** El artículo de «la de la columna» / «el de la columna». */
+  articulo: 'la' | 'el'
+} {
+  if (deporte && DEPORTES_DE_SETS.includes(deporte)) {
+    return { nombre: 'pareja', de: 'de la pareja', articulo: 'la' }
+  }
+  if (deporte && ['futbol', 'basquet', 'voley', 'hockey'].includes(deporte)) {
+    return { nombre: 'equipo', de: 'del equipo', articulo: 'el' }
+  }
+  return { nombre: 'competidor', de: 'del competidor', articulo: 'el' }
+}
+
 /** Cómo se juega cada partido, en una frase para la cabecera del torneo. */
 export function comoSeJuega(
   torneo: Pick<Torneo, 'sets_para_ganar' | 'games_por_set'>,

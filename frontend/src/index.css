@@ -505,22 +505,21 @@
 /* ── La grilla de una zona (americano) ──────────────────────────────────────
  *
  * 1. La diagonal. Una pareja no juega contra sí misma, y en la hoja de un
- *    americano ese casillero va tachado en rojo. Es un degradado con una línea
- *    de 2px de lado a lado —el 50% de un degradado «to top right» pasa por las
- *    otras dos esquinas, sea cual sea la forma del casillero— y no un SVG ni un
- *    borde torcido: se estira solo con la celda.
+ *    americano ese casillero va **relleno de rojo**, entero: cuadrados sólidos
+ *    sobre la diagonal. (Antes era una línea fina de esquina a esquina; al
+ *    humano «no le quedaba bien».) Es el color de fondo de la celda y nada más:
+ *    se estira solo con ella, no hay nada que alinear.
+ *
+ *    En oscuro el `--destructive` es un rojo claro pensado para texto, y de
+ *    relleno encandila: se mezcla con el fondo para que contraste sin brillar.
  */
 .grilla-diagonal {
   min-width: 3rem;
-  background-repeat: no-repeat;
-  background-size: 100% 100%;
-  background-image: linear-gradient(
-    to top right,
-    transparent calc(50% - 1px),
-    var(--destructive) calc(50% - 1px),
-    var(--destructive) calc(50% + 1px),
-    transparent calc(50% + 1px)
-  );
+  background-color: var(--destructive);
+}
+
+.dark .grilla-diagonal {
+  background-color: color-mix(in oklab, var(--destructive) 60%, var(--background));
 }
 
 .grilla-esquina {
@@ -576,16 +575,13 @@
     font-weight: 700;
   }
 
-  .hoja-grilla .grilla-diagonal {
-    background-repeat: no-repeat;
-    background-size: 100% 100%;
-    background-image: linear-gradient(
-      to top right,
-      transparent calc(50% - 0.3mm),
-      #c00000 calc(50% - 0.3mm),
-      #c00000 calc(50% + 0.3mm),
-      transparent calc(50% + 0.3mm)
-    );
+  /* Rojo sólido que sale impreso: sin `print-color-adjust: exact` el
+     navegador descarta los fondos para ahorrar tinta y la diagonal saldría en
+     blanco. Fijo (y no el token) porque la hoja es siempre sobre papel blanco,
+     también si la pantalla está en modo oscuro. */
+  .hoja-grilla .grilla-diagonal,
+  .dark .hoja-grilla .grilla-diagonal {
+    background-color: #c00000;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }

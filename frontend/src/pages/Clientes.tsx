@@ -15,6 +15,7 @@ import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 import { useReincidentes } from '@/lib/ausentismo'
 import { fecha } from '@/lib/fechas'
 import { ICONOS } from 'libra-ui/iconos-identidad'
+import { EtiquetaDePersonaDelNodo } from 'libra-ui/EtiquetaProvisorio'
 
 export function Clientes() {
   const { user } = useAuth()
@@ -69,6 +70,9 @@ export function Clientes() {
         cell: ({ row }) => (
           <span className="font-medium">
             {row.original.nombre}
+            {/* Un cliente dado de alta sin conexión (id negativo) todavía no tiene su número del central: se lo puede corregir y
+                la corrección sube junto con el alta. Ver ADR-022. */}
+            <EtiquetaDePersonaDelNodo id={row.original.id} persona="cliente" className="ml-2" />
             {!row.original.activo && (
               <span className="ml-2 text-xs text-muted-foreground">(de baja)</span>
             )}

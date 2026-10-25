@@ -46,6 +46,36 @@ function abrir(cliente: Cliente | null) {
   return onGuardado
 }
 
+describe('formulario de un cliente dado de alta sin conexión', () => {
+  const PROVISORIO: Cliente = { ...EXISTENTE, id: -3 }
+
+  it('se puede editar: lleva la etiqueta «Provisorio», dice que sube con el alta y manda el PUT al id provisorio', async () => {
+    const onGuardado = abrir(PROVISORIO)
+    expect(screen.getByText('Provisorio')).toBeInTheDocument()
+    expect(screen.getByText(/los cambios suben al central junto con el alta/i)).toBeInTheDocument()
+
+    await userEvent.clear(screen.getByRole('textbox', { name: /^teléfono$/i }))
+    await userEvent.type(screen.getByRole('textbox', { name: /^teléfono$/i }), '11-2222-3333')
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar' }))
+    await waitFor(() => expect(onGuardado).toHaveBeenCalled())
+
+    const envio = llamadas.find((l) => l.metodo === 'PUT')!
+    expect(envio.url).toBe('/api/clientes/-3')
+    expect(envio.cuerpo).toMatchObject({ telefono: '11-2222-3333' })
+  })
+
+  it('el control: uno del central no lleva la etiqueta ni el aviso', () => {
+    abrir(EXISTENTE)
+    expect(screen.queryByText('Provisorio')).not.toBeInTheDocument()
+    expect(screen.queryByText(/dio de alta sin conexión/i)).not.toBeInTheDocument()
+  })
+
+  it('un alta nueva tampoco lleva la etiqueta (todavía no tiene id)', () => {
+    abrir(null)
+    expect(screen.queryByText('Provisorio')).not.toBeInTheDocument()
+  })
+})
+
 describe('formulario de cliente', () => {
   it('los campos vacíos viajan como null, no como cadena vacía', async () => {
     const onGuardado = abrir(null)
