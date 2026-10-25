@@ -99,6 +99,11 @@ automático del cuadro. Límite conocido y explícito: 1 o 2 clasificados por zo
 (ADR-013), y **no hay eliminación doble** — el cuadro de perdedores es otro
 problema y no apareció el pedido.
 
+**Campeonatos americanos: hecho** (2026-10-25, ADR-024). Grilla de doble entrada
+por zona (con impresión), el partido a 6 o a 9 games o al mejor de 3 sets,
+desempate con cara a cara, zonas que terminan sin llaves, categorías y eventos
+con las mismas fechas y canchas.
+
 Gate: cada módulo justificado por uso medido, no por catálogo de features.
 
 ---

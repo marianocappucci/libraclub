@@ -501,3 +501,101 @@
     border-bottom-color: color-mix(in oklab, var(--marca) 30%, var(--border));
   }
 }
+
+/* ── La grilla de una zona (americano) ──────────────────────────────────────
+ *
+ * 1. La diagonal. Una pareja no juega contra sí misma, y en la hoja de un
+ *    americano ese casillero va tachado en rojo. Es un degradado con una línea
+ *    de 2px de lado a lado —el 50% de un degradado «to top right» pasa por las
+ *    otras dos esquinas, sea cual sea la forma del casillero— y no un SVG ni un
+ *    borde torcido: se estira solo con la celda.
+ */
+.grilla-diagonal {
+  min-width: 3rem;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  background-image: linear-gradient(
+    to top right,
+    transparent calc(50% - 1px),
+    var(--destructive) calc(50% - 1px),
+    var(--destructive) calc(50% + 1px),
+    transparent calc(50% + 1px)
+  );
+}
+
+.grilla-esquina {
+  min-width: 7rem;
+}
+
+/* 2. La hoja para pegar en la pared. Una zona por página, apaisada: con seis
+ *    parejas son once columnas y en vertical los nombres no entran. `page:` con
+ *    nombre es lo que permite que sólo estas páginas sean apaisadas y no el
+ *    resto de lo que imprime el producto. */
+@media print {
+  .hoja-grilla .grilla-pagina {
+    page: grilla;
+    page-break-after: always;
+  }
+
+  .hoja-grilla .grilla-pagina:last-child {
+    page-break-after: auto;
+  }
+
+  .hoja-grilla h1 {
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.5mm;
+    font-size: 18pt;
+  }
+
+  .hoja-grilla header p {
+    text-align: center;
+    font-size: 10pt;
+  }
+
+  .hoja-grilla table {
+    table-layout: auto;
+    font-size: 11pt;
+  }
+
+  .hoja-grilla th,
+  .hoja-grilla td {
+    border: 0.3mm solid #000;
+    padding: 2mm;
+    text-align: center;
+    height: 14mm;
+    vertical-align: middle;
+  }
+
+  .hoja-grilla th[scope='row'] {
+    text-align: left;
+  }
+
+  .hoja-grilla .grilla-esquina {
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+
+  .hoja-grilla .grilla-diagonal {
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+    background-image: linear-gradient(
+      to top right,
+      transparent calc(50% - 0.3mm),
+      #c00000 calc(50% - 0.3mm),
+      #c00000 calc(50% + 0.3mm),
+      transparent calc(50% + 0.3mm)
+    );
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .hoja-grilla .grilla-casillero {
+    padding: 0;
+  }
+
+  @page grilla {
+    size: A4 landscape;
+    margin: 12mm 10mm;
+  }
+}

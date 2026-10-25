@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import type { ColumnDef } from 'libra-ui/data-table'
 import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 import { Plus, Trophy } from 'lucide-react'
 
-import { NOMBRE_DE_DEPORTE, torneos as api } from '@/lib/api'
-import type { TorneoEnLista } from '@/lib/api'
+import { canchas as apiCanchas, eventos as apiEventos, NOMBRE_DE_DEPORTE, torneos as api } from '@/lib/api'
+import type { Cancha, EventoEnLista, TorneoEnLista } from '@/lib/api'
 import { useSucursal } from '@/context/SucursalContext'
 import { useAuth } from '@/context/AuthContext'
+import { FormularioDeEvento } from '@/components/FormularioDeEvento'
 import { FormularioDeTorneo } from '@/components/FormularioDeTorneo'
-import { EstadoDelTorneo, NOMBRE_DE_FORMATO } from '@/components/torneo'
+import { EstadoDelTorneo, nombreDelFormato } from '@/components/torneo'
 import { AvisoDeError } from '@/components/listado'
 import { Button } from '@/components/ui/button'
 import { fecha } from '@/lib/fechas'
@@ -23,6 +24,9 @@ export function Torneos() {
   const [filas, setFilas] = useState<TorneoEnLista[]>([])
   const [error, setError] = useState<string | null>(null)
   const [abierto, setAbierto] = useState(false)
+  const [eventos, setEventos] = useState<EventoEnLista[]>([])
+  const [canchas, setCanchas] = useState<Cancha[]>([])
+  const [nuevoEvento, setNuevoEvento] = useState(false)
 
   // Crear un torneo es de admin: el backend lo gatea con `require_admin`. La
   // pantalla esconde el botón en vez de mostrarlo y dejar que falle con 403.
@@ -31,9 +35,13 @@ export function Torneos() {
   const recargar = useCallback(() => {
     if (actual === null) return
     api.listar(actual).then(setFilas).catch((e: Error) => setError(e.message))
+    apiEventos.listar(actual).then(setEventos).catch((e: Error) => setError(e.message))
   }, [actual])
 
   useEffect(recargar, [recargar])
+  useEffect(() => {
+    apiCanchas.listar().then(setCanchas).catch(() => setCanchas([]))
+  }, [])
 
   const columnas = useMemo<ColumnDef<TorneoEnLista, unknown>[]>(
     () => [
@@ -44,7 +52,9 @@ export function Torneos() {
           <span>
             <span className="block font-medium">{row.original.nombre}</span>
             <span className="block text-xs text-muted-foreground">
-              {NOMBRE_DE_FORMATO[row.original.formato]} · {NOMBRE_DE_DEPORTE[row.original.deporte] ?? row.original.deporte}
+              {nombreDelFormato(row.original)} · {NOMBRE_DE_DEPORTE[row.original.deporte] ?? row.original.deporte}
+              {row.original.categoria && ` · ${row.original.categoria}`}
+              {row.original.evento && ` · ${row.original.evento}`}
             </span>
           </span>
         ),
@@ -108,14 +118,48 @@ export function Torneos() {
     <div className="space-y-3">
       <EncabezadoDePantalla titulo={<TituloPantalla icono={Trophy}>Torneos</TituloPantalla>}>
         {puedeEscribir && actual !== null && (
-          <Button onClick={() => setAbierto(true)}>
-            <Plus className="size-4" />
-            Nuevo torneo
-          </Button>
+          <>
+            <Button variant="outline" onClick={() => setNuevoEvento(true)}>
+              <Plus className="size-4" />
+              Nuevo evento
+            </Button>
+            <Button onClick={() => setAbierto(true)}>
+              <Plus className="size-4" />
+              Nuevo torneo
+            </Button>
+          </>
         )}
       </EncabezadoDePantalla>
 
       <AvisoDeError mensaje={error} />
+
+      {/* Los eventos, arriba de los torneos: son el campeonato que junta varias
+          categorías. Sin ninguno, la sección no existe y la pantalla es la de
+          siempre. */}
+      {eventos.length > 0 && (
+        <section aria-label="Eventos" className="space-y-2">
+          <h2 className="text-sm font-semibold">Eventos</h2>
+          <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {eventos.map((evento) => (
+              <li key={evento.id}>
+                <Link
+                  to={`/torneos/eventos/${evento.id}`}
+                  className="block rounded-lg border bg-card p-3 hover:border-primary"
+                >
+                  <span className="block font-medium">{evento.nombre}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {evento.hasta
+                      ? `${fecha(evento.desde)} al ${fecha(evento.hasta)}`
+                      : fecha(evento.desde)}{' '}
+                    · {evento.categorias}{' '}
+                    {evento.categorias === 1 ? 'categoría' : 'categorías'}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <DataTable
         columns={columnas}
@@ -129,11 +173,25 @@ export function Torneos() {
         }
         emptyMessage="Esta sucursal todavía no tiene torneos."
         search={{
-          campos: (t: TorneoEnLista) => [t.nombre, t.deporte, t.campeon],
-          placeholder: 'Buscar por nombre, deporte o campeón',
+          campos: (t: TorneoEnLista) => [t.nombre, t.deporte, t.campeon, t.categoria, t.evento],
+          placeholder: 'Buscar por nombre, categoría, deporte o campeón',
           ariaLabel: 'Buscar torneo',
         }}
       />
+
+      {actual !== null && (
+        <FormularioDeEvento
+          abierto={nuevoEvento}
+          sucursalId={actual}
+          canchas={canchas.filter((c) => c.sucursal_id === actual && c.activa)}
+          onCerrar={() => setNuevoEvento(false)}
+          onGuardado={(evento) => {
+            setNuevoEvento(false)
+            // Directo al evento: lo primero es sumarle categorías.
+            navegar(`/torneos/eventos/${evento.id}`)
+          }}
+        />
+      )}
 
       {actual !== null && (
         <FormularioDeTorneo

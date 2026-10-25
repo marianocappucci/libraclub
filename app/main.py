@@ -70,7 +70,17 @@ from app.auth import (
 )
 from app.config import Config, misma_base
 from app.models.maestros import Sucursal
-from app.routers import admin, conflictos, disponibilidad, maestros, reservas, salud, sincronizacion_offline, torneos
+from app.routers import (
+    admin,
+    conflictos,
+    disponibilidad,
+    eventos,
+    maestros,
+    reservas,
+    salud,
+    sincronizacion_offline,
+    torneos,
+)
 from app.routers import ausentismo as ausentismo_router
 from app.routers import auth as auth_router
 from app.routers import buffet as buffet_router
@@ -130,6 +140,9 @@ AUDITABLES = {
     # escriben una vez, en el sorteo y en la inscripción, que ya quedan
     # anotados por el torneo y el competidor.
     "Torneo": "torneo",
+    # El evento agrupa categorías: quién le cambió las fechas o las canchas mueve
+    # a todos los torneos de adentro.
+    "Evento": "evento",
     "Competidor": "competidor",
     "PartidoDeTorneo": "partido de torneo",
 }
@@ -426,6 +439,8 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # lo que el complejo se comprometió a jugar— e inscribir, programar y cargar
     # resultados son de mostrador. Cada endpoint declara el suyo.
     app.include_router(torneos.router, dependencies=_DEL_CENTRAL)
+    # Los eventos (ADR-024): agrupan categorías —cada una un torneo— con las mismas fechas y canchas.
+    app.include_router(eventos.router, dependencies=_DEL_CENTRAL)
     app.include_router(disponibilidad.router)
     app.include_router(usuarios_router.router, dependencies=_DEL_CENTRAL)
     app.include_router(admin.router, dependencies=_DEL_CENTRAL)

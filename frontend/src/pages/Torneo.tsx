@@ -3,19 +3,23 @@ import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Dices, Plus, Swords, Trash2, Trophy } from 'lucide-react'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 
-import { canchas as apiCanchas, NOMBRE_DE_DEPORTE, torneos as api } from '@/lib/api'
+import {
+  canchas as apiCanchas, eventos as apiEventos, NOMBRE_DE_DEPORTE, torneos as api,
+} from '@/lib/api'
 import type {
-  Cancha, Competidor, Fixture as DatosDelFixture, PartidoDeTorneo, TablaDeZona, Torneo as UnTorneo,
+  Cancha, Competidor, Evento, Fixture as DatosDelFixture, PartidoDeTorneo, TablaDeZona,
+  Torneo as UnTorneo,
 } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
 import { AvisoDeError } from '@/components/listado'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Fixture } from '@/components/Fixture'
+import { GrillasDelTorneo } from '@/components/GrillaDeZona'
 import { TablaDePosiciones } from '@/components/TablaDePosiciones'
 import { FormularioDeCompetidor } from '@/components/FormularioDeCompetidor'
 import { DialogoDePartidoDeTorneo } from '@/components/DialogoDePartidoDeTorneo'
-import { EstadoDelTorneo, NOMBRE_DE_FORMATO } from '@/components/torneo'
+import { EstadoDelTorneo, comoSeJuega, nombreDelFormato } from '@/components/torneo'
 import { fecha } from '@/lib/fechas'
 
 export function Torneo() {
@@ -29,6 +33,7 @@ export function Torneo() {
   const [fixture, setFixture] = useState<DatosDelFixture>({ rondas: 0, partidos: [] })
   const [tablas, setTablas] = useState<TablaDeZona[]>([])
   const [canchas, setCanchas] = useState<Cancha[]>([])
+  const [evento, setEvento] = useState<Evento | null>(null)
   const [abierto, setAbierto] = useState<PartidoDeTorneo | null>(null)
   const [inscribiendo, setInscribiendo] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -56,6 +61,15 @@ export function Torneo() {
   useEffect(() => {
     apiCanchas.listar().then(setCanchas).catch(() => setCanchas([]))
   }, [])
+  // El evento, si es una categoría: de él salen las canchas que se ofrecen.
+  const eventoId = torneo?.evento_id ?? null
+  useEffect(() => {
+    if (eventoId === null) {
+      setEvento(null)
+      return
+    }
+    apiEventos.ver(eventoId).then(setEvento).catch(() => setEvento(null))
+  }, [eventoId])
 
   if (cargando) return <p className="text-muted-foreground">Cargando…</p>
   if (!torneo) {
@@ -68,13 +82,22 @@ export function Torneo() {
   }
 
   const jugados = fixture.partidos.filter((p) => p.finalizado).length
-  const propias = canchas.filter((c) => c.sucursal_id === torneo.sucursal_id && c.activa)
+  // Las canchas de un evento son las únicas que se ofrecen (el backend también lo
+  // exige). Un evento sin canchas cargadas no restringe: valen todas las de la sucursal.
+  const delEvento = evento?.cancha_ids ?? []
+  const propias = canchas.filter(
+    (c) =>
+      c.sucursal_id === torneo.sucursal_id &&
+      c.activa &&
+      (delEvento.length === 0 || delEvento.includes(c.id)),
+  )
   // El playoff se puede largar cuando terminaron todos los partidos de grupos y
   // todavía no hay llaves. El backend lo valida igual; acá sólo decide si el
   // botón se ofrece.
   const grupos = fixture.partidos.filter((p) => p.etapa === 'grupos')
   const puedeLargarPlayoff =
     torneo.formato === 'zonas' &&
+    !torneo.termina_en_zonas &&
     torneo.estado === 'sorteado' &&
     grupos.length > 0 &&
     grupos.every((p) => p.finalizado) &&
@@ -111,7 +134,25 @@ export function Torneo() {
               <EstadoDelTorneo torneo={{ estado: torneo.estado, jugados }} />
             </TituloPantalla>
             <p className="text-sm text-muted-foreground">
-              {NOMBRE_DE_FORMATO[torneo.formato]} · {NOMBRE_DE_DEPORTE[torneo.deporte] ?? torneo.deporte} ·{' '}
+              {torneo.categoria && (
+                <>
+                  <span className="font-medium text-foreground">{torneo.categoria}</span>
+                  {' · '}
+                </>
+              )}
+              {evento && (
+                <>
+                  <Link
+                    to={`/torneos/eventos/${evento.id}`}
+                    className="underline hover:text-foreground"
+                  >
+                    {evento.nombre}
+                  </Link>
+                  {' · '}
+                </>
+              )}
+              {nombreDelFormato(torneo)} · {NOMBRE_DE_DEPORTE[torneo.deporte] ?? torneo.deporte} ·{' '}
+              {comoSeJuega(torneo)} ·{' '}
               {fecha(torneo.desde)}
               {torneo.hasta ? ` al ${fecha(torneo.hasta)}` : ''}
               {torneo.semilla !== null && (
@@ -184,11 +225,22 @@ export function Torneo() {
 
       <AvisoDeError mensaje={error} />
 
-      <Tabs defaultValue={torneo.estado === 'armado' ? 'competidores' : 'fixture'}>
+      <Tabs
+        defaultValue={
+          torneo.estado === 'armado'
+            ? 'competidores'
+            : // Con zonas lo primero que se busca es la grilla, que se imprime y
+              // se pega: el fixture sigue a un clic.
+              tablas.length > 0
+              ? 'grilla'
+              : 'fixture'
+        }
+      >
         <TabsList>
           <TabsTrigger value="competidores">
             Competidores ({competidores.length})
           </TabsTrigger>
+          {tablas.length > 0 && <TabsTrigger value="grilla">Grilla</TabsTrigger>}
           <TabsTrigger value="fixture">Fixture</TabsTrigger>
           {/* La pestaña de posiciones sólo existe si hay tabla. En un cuadro de
               eliminación no hay nada que mostrar ahí, y una pestaña vacía hace
@@ -207,6 +259,17 @@ export function Torneo() {
           />
         </TabsContent>
 
+        {tablas.length > 0 && (
+          <TabsContent value="grilla" className="pt-3">
+            <GrillasDelTorneo
+              torneo={torneo}
+              tablas={tablas}
+              partidos={fixture.partidos}
+              onAbrir={setAbierto}
+            />
+          </TabsContent>
+        )}
+
         <TabsContent value="fixture" className="pt-3">
           <Fixture fixture={fixture} onAbrir={setAbierto} />
         </TabsContent>
@@ -216,6 +279,7 @@ export function Torneo() {
             <TablaDePosiciones
               tablas={tablas}
               clasifican={torneo.clasifican_por_zona}
+              terminaEnZonas={torneo.termina_en_zonas}
             />
           </TabsContent>
         )}

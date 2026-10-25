@@ -27,6 +27,7 @@ const cargarResultado = vi.fn()
 const sortear = vi.fn()
 const playoff = vi.fn()
 const canchasListar = vi.fn()
+const verEvento = vi.fn()
 
 vi.mock('@/lib/api', async (original) => {
   const real = await original<Record<string, unknown>>()
@@ -39,6 +40,7 @@ vi.mock('@/lib/api', async (original) => {
       liberar: vi.fn(), borrarResultado: vi.fn(), bajar: vi.fn(), cancelar: vi.fn(),
     },
     canchas: { ...(real.canchas as object), listar: canchasListar },
+    eventos: { ...(real.eventos as object), ver: verEvento },
   }
 })
 
@@ -92,7 +94,7 @@ function montar() {
 beforeEach(() => {
   ROL = 'admin'
   for (const espia of [ver, competidores, fixtureApi, posiciones, programar,
-                       cargarResultado, sortear, playoff, canchasListar]) {
+                       cargarResultado, sortear, playoff, canchasListar, verEvento]) {
     espia.mockReset()
   }
   ver.mockResolvedValue(TORNEO)
@@ -379,5 +381,132 @@ describe('las posiciones', () => {
     // La diferencia positiva lleva el signo: `+7` y no `7`.
     expect(screen.getByText('+7')).toBeInTheDocument()
     expect(screen.getByText('-9')).toBeInTheDocument()
+  })
+})
+
+describe('el americano', () => {
+  const AMERICANO = {
+    ...TORNEO, nombre: 'Americano Caballeros', formato: 'zonas' as const,
+    cantidad_zonas: 2, clasifican_por_zona: null, termina_en_zonas: true,
+    sets_para_ganar: 1, games_por_set: 9, categoria: 'Caballeros 5ta', evento_id: null,
+  }
+  const DE_GRUPOS = {
+    ...PARTIDO, etapa: 'grupos' as const, zona_id: 1, zona: 'Zona A',
+    instancia: 'Zona A · Fecha 1', avanza_a_id: null, avanza_a_slot: null,
+  }
+  const TABLA_DE_SETS = {
+    zona_id: 1, nombre: 'Zona A', con_sets: true, completa: false,
+    filas: [
+      { competidor_id: 1, nombre: 'Pérez / García', jugados: 1, ganados: 1, empatados: 0,
+        perdidos: 0, a_favor: 9, en_contra: 4, diferencia: 5, puntos: 3,
+        sets_a_favor: 1, sets_en_contra: 0, diferencia_sets: 1 },
+      { competidor_id: 2, nombre: 'López / Díaz', jugados: 1, ganados: 0, empatados: 0,
+        perdidos: 1, a_favor: 4, en_contra: 9, diferencia: -5, puntos: 0,
+        sets_a_favor: 0, sets_en_contra: 1, diferencia_sets: -1 },
+    ],
+  }
+
+  beforeEach(() => {
+    ver.mockResolvedValue(AMERICANO)
+    fixtureApi.mockResolvedValue({ rondas: 0, partidos: [DE_GRUPOS] })
+    posiciones.mockResolvedValue([TABLA_DE_SETS])
+  })
+
+  it('con zonas abre en la grilla, titulada con el torneo y la categoría', async () => {
+    montar()
+    expect(
+      await screen.findByRole('heading', { name: 'Americano Caballeros · Caballeros 5ta' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Grilla' })).toHaveAttribute('data-state', 'active')
+  })
+
+  it('un casillero de la grilla abre el partido para cargar el resultado', async () => {
+    montar()
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Pérez / García contra López / Díaz' }),
+    )
+    const dialogo = await screen.findByRole('dialog')
+    expect(within(dialogo).getByText('Zona A · Fecha 1')).toBeInTheDocument()
+    expect(within(dialogo).getByText('Guardar resultado')).toBeInTheDocument()
+  })
+
+  it('el diálogo dice la regla del set: a 9 games', async () => {
+    montar()
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Pérez / García contra López / Díaz' }),
+    )
+    const dialogo = await screen.findByRole('dialog')
+    expect(within(dialogo).getByText(/Un set a 9 games\./)).toBeInTheDocument()
+    // Un set: un solo parcial para cargar.
+    expect(within(dialogo).getAllByLabelText(/Pérez \/ García, parcial/)).toHaveLength(1)
+  })
+
+  it('en una grilla ya jugada, el casillero trae el resultado desde la fila', async () => {
+    fixtureApi.mockResolvedValue({
+      rondas: 0,
+      partidos: [{
+        ...DE_GRUPOS, finalizado: true, ganador_id: 1,
+        parciales: [{ numero: 1, puntos_a: 9, puntos_b: 4 }],
+      }],
+    })
+    montar()
+    expect(
+      await screen.findByRole('button', { name: 'Pérez / García contra López / Díaz: 9-4' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'López / Díaz contra Pérez / García: 4-9' }),
+    ).toBeInTheDocument()
+  })
+
+  it('la cabecera dice cómo se juega y que no hay llaves', async () => {
+    montar()
+    expect(await screen.findByText(/Por zonas, sin llaves/)).toBeInTheDocument()
+    expect(screen.getByText(/Un set a 9 games/)).toBeInTheDocument()
+  })
+
+  it('🔴 sin llaves no se ofrece largar el playoff, aunque terminaron las zonas', async () => {
+    fixtureApi.mockResolvedValue({
+      rondas: 0,
+      partidos: [{ ...DE_GRUPOS, finalizado: true, ganador_id: 1,
+                   parciales: [{ numero: 1, puntos_a: 9, puntos_b: 4 }] }],
+    })
+    montar()
+    await screen.findByRole('tab', { name: 'Grilla' })
+    expect(screen.queryByText('Largar el playoff')).not.toBeInTheDocument()
+  })
+
+  it('las posiciones traen la diferencia de sets y de games', async () => {
+    montar()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Posiciones' }))
+    expect(await screen.findByText('Dif. sets')).toBeInTheDocument()
+    expect(screen.getByText('Dif. games')).toBeInTheDocument()
+    expect(screen.getByText('Games a favor')).toBeInTheDocument()
+    expect(screen.queryByText('PE')).not.toBeInTheDocument()
+  })
+
+  it('un torneo de una categoría de evento ofrece sólo las canchas del evento', async () => {
+    canchasListar.mockResolvedValue([
+      { id: 7, sucursal_id: 1, nombre: 'Cancha 1', deporte: 'padel', duracion_turno_min: 90,
+        techada: false, iluminacion: true, superficie: null, orden: 0, activa: true,
+        observaciones: null },
+      { id: 8, sucursal_id: 1, nombre: 'Cancha 2', deporte: 'padel', duracion_turno_min: 90,
+        techada: false, iluminacion: true, superficie: null, orden: 1, activa: true,
+        observaciones: null },
+    ])
+    ver.mockResolvedValue({ ...AMERICANO, evento_id: 4 })
+    verEvento.mockResolvedValue({
+      id: 4, sucursal_id: 1, nombre: 'Americano de primavera', desde: '2026-09-05',
+      hasta: null, observaciones: null, cancha_ids: [8], categorias: [],
+    })
+    montar()
+    // El evento aparece en la cabecera, con su vínculo.
+    expect(await screen.findByRole('link', { name: 'Americano de primavera' })).toHaveAttribute(
+      'href', '/torneos/eventos/4',
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Pérez / García contra López / Díaz' }))
+    await userEvent.click(await screen.findByText('Dar cancha'))
+    await waitFor(() => expect(programar).toHaveBeenCalled())
+    // 🔑 La primera (y única) cancha ofrecida es la 8: la 7 no es del evento.
+    expect(programar.mock.calls[0][1].cancha_id).toBe(8)
   })
 })

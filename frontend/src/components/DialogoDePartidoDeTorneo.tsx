@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { SelectBuscable } from '@/components/select-buscable'
 import { diaISO, fecha, hora } from '@/lib/fechas'
-import { nombreDe } from '@/components/torneo'
+import { MODALIDADES_DE_PARTIDO, nombreDe } from '@/components/torneo'
 
 /** Un parcial en carga. Texto y no número: un campo numérico vacío es `NaN`, y
  *  el operador tiene que poder borrarlo para escribir de nuevo. */
@@ -59,6 +59,11 @@ export function DialogoDePartidoDeTorneo({
   if (!partido) return null
 
   const sinRivales = !partido.competidor_a_id || !partido.competidor_b_id
+  // La regla del marcador, a la vista de quien lo carga: el backend rechaza un
+  // 6-5 y es mejor que el encargado sepa por qué antes de tocar «Guardar».
+  const regla = MODALIDADES_DE_PARTIDO.find(
+    (m) => m.sets_para_ganar === torneo.sets_para_ganar && m.games_por_set === torneo.games_por_set,
+  )
 
   async function accion(fn: () => Promise<unknown>) {
     setError(null)
@@ -158,6 +163,11 @@ export function DialogoDePartidoDeTorneo({
 
               <section className="space-y-2">
                 <h3 className="font-medium">Resultado</h3>
+                {regla && (
+                  <p className="text-xs text-muted-foreground">
+                    {regla.nombre}. {regla.ayuda}
+                  </p>
+                )}
                 {parciales.map((parcial, indice) => (
                   <div key={indice} className="flex items-center gap-2">
                     <span className="w-6 text-xs text-muted-foreground">
