@@ -1268,8 +1268,10 @@ export const FORMATOS: { valor: FormatoTorneo; nombre: string; ayuda: string }[]
   },
   {
     valor: 'zonas',
-    nombre: 'Zonas y playoff',
-    ayuda: 'Grupos y después llaves entre los que clasifican.',
+    nombre: 'Por zonas',
+    ayuda:
+      'Grupos de todos contra todos, como un americano. Después pasan a llaves ' +
+      'los primeros de cada zona, o el torneo termina en las zonas.',
   },
 ]
 
@@ -1282,15 +1284,30 @@ export interface TorneoEntrada {
   hasta: string | null
   /** 1 = fútbol (un solo resultado). 2 = al mejor de tres, el pádel normal. */
   sets_para_ganar: number
+  /** A cuántos games se juega cada set en pádel y tenis: 6 o 9. `null` = no se
+   *  controlan los games (fútbol y demás deportes, o un torneo anterior). */
+  games_por_set?: number | null
   /** Sólo en formato `zonas`; `null` en los otros, y el backend lo exige así. */
   cantidad_zonas: number | null
-  /** Sólo en formato `zonas`. El backend soporta 1 o 2. */
+  /** Sólo en formato `zonas` con llaves. El backend soporta 1 o 2. `null` si el
+   *  torneo termina en las zonas. */
   clasifican_por_zona: number | null
+  /** Sólo en formato `zonas`: sin llaves, el primero de cada zona es el campeón
+   *  de su zona. Excluye a `clasifican_por_zona`. */
+  termina_en_zonas?: boolean
+  /** «Caballeros 5ta», «Damas», «Mixto». */
+  categoria?: string | null
+  /** El evento del que es una categoría; las fechas las pone el evento. */
+  evento_id?: number | null
   observaciones: string | null
 }
 
 export interface Torneo extends TorneoEntrada {
   id: number
+  games_por_set: number | null
+  termina_en_zonas: boolean
+  categoria: string | null
+  evento_id: number | null
   estado: EstadoTorneo
   /** La semilla del sorteo. Con ella y la lista de inscriptos el cuadro se
    *  reproduce entero: es lo que hace auditable el sorteo. */
@@ -1304,7 +1321,34 @@ export interface TorneoEnLista extends Torneo {
   /** Partidos sin cancha ni horario. Es lo que le dice al encargado que le
    *  queda trabajo por hacer. */
   sin_programar: number
+  /** El campeón. En un torneo que termina en las zonas hay uno por zona y viene
+   *  dicho así: «Zona A: Pérez / García · Zona B: …». */
   campeon: string | null
+  /** El nombre del evento, si es una categoría de uno. */
+  evento: string | null
+}
+
+/** Un campeonato con varias categorías; cada una es un torneo. */
+export interface EventoEntrada {
+  sucursal_id: number
+  nombre: string
+  desde: string
+  hasta: string | null
+  observaciones: string | null
+  /** Las canchas del evento; vacío = cualquiera de la sucursal. */
+  cancha_ids: number[]
+}
+
+export interface Evento extends EventoEntrada {
+  id: number
+}
+
+export interface EventoEnLista extends Evento {
+  categorias: number
+}
+
+export interface EventoConCategorias extends Evento {
+  categorias: TorneoEnLista[]
 }
 
 export interface Integrante {
@@ -1378,6 +1422,10 @@ export interface FilaDePosiciones {
   en_contra: number
   diferencia: number
   puntos: number
+  /** Sólo en pádel y tenis (`null` en el resto). */
+  sets_a_favor?: number | null
+  sets_en_contra?: number | null
+  diferencia_sets?: number | null
 }
 
 export interface TablaDeZona {
@@ -1385,6 +1433,10 @@ export interface TablaDeZona {
   /** `null` en una liga, que no tiene zonas. */
   nombre: string | null
   filas: FilaDePosiciones[]
+  /** Ya se jugaron todos los partidos de la zona. */
+  completa?: boolean
+  /** La tabla lleva las columnas de sets y se ordena con cara a cara. */
+  con_sets?: boolean
 }
 
 export const torneos = {
@@ -1397,7 +1449,13 @@ export const torneos = {
   /** Sólo lo que no toca el cuadro: el formato no se puede cambiar. */
   editar: (
     id: number,
-    cuerpo: { nombre: string; desde: string; hasta: string | null; observaciones: string | null },
+    cuerpo: {
+      nombre: string
+      desde: string
+      hasta: string | null
+      observaciones: string | null
+      categoria?: string | null
+    },
   ) => api.put<Torneo>(`/api/torneos/${id}`, cuerpo),
   cancelar: (id: number) =>
     api.post<{ torneo_id: number; canchas_liberadas: number }>(
@@ -1432,6 +1490,18 @@ export const torneos = {
     api.post<PartidoDeTorneo>(`/api/torneos/partidos/${partidoId}/resultado`, { parciales }),
   borrarResultado: (partidoId: number) =>
     api.del(`/api/torneos/partidos/${partidoId}/resultado`),
+}
+
+export const eventos = {
+  listar: (sucursalId?: number) =>
+    api.get<EventoEnLista[]>(
+      `/api/eventos${sucursalId ? `?sucursal_id=${sucursalId}` : ''}`,
+    ),
+  ver: (id: number) => api.get<EventoConCategorias>(`/api/eventos/${id}`),
+  crear: (cuerpo: EventoEntrada) => api.post<Evento>('/api/eventos', cuerpo),
+  /** La sucursal no se cambia. Las fechas se copian a todas las categorías. */
+  editar: (id: number, cuerpo: Omit<EventoEntrada, 'sucursal_id'>) =>
+    api.put<Evento>(`/api/eventos/${id}`, cuerpo),
 }
 
 /** Una devolución de seña que el complejo debe y todavía no hizo. */
