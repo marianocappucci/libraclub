@@ -13,7 +13,7 @@
 import { Outlet } from 'react-router-dom'
 import { createLayout } from 'libra-ui/Layout'
 import { ICONOS } from 'libra-ui/iconos-identidad'
-import { RUTA_COLA_DEL_NODO, TITULO_COLA } from 'libra-ui/cola-del-nodo'
+import { TITULO_COLA } from 'libra-ui/cola-del-nodo'
 import { TEXTO_CARTEL_SIN_CONEXION_CON_COLA, useConexionDelNodo } from 'libra-ui/nodo-offline'
 import { CalendarClock, CupSoda, LayoutGrid, Repeat, Trophy, Undo2 } from 'lucide-react'
 
@@ -203,10 +203,9 @@ const Cascaron = createLayout<Usuario>({
   barraDeEstado: { useSucursal: useSucursalActiva },
   // El cartel «Sin conexión» arriba del contenido, sólo en un nodo y sólo sin conexión (libra-ui ADR-077/ADR-094). Con la frase de los
   // productos que encolan en vez de vender: las facturas quedan en cola y salen solas al volver.
-  // 🔑 `ruta` es la de la cola y no la `/api/nodo/conexion` de siempre: LibraClub no monta esa (es del punto de venta de ContaLibra y
-  // RestoLibra), y la cola contesta lo mismo que el cartel lee (`es_nodo`, `en_linea`, `node_id`). `limite=1` porque acá sólo importa
-  // la cabecera. Fuera de un nodo contesta `es_nodo: false`, el cartel deja de consultar y no se dibuja nada.
-  conexionDelNodo: { ruta: `${RUTA_COLA_DEL_NODO}?limite=1`, texto: TEXTO_CARTEL_SIN_CONEXION_CON_COLA },
+  // La ruta es la del kit, `GET /api/nodo/conexion` (`build_conexion_del_nodo_router` de libracore, ADR-084). Fuera de un nodo contesta
+  // `es_nodo: false`, el cartel deja de consultar y no se dibuja nada.
+  conexionDelNodo: { texto: TEXTO_CARTEL_SIN_CONEXION_CON_COLA },
   useAuth: useAuthConSucursal,
 })
 

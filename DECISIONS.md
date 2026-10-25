@@ -881,3 +881,13 @@ que `/api/reservas/series/listado`.
   - **Pseudo-elementos en cada tarjeta**: con un solo origen el conector cambia de forma y obliga a una clase por caso.
   - **Dibujar los huecos de los byes** (el bracket de papel con renglones vacíos): desperdicia la mitad de la ronda 1 con 12 competidores y no lo pidió nadie.
 - Consecuencias: las tarjetas del cuadro son de alto fijo (una línea de cancha y horario, recortada con «…»; el nombre de la cancha completo está en el `title`). El cuadro tiene ancho propio y sigue scrolleando horizontal. Tests: `llaves.test.ts` (geometría), `Fixture.test.tsx` (conectores, byes, orden) y casos nuevos en `GrillaDeZona.test.tsx`.
+
+## ADR-026 — Se adopta libracore v1.195.0: la ruta de conexión del nodo y una sola forma del 202 «en cola»
+
+- Estado: propuesta (2026-10-25; libracore ADR-084). Sin migración ni cambio de esquema. Addendum de ADR-023.
+- Contexto: LibraClub no tiene punto de venta, así que no podía montar `build_facturacion_del_nodo_router` (pide un `PuertoDeVentas`) y su cartel «Sin conexión» preguntaba la conexión a `GET /api/nodo/cola?limite=1`, trayendo una lista de pedidos que no usa. El 202 de la factura conjunta lo armaba `reservas._facturar_en_el_nodo` a mano, con una forma distinta de la de LibraCargo.
+- Qué ya existía: `offline.CONEXION` (el `ConexionDelNodo` que ya usan la cola y la barra de estado) y el reconocimiento del 202 en libra-ui. El motor suma `build_conexion_del_nodo_router` y `respuesta_en_cola`.
+- Decisión:
+  1. Se monta `build_conexion_del_nodo_router(conexion=offline.CONEXION, usuario_actual=get_current_user)` detrás de `require_staff`, como la barra de estado. No pide `exigir_base`: no lee `arca_config`. `a_facturar` queda en 0 (la cola se muestra con `BandejaDeLaCola`). `Layout.tsx` saca la `ruta` de `conexionDelNodo`.
+  2. `_facturar_en_el_nodo` contesta `respuesta_en_cola(pedido, mensaje=resultado["mensaje"])`: el mensaje de LibraClub (el motivo del central o de ARCA) se conserva. El pedido nunca llega `emitido` ni `descartado` a ese punto (el primero sale por el 201 y el segundo por `PedidoYaResuelto`, 409), así que el `ValueError` del motor no se alcanza.
+- Consecuencias: el 202 gana `codigo` y `motivo`; el kit lo reconoce por `en_cola === true` como antes. `tests/test_nodo_roles_y_aprovisionamiento.py` suma la fila `GET /api/nodo/conexion` (STAFF). Requiere libracore >= v1.195.0 en la imagen.

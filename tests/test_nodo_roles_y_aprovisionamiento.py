@@ -10,7 +10,7 @@ nunca):
 | `libraedge.sync.api.RUTAS_AUTENTICADAS_POR_NODO` (`/sync/v1/push`, `pull`, `ticket-arca`, `carga-inicial`) |
 PÚBLICA, secreto del nodo: ni sesión ni rol | | `POST /sync/v1/vinculacion` (el canje del código) | PÚBLICA: la llama
 el instalador | | `/api/nodos-offline*` («Sucursal sin internet») | ADMIN |
-| `GET /api/nodo/cola` y `POST /api/nodo/cola/emitir` | STAFF (mostrador) |
+| `GET /api/nodo/conexion`, `GET /api/nodo/cola` y `POST /api/nodo/cola/emitir` | STAFF (mostrador) |
 | `POST /api/nodo/cola/{id}/reintentar`, `/descartar`, `/emitido` | ADMIN: deciden sobre un documento fiscal |
 """
 
@@ -123,8 +123,10 @@ def test_el_admin_ve_la_pantalla_de_sucursal_sin_internet(clientes, sucursal):
 # ── STAFF ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize(("metodo", "ruta"), [("GET", "/api/nodo/cola"), ("POST", "/api/nodo/cola/emitir")])
-def test_ver_la_cola_y_pedir_que_se_emita_es_del_mostrador(clientes, metodo, ruta):
+@pytest.mark.parametrize(("metodo", "ruta"), [
+    ("GET", "/api/nodo/conexion"), ("GET", "/api/nodo/cola"), ("POST", "/api/nodo/cola/emitir"),
+])
+def test_ver_la_conexion_la_cola_y_pedir_que_se_emita_es_del_mostrador(clientes, metodo, ruta):
     assert _llamar(clientes["anonimo"], metodo, ruta).status_code == 401, ruta
     assert _llamar(clientes["staff"], metodo, ruta).status_code == 200, ruta
     assert _llamar(clientes["admin"], metodo, ruta).status_code == 200, ruta
@@ -137,7 +139,7 @@ def test_toda_ruta_del_nodo_tiene_una_fila_en_esta_matriz(app_con_roles):
         "/api/nodos-offline", "/api/nodos-offline/menu", "/api/nodos-offline/vinculacion",
         "/api/nodos-offline/{node_id}/vinculacion", "/api/nodos-offline/{node_id}/carga",
         "/api/nodos-offline/{node_id}",
-        "/api/nodo/cola", "/api/nodo/cola/emitir", "/api/nodo/cola/{pedido_id}/reintentar",
+        "/api/nodo/conexion", "/api/nodo/cola", "/api/nodo/cola/emitir", "/api/nodo/cola/{pedido_id}/reintentar",
         "/api/nodo/cola/{pedido_id}/descartar", "/api/nodo/cola/{pedido_id}/emitido",
     }
     montadas = {
