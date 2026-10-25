@@ -1,5 +1,7 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { PartidoDeTorneo, TablaDeZona, Torneo } from '@/lib/api'
@@ -165,6 +167,36 @@ describe('la grilla', () => {
     }
   })
 
+  it('🔴 la diagonal va rellena de rojo, entera, y no con una línea fina', () => {
+    // jsdom no calcula estilos de una hoja de CSS externa: se lee el fuente.
+    const css = readFileSync(join(process.cwd(), 'src/index.css'), 'utf8')
+    const bloque = (selector: string) => {
+      const desde = css.indexOf(`${selector} {`)
+      expect(desde, `falta ${selector}`).toBeGreaterThan(-1)
+      return css.slice(desde, css.indexOf('}', desde))
+    }
+    const pantalla = bloque('\n.grilla-diagonal')
+    expect(pantalla).toContain('background-color: var(--destructive)')
+    // Sin la diagonal de esquina a esquina.
+    expect(css.slice(css.indexOf('La grilla de una zona'))).not.toMatch(/linear-gradient/)
+    // En oscuro, un rojo mezclado con el fondo y no el claro del texto.
+    expect(bloque('.dark .grilla-diagonal')).toContain('color-mix(')
+    // En papel, rojo sólido que se imprime.
+    const papel = bloque('  .hoja-grilla .grilla-diagonal,\n  .dark .hoja-grilla .grilla-diagonal')
+    expect(papel).toMatch(/background-color: #c00000/)
+    expect(papel).toContain('print-color-adjust: exact')
+  })
+
+  it('la diagonal es la misma en la hoja para el papel, y tampoco se puede abrir', () => {
+    montar({ paraPapel: true, deporte: 'futbol', tabla: { ...TABLA, con_sets: false } })
+    const diagonales = document.querySelectorAll('td.grilla-diagonal')
+    expect(diagonales).toHaveLength(PAREJAS.length)
+    for (const celda of diagonales) {
+      expect(celda).toHaveAttribute('aria-hidden', 'true')
+      expect(celda.textContent).toBe('')
+    }
+  })
+
   it('el casillero abre el partido, de cualquiera de los dos lados', async () => {
     const onAbrir = montar()
     await userEvent.click(
@@ -205,6 +237,38 @@ describe('las columnas de posiciones', () => {
     montar({ tabla: { ...TABLA, con_sets: false } })
     expect(screen.queryByRole('columnheader', { name: 'Sets' })).toBeNull()
     expect(screen.getByRole('columnheader', { name: 'Dif' })).toBeInTheDocument()
+  })
+
+  it('🔴 en fútbol la columna son los puntos (Pts) y no los partidos ganados (PG)', () => {
+    // La tabla de fútbol se ordena por puntos (ganar 3, empatar 1): con PG se
+    // vería un equipo de 0 PG y 2 empates arriba de otro con 0 PG y 2 derrotas
+    // sin explicación. La grilla muestra lo MISMO que `TablaDePosiciones`.
+    const futbol: TablaDeZona = {
+      zona_id: 7, nombre: 'Zona A', con_sets: false, completa: false,
+      filas: [
+        { ...fila(3, 2, 1, 0, 2), empatados: 1, perdidos: 0, puntos: 4 },
+        { ...fila(1, 2, 0, 0, 0), empatados: 2, perdidos: 0, puntos: 2 },
+        { ...fila(2, 2, 0, 0, -2), empatados: 0, perdidos: 2, puntos: 0 },
+      ],
+    }
+    montar({ tabla: futbol, deporte: 'futbol' })
+    expect(screen.getByRole('columnheader', { name: 'Pts' })).toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: 'PG' })).toBeNull()
+    const derecha = (nombre: string) => {
+      const tr = screen.getAllByText(nombre).map((e) => e.closest('tr')!).find((t) => t.querySelector('th[scope=row]'))!
+      return within(tr).getAllByRole('cell').slice(-3).map((c) => c.textContent)
+    }
+    // Pts, Dif, Pos. Los empates cuentan: el de 0 PG y 2 empates tiene 2 puntos.
+    expect(derecha('Echeverría / Fuentes')).toEqual(['4', '+2', '1'])
+    expect(derecha('Aguirre / Bustos')).toEqual(['2', '0', '2'])
+    expect(derecha('Cabrera / Domínguez')).toEqual(['0', '-2', '3'])
+  })
+
+  it('en pádel y tenis queda PG, Sets, Games y Pos.', () => {
+    montar({ deporte: 'padel' })
+    const encabezados = screen.getAllByRole('columnheader').map((h) => h.textContent)
+    expect(encabezados.slice(-4)).toEqual(['PG', 'Sets', 'Games', 'Pos.'])
+    expect(screen.queryByRole('columnheader', { name: 'Pts' })).toBeNull()
   })
 
   it('no inventa un puesto para la pareja que todavía no jugó', () => {
@@ -291,6 +355,36 @@ describe('las grillas del torneo', () => {
     // Los partidos de la zona A no se cuelan en la B.
     const grillaB = screen.getAllByRole('table')[1]
     expect(within(grillaB).queryByRole('button', { name: /contra/ })).toBeNull()
+  })
+
+  it('🔴 el texto de ayuda nombra a quienes juegan según el deporte', () => {
+    const de = (deporte: string, con_sets = false) => {
+      const { unmount } = render(
+        <GrillasDelTorneo
+          torneo={{ ...TORNEO, deporte } as Torneo}
+          tablas={[{ ...TABLA, con_sets }]}
+          partidos={PARTIDOS}
+          onAbrir={vi.fn()}
+        />,
+      )
+      const ayuda = screen.getByText(/Cada casillero es el resultado/).textContent
+      const caption = document.querySelector('caption')?.textContent
+      unmount()
+      return { ayuda, caption }
+    }
+    const padel = de('padel', true)
+    expect(padel.ayuda).toContain('de la pareja de la fila contra la de la columna')
+    expect(padel.caption).toContain('cada pareja de la fila contra la de la columna')
+    expect(de('tenis', true).ayuda).toContain('de la pareja')
+
+    for (const deporte of ['futbol', 'basquet', 'voley', 'hockey']) {
+      const { ayuda, caption } = de(deporte)
+      expect(ayuda).toContain('del equipo de la fila contra el de la columna')
+      expect(ayuda).not.toContain('pareja')
+      expect(caption).toContain('cada equipo de la fila contra el de la columna')
+    }
+    // Ante la duda, «competidor».
+    expect(de('otro').ayuda).toContain('del competidor de la fila contra el de la columna')
   })
 
   it('imprimir arma la hoja de la zona elegida con el título y la manda a la impresora', async () => {

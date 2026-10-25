@@ -7,6 +7,17 @@ import { CalendarClock, MapPin, Trophy } from 'lucide-react'
 
 import type { Fixture as DatosDelFixture, PartidoDeTorneo } from '@/lib/api'
 import { fecha, hora } from '@/lib/fechas'
+import {
+  ALTO_DE_FILA,
+  ALTO_DE_PARTIDO,
+  ALTO_DE_TITULO,
+  ANCHO_DE_PARTIDO,
+  anchoDelCuadro,
+  disponerLlaves,
+  trazoDelConector,
+  xDeColumna,
+  yEnRem,
+} from '@/components/llaves'
 import { marcador, nombreDe } from '@/components/torneo'
 import { cn } from '@/lib/utils'
 
@@ -82,13 +93,29 @@ function Grupos({
   )
 }
 
-/** El cuadro de eliminación, una columna por ronda.
+/** El color de las líneas: el del borde del tema, un poco más cerca del texto.
+ *  Con el `--border` puro, en oscuro (blanco al 10%) las líneas casi no se ven,
+ *  y son justo lo que este cuadro viene a mostrar. */
+const COLOR_DE_LINEA = 'color-mix(in oklab, var(--border) 60%, var(--muted-foreground))'
+
+/** El cuadro de eliminación: una columna por ronda y las líneas que unen cada
+ * par de partidos con el que sigue, como un bracket de papel.
  *
- * 🔑 **`justify-around` en cada columna, no posiciones absolutas.** Un bracket
- * dibujado con coordenadas hay que recalcularlo cuando cambia la altura de una
- * tarjeta, y con byes las rondas no tienen la misma cantidad de partidos. Que
- * cada columna reparta su espacio sola da la forma de embudo sin ninguna
- * cuenta, y aguanta que un partido crezca porque tiene resultado y cancha.
+ * 🔑 **Posiciones calculadas, no `justify-around`.** El reparto automático deja
+ * el partido siguiente «más o menos» entre sus dos orígenes, y con byes ni eso:
+ * las rondas no tienen la misma cantidad de partidos, así que cada columna
+ * repartía distinto y las líneas no tenían dónde caer. Acá cada partido va a
+ * la altura media exacta de los que lo alimentan (`disponerLlaves`, que lee
+ * `avanza_a_id` y `avanza_a_slot`). Lo que hacía frágil a un bracket con
+ * coordenadas —que una tarjeta crezca y haya que recalcular— se evita con el
+ * alto fijo de la tarjeta (`ALTO_DE_PARTIDO`): lo que no entra se recorta en
+ * una línea, y el detalle completo está en el diálogo que abre al tocarla.
+ *
+ * 🔑 **Un solo SVG para todas las líneas, detrás de las tarjetas.** Las
+ * unidades del SVG son rem —el mismo `rem` con que se ubican las tarjetas—, así
+ * que líneas y tarjetas no pueden desalinearse al cambiar el tamaño de letra.
+ * Con byes el partido siguiente tiene un solo origen y la línea es recta; el que
+ * entró directo no tiene línea (ver `llaves.ts`).
  */
 function Llaves({
   partidos,
@@ -99,9 +126,11 @@ function Llaves({
   rondas: number
   onAbrir: (partido: PartidoDeTorneo) => void
 }) {
-  const columnas = Array.from({ length: rondas }, (_, i) =>
-    partidos.filter((p) => p.ronda === i + 1),
-  )
+  const { nodos, conectores, filas } = disponerLlaves(partidos)
+  const porId = new Map(nodos.map((n) => [n.partido.id, n]))
+  const columnas = Math.max(rondas, ...nodos.map((n) => n.columna + 1))
+  const ancho = anchoDelCuadro(columnas)
+  const alto = filas * ALTO_DE_FILA
   return (
     <section className="space-y-2">
       <h3 className="text-sm font-semibold">Llaves</h3>
@@ -109,20 +138,69 @@ function Llaves({
           un teléfono no entran. Lo que no puede pasar es que scrollee la
           página entera. */}
       <div className="overflow-x-auto pb-2">
-        <div className="flex min-h-[16rem] gap-3">
-          {columnas.map((deLaRonda, indice) => (
-            <div
-              key={indice}
-              className="flex min-w-[15rem] flex-1 flex-col justify-around gap-3"
-            >
-              <h4 className="text-xs font-medium text-muted-foreground">
-                {deLaRonda[0]?.instancia ?? ''}
-              </h4>
-              {deLaRonda.map((partido) => (
-                <Partido key={partido.id} partido={partido} onAbrir={onAbrir} />
-              ))}
-            </div>
-          ))}
+        <div
+          data-testid="cuadro-de-llaves"
+          className="relative"
+          style={{ width: `${ancho}rem`, height: `${ALTO_DE_TITULO + alto}rem` }}
+        >
+          <svg
+            aria-hidden="true"
+            focusable="false"
+            className="pointer-events-none absolute left-0"
+            style={{ top: `${ALTO_DE_TITULO}rem`, width: `${ancho}rem`, height: `${alto}rem` }}
+            viewBox={`0 0 ${ancho} ${alto}`}
+          >
+            {conectores.map((conector) => (
+              <path
+                key={conector.hacia}
+                data-conector=""
+                data-hacia={conector.hacia}
+                data-desde={conector.desde.join(',')}
+                d={trazoDelConector(conector, porId)}
+                fill="none"
+                stroke={COLOR_DE_LINEA}
+                strokeWidth={1.5}
+                strokeLinecap="square"
+                vectorEffect="non-scaling-stroke"
+              />
+            ))}
+          </svg>
+          {Array.from({ length: columnas }, (_, columna) => {
+            const deLaRonda = nodos
+              .filter((n) => n.columna === columna)
+              .sort((a, b) => a.y - b.y)
+            return (
+              <div
+                key={columna}
+                className="absolute top-0"
+                style={{ left: `${xDeColumna(columna)}rem`, width: `${ANCHO_DE_PARTIDO}rem` }}
+              >
+                <h4
+                  className="text-xs font-medium text-muted-foreground"
+                  style={{ height: `${ALTO_DE_TITULO}rem` }}
+                >
+                  {deLaRonda[0]?.partido.instancia ?? ''}
+                </h4>
+                <ul>
+                  {deLaRonda.map((nodo) => (
+                    <li
+                      key={nodo.partido.id}
+                      data-partido={nodo.partido.id}
+                      data-y={nodo.y}
+                      data-origenes={nodo.origenes.join(',')}
+                      className="absolute inset-x-0"
+                      style={{
+                        top: `${ALTO_DE_TITULO + yEnRem(nodo.y) - ALTO_DE_PARTIDO / 2}rem`,
+                        height: `${ALTO_DE_PARTIDO}rem`,
+                      }}
+                    >
+                      <Partido partido={nodo.partido} onAbrir={onAbrir} compacta />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )
+          })}
         </div>
       </div>
     </section>
@@ -133,9 +211,13 @@ function Llaves({
 function Partido({
   partido,
   onAbrir,
+  compacta = false,
 }: {
   partido: PartidoDeTorneo
   onAbrir: (partido: PartidoDeTorneo) => void
+  /** En el cuadro de llaves: alto fijo (lo ponen las líneas) y una sola línea
+   *  de detalle, recortada. */
+  compacta?: boolean
 }) {
   const resultado = marcador(partido)
   return (
@@ -146,7 +228,10 @@ function Partido({
       // él, un cuadro de 16 son quince botones que un lector de pantalla
       // anuncia igual, y no hay forma de saber cuál se está por abrir.
       aria-label={`${partido.instancia}: ${nombreDe(partido.competidor_a)} contra ${nombreDe(partido.competidor_b)}`}
-      className="w-full rounded-lg border bg-card p-2 text-left text-sm hover:border-primary"
+      className={cn(
+        'w-full rounded-lg border bg-card p-2 text-left text-sm hover:border-primary',
+        compacta && 'flex h-full flex-col justify-center overflow-hidden',
+      )}
     >
       <Lado
         nombre={partido.competidor_a}
@@ -156,7 +241,12 @@ function Partido({
         nombre={partido.competidor_b}
         gana={partido.finalizado && partido.ganador_id === partido.competidor_b_id}
       />
-      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      <div
+        className={cn(
+          'mt-1 flex items-center gap-x-3 text-xs text-muted-foreground',
+          compacta ? 'h-4 min-w-0 flex-nowrap whitespace-nowrap' : 'flex-wrap gap-y-1',
+        )}
+      >
         {resultado && <span className="font-medium text-foreground">{resultado}</span>}
         {partido.finalizado && !partido.ganador_id && <span>Empate</span>}
         {partido.comienza_at && (
@@ -166,9 +256,9 @@ function Partido({
           </span>
         )}
         {partido.cancha && (
-          <span className="flex items-center gap-1">
-            <MapPin className="size-3" />
-            {partido.cancha}
+          <span className="flex min-w-0 items-center gap-1" title={partido.cancha}>
+            <MapPin className="size-3 shrink-0" />
+            <span className="truncate">{partido.cancha}</span>
           </span>
         )}
         {/* 🔑 Se avisa que falta cancha sólo si el partido se puede jugar. Un
