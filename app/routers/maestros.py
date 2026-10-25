@@ -77,6 +77,8 @@ def construir_abm(
     rol_escritura=require_admin,
     agregar: Callable | None = None,
     exigir_modificable: Callable[[int], None] | None = None,
+    exigir_editable: Callable[[int], None] | None = None,
+    editar_item: Callable | None = None,
 ) -> APIRouter:
     """Un ABM completo: listar, obtener, crear, editar y borrar.
 
@@ -93,8 +95,13 @@ def construir_abm(
     `agregar(sesion, item)` es cómo se agrega un alta (por defecto, `sesion.add`): los
     clientes lo cambian para darse de alta con id provisorio en un nodo (ADR-022).
     `exigir_modificable(item_id)` corre antes de editar o borrar y levanta si no se puede
-    (en un nodo, los clientes son del central).
+    (en un nodo, los clientes son del central). `exigir_editable(item_id)` lo reemplaza **sólo para
+    editar** (por defecto, el mismo): en un nodo un cliente provisorio se edita pero no se borra.
+    `editar_item(sesion, item, datos)` es cómo se aplica una edición (por defecto, un `setattr` por
+    campo): los clientes lo cambian para que la corrección de un provisorio suba al central (ADR-022).
     """
+    if exigir_editable is None:
+        exigir_editable = exigir_modificable
     router = APIRouter(prefix=f"/api/{prefijo}", tags=[etiqueta])
 
     @router.get("", response_model=list[salida])
@@ -144,11 +151,14 @@ def construir_abm(
         item = sesion.get(modelo, item_id)
         if item is None:
             raise HTTPException(404, f"No existe {etiqueta} con id {item_id}.")
-        if exigir_modificable is not None:
-            exigir_modificable(item_id)
-        for campo, valor in datos.model_dump().items():
-            setattr(item, campo, valor)
+        if exigir_editable is not None:
+            exigir_editable(item_id)
         try:
+            if editar_item is None:
+                for campo, valor in datos.model_dump().items():
+                    setattr(item, campo, valor)
+            else:
+                editar_item(sesion, item, datos.model_dump())
             sesion.commit()
         except IntegrityError as exc:
             sesion.rollback()
@@ -205,9 +215,12 @@ clientes = construir_abm(
     # El único maestro que un encargado puede dar de alta: es lo que hace posible
     # tomarle la reserva a alguien que llama por primera vez. Ver `construir_abm`.
     rol_escritura=require_staff,
-    # En un nodo el alta lleva id provisorio y sube; editar o borrar es del central (ADR-022).
+    # En un nodo el alta lleva id provisorio y sube; editar o borrar uno del central no se puede (ADR-022).
     agregar=clientes_nodo.agregar,
     exigir_modificable=clientes_nodo.exigir_cliente_modificable,
+    # Un cliente provisorio (dado de alta en el nodo, todavía sin subir) se corrige y la corrección sube; borrarlo no.
+    exigir_editable=clientes_nodo.exigir_cliente_editable,
+    editar_item=clientes_nodo.editar,
 )
 
 feriados = construir_abm(

@@ -8,6 +8,8 @@ import { Input } from '@/components/ui/input'
 import { buttonVariants } from '@/components/ui/button'
 import { AvisoDeError } from '@/components/listado'
 import { ConsultarEnArca } from 'libra-ui/configuracion/ConsultarEnArca'
+import { EtiquetaDePersonaDelNodo } from 'libra-ui/EtiquetaProvisorio'
+import { esIdProvisorio } from 'libra-ui/ids-provisorios'
 
 function vacio(): ClienteEntrada {
   return {
@@ -96,9 +98,19 @@ export function FormularioDeCliente({
     <Dialog open={abierto} onOpenChange={(o) => { if (!o) onCerrar() }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{cliente ? `Editar ${cliente.nombre}` : 'Nuevo cliente'}</DialogTitle>
+          <DialogTitle>
+            {cliente ? `Editar ${cliente.nombre}` : 'Nuevo cliente'}
+            {cliente && <EtiquetaDePersonaDelNodo id={cliente.id} persona="cliente" className="ml-2 align-middle" />}
+          </DialogTitle>
         </DialogHeader>
         <form onSubmit={enviar} className="space-y-3">
+          {/* Se edita igual (ADR-022): el cambio sube al central detrás del alta, cuando vuelva la conexión. */}
+          {cliente && esIdProvisorio(cliente.id) && (
+            <p className="text-xs text-muted-foreground">
+              Se dio de alta sin conexión. Podés corregirlo: los cambios suben al central junto con el alta. Si querés sacarlo de las
+              listas, desmarcá «Activo»: borrarlo recién se puede cuando tenga su número definitivo.
+            </p>
+          )}
           <label className="block space-y-1">
             <span className="text-sm font-medium">Nombre</span>
             <Input

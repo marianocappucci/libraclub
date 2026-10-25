@@ -29,6 +29,26 @@ beforeEach(() => {
 
 afterEach(() => vi.unstubAllGlobals())
 
+describe('clientes dados de alta sin conexión en el listado', () => {
+  it('el de id negativo lleva la etiqueta «Provisorio» y los del central no', async () => {
+    vi.stubGlobal('fetch', async (url: string) => {
+      if (url === '/api/clientes/ausentismo/reincidentes') {
+        return { ok: true, status: 200, json: async () => ({ umbral: 3, dias: 90, reincidentes: [] }) } as Response
+      }
+      return {
+        ok: true, status: 200,
+        json: async () => [{ ...CLIENTES[0], id: -2, nombre: 'Carla Nueva' }, CLIENTES[1]],
+      } as Response
+    })
+    render(<MemoryRouter><Clientes /></MemoryRouter>)
+
+    expect(await screen.findByText('Carla Nueva')).toBeInTheDocument()
+    expect(screen.getAllByText('Provisorio')).toHaveLength(1)
+    // Y se puede editar: la columna de acciones sigue ahí para las dos filas.
+    expect(screen.getAllByRole('button', { name: /editar/i }).length).toBeGreaterThanOrEqual(2)
+  })
+})
+
 describe('ausentismo en el listado de clientes', () => {
   it('marca al que viene faltando, con cuántas veces y la última', async () => {
     render(<MemoryRouter><Clientes /></MemoryRouter>)

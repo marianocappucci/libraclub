@@ -181,15 +181,19 @@ def test_con_conexion_el_nodo_tampoco_cambia_un_cliente_del_central(api_staff, s
     assert sesion.get(Cliente, cliente_id).nombre == "Del central", "no se tocó"
 
 
-def test_un_cliente_provisorio_tampoco_se_edita_porque_ya_subio_con_sus_datos(api_staff, sesion, nodo_clientes):
+def test_un_cliente_provisorio_no_se_borra_pero_se_da_de_baja(api_staff, sesion, nodo_clientes):
+    """Borrar un provisorio sigue siendo 409: su alta ya está en el outbox. Dar de baja es una edición y sí se puede."""
     creado = api_staff.post("/api/clientes", json=NUEVO).json()
-    for respuesta in (
-        api_staff.put(f"/api/clientes/{creado['id']}", json={**NUEVO, "nombre": "Juan Perez"}),
-        api_staff.delete(f"/api/clientes/{creado['id']}"),
-    ):
-        assert respuesta.status_code == 409, respuesta.text
-        assert respuesta.json()["detail"]["codigo"] == "solo_en_el_central"
+
+    borrado = api_staff.delete(f"/api/clientes/{creado['id']}")
+    assert borrado.status_code == 409, borrado.text
+    assert borrado.json()["detail"]["codigo"] == "solo_en_el_central"
+    assert "dalo de baja" in borrado.json()["detail"]["mensaje"]
     assert api_staff.get(f"/api/clientes/{creado['id']}").json()["nombre"] == "Juan Pérez"
+
+    baja = api_staff.put(f"/api/clientes/{creado['id']}", json={**NUEVO, "activo": False})
+    assert baja.status_code == 200 and baja.json()["activo"] is False
+    assert nodo_clientes.ediciones[0]["despues"] == {"activo": False}
 
 
 def test_un_nodo_cuyo_estado_no_se_puede_leer_se_toma_sin_conexion(sesion):
@@ -216,6 +220,114 @@ def test_en_un_nodo_el_portal_no_registra_cuentas(sesion, nodo_clientes):
     with pytest.raises(SoloEnElCentral):
         portal.registrar(sesion, email="ana@example.com", password="una-clave-larga", nombre="Ana")
     assert _ids(sesion) == [], "ni siquiera el cliente"
+
+
+# ── En un nodo: editar un cliente provisorio ─────────────────────────────────
+
+
+def test_editar_un_provisorio_actualiza_la_fila_y_encola_solo_lo_que_cambio(api_staff, sesion, nodo_clientes):
+    creado = api_staff.post("/api/clientes", json=NUEVO).json()
+
+    editado = api_staff.put(
+        f"/api/clientes/{creado['id']}", json={**NUEVO, "telefono": "11 5555 9999", "observaciones": "Juega los martes"}
+    )
+
+    assert editado.status_code == 200, editado.text
+    assert editado.json()["id"] == creado["id"] == -1, "sigue siendo el provisorio: el definitivo lo da el central"
+    assert editado.json()["telefono"] == "11 5555 9999"
+    (edicion,) = nodo_clientes.ediciones
+    assert edicion["version"] == 1 and edicion["cliente_id"] == -1 and edicion["editada_at"]
+    assert edicion["antes"] == {"telefono": "11 5555 1234", "observaciones": None}
+    assert edicion["despues"] == {"telefono": "11 5555 9999", "observaciones": "Juega los martes"}
+    assert len(nodo_clientes.altas) == 1, "la alta no se toca: la edición va detrás, como otra operación"
+
+
+def test_editar_un_provisorio_vale_con_y_sin_conexion(api_staff, sesion, nodo_clientes):
+    creado = api_staff.post("/api/clientes", json=NUEVO).json()
+    for en_linea, nombre in ((False, "Juan P."), (True, "Juan Pablo")):
+        nodo_clientes.en_linea = en_linea
+        r = api_staff.put(f"/api/clientes/{creado['id']}", json={**NUEVO, "nombre": nombre})
+        assert r.status_code == 200, r.text
+    assert [e["despues"]["nombre"] for e in nodo_clientes.ediciones] == ["Juan P.", "Juan Pablo"]
+    assert nodo_clientes.ediciones[1]["antes"] == {"nombre": "Juan P."}, "la base es lo que tenía el nodo al editar"
+
+
+def test_guardar_sin_cambios_no_encola_nada(api_staff, sesion, nodo_clientes):
+    creado = api_staff.post("/api/clientes", json=NUEVO).json()
+    # Los espacios de los bordes y el vacío contra `None` no son un cambio.
+    r = api_staff.put(f"/api/clientes/{creado['id']}", json={**NUEVO, "nombre": " Juan Pérez ", "cuit": ""})
+    assert r.status_code == 200, r.text
+    assert nodo_clientes.ediciones == []
+
+
+def test_el_valor_vacio_viaja_como_null_y_los_booleanos_como_booleanos(api_staff, sesion, nodo_clientes):
+    creado = api_staff.post("/api/clientes", json=NUEVO).json()
+    r = api_staff.put(f"/api/clientes/{creado['id']}", json={**NUEVO, "email": "", "acepta_avisos": False})
+    assert r.status_code == 200, r.text
+    (edicion,) = nodo_clientes.ediciones
+    assert edicion["antes"] == {"email": "juan@example.com", "acepta_avisos": True}
+    assert edicion["despues"] == {"email": None, "acepta_avisos": False}
+
+
+def test_un_cliente_del_central_sigue_sin_editarse_aunque_haya_provisorios(api_staff, sesion, nodo_clientes):
+    """La excepción es sólo para el provisorio: el definitivo es del central y el nodo no tiene cómo subir el cambio."""
+    api_staff.post("/api/clientes", json=NUEVO)
+    cliente_id = _cliente_del_central(sesion)
+    nodo_clientes.en_linea = True
+    r = api_staff.put(f"/api/clientes/{cliente_id}", json={"nombre": "Otro"})
+    assert r.status_code == 409 and r.json()["detail"]["codigo"] == "solo_en_el_central"
+    assert nodo_clientes.ediciones == []
+
+
+def test_fuera_de_un_nodo_editar_es_el_setattr_de_siempre(sesion):
+    cliente = Cliente(nombre="Ana")
+    sesion.add(cliente)
+    sesion.commit()
+    assert clientes_nodo.editar(sesion, cliente, {"nombre": "Ana María", "telefono": "11 1"}) is False
+    sesion.commit()
+    assert (cliente.nombre, cliente.telefono) == ("Ana María", "11 1")
+
+
+def test_fuera_de_un_nodo_la_guarda_de_edicion_no_hace_nada():
+    clientes_nodo.exigir_cliente_editable(5)
+    clientes_nodo.exigir_cliente_editable(-5)
+
+
+def test_la_guarda_de_edicion_deja_pasar_al_provisorio_y_frena_al_del_central(nodo_clientes):
+    clientes_nodo.exigir_cliente_editable(-5)
+    with pytest.raises(SinConexion):
+        clientes_nodo.exigir_cliente_editable(5)
+    nodo_clientes.en_linea = True
+    with pytest.raises(SoloEnElCentral):
+        clientes_nodo.exigir_cliente_editable(5)
+
+
+def test_si_el_encolado_de_la_edicion_falla_el_cambio_no_queda(sesion):
+    def falla(conn, datos):
+        raise RuntimeError("el outbox no anda")
+
+    clientes_nodo.configurar(
+        clientes_nodo.ClientesEnNodo(nodo=lambda: NODO, id_provisorio=lambda conn: -1, al_editar_cliente=falla)
+    )
+    try:
+        cliente = clientes_nodo.agregar(sesion, Cliente(nombre="Juan"))
+        sesion.commit()
+        with pytest.raises(RuntimeError, match="el outbox no anda"):
+            clientes_nodo.editar(sesion, cliente, {"nombre": "Juan Pablo"})
+        sesion.rollback()
+    finally:
+        clientes_nodo.configurar(None)
+    assert sesion.execute(text("SELECT nombre FROM clientes")).scalar_one() == "Juan"
+
+
+def test_si_el_provisorio_recibio_su_id_definitivo_mientras_se_editaba_es_409(sesion, nodo_clientes):
+    """El espejo reapunta y borra la fila provisoria entre que se leyó el cliente y se guardó: no es un 500."""
+    cliente = clientes_nodo.agregar(sesion, Cliente(nombre="Juan"))
+    sesion.commit()
+    sesion.execute(text("DELETE FROM clientes WHERE id = :id"), {"id": cliente.id})
+    with pytest.raises(SoloEnElCentral, match="definitivo"):
+        clientes_nodo.editar(sesion, cliente, {"nombre": "Juan Pablo"})
+    assert nodo_clientes.ediciones == []
 
 
 # ── Con el outbox de verdad ──────────────────────────────────────────────────
@@ -272,6 +384,31 @@ def test_el_alta_sube_antes_que_la_reserva_que_la_usa(api_staff, sesion, cancha,
     filas = _outbox(sesion)
     assert [f[0] for f in filas] == ["cliente_club.alta", "reserva.creada"]
     assert json.loads(filas[1][3])["cliente_id"] == cliente_id == -1
+
+
+def test_la_edicion_entra_en_el_outbox_detras_del_alta_y_en_su_transaccion(api_staff, sesion, nodo_con_outbox):
+    """Orden del outbox (ADR-020 de libraedge): alta, edición, edición, por la misma secuencia del nodo y con el mismo
+    `aggregate_id`; el central las aplica en ese orden."""
+    cliente_id = api_staff.post("/api/clientes", json=NUEVO).json()["id"]
+    assert api_staff.put(f"/api/clientes/{cliente_id}", json={**NUEVO, "telefono": "11 1"}).status_code == 200
+    assert api_staff.put(f"/api/clientes/{cliente_id}", json={**NUEVO, "telefono": "11 2"}).status_code == 200
+
+    filas = _outbox(sesion)
+    assert [f[0] for f in filas] == ["cliente_club.alta", "cliente_club.edicion", "cliente_club.edicion"]
+    assert {f[2] for f in filas} == {f"{NODO}:cliente_club:-1"}
+    assert json.loads(filas[1][3])["antes"] == {"telefono": "11 5555 1234"}
+    assert json.loads(filas[2][3])["antes"] == {"telefono": "11 1"}
+    assert json.loads(filas[2][3])["despues"] == {"telefono": "11 2"}
+
+
+def test_si_la_edicion_se_deshace_la_operacion_tambien(sesion, nodo_con_outbox):
+    cliente = clientes_nodo.agregar(sesion, Cliente(nombre="Juan"))
+    sesion.commit()
+    assert clientes_nodo.editar(sesion, cliente, {"nombre": "Juan Pablo"}) is True
+    assert [f[0] for f in _outbox(sesion)] == ["cliente_club.alta", "cliente_club.edicion"]
+    sesion.rollback()
+    assert [f[0] for f in _outbox(sesion)] == ["cliente_club.alta"]
+    assert sesion.execute(text("SELECT nombre FROM clientes")).scalar_one() == "Juan"
 
 
 def test_fuera_de_un_nodo_el_outbox_no_se_toca(sesion):

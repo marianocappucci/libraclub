@@ -16,6 +16,8 @@ chocaba con uno del central, o lo pisaba el espejo, y la reserva subía con un `
 - `operation_type`: `cliente_club.alta`. `aggregate_type = "cliente_club"`, `aggregate_id = "<nodo>:cliente_club:<id>"`.
 - La encola `agregar`, en la transacción del alta.
 - El central usa al cliente que ya existe o lo crea, y anota el mapeo.
+- `cliente_club.edicion` (mismo `aggregate_id`): la corrección de un cliente **provisorio** (ver «Editar un cliente
+  provisorio»).
 
 `cliente_club.alta` y **no** `cliente.alta`: ese tipo ya lo registra `libracommerce.erp.offline.registrar_en` (para los
 `clients` del buffet), y el `Despachador` falla al arrancar si se registra dos veces un mismo tipo.
@@ -62,15 +64,41 @@ un nodo se aplican en el orden en que se encolaron (ADR-020 de libraedge), y el 
 precede a la reserva. Si el alta quedó en revisión manual, la reserva se rechaza (`VinculoNoSincronizado`) en vez de
 quedar atada a nadie, y se reintenta al resolver el alta.
 
+## Editar un cliente provisorio (ADR-022, segundo addendum)
+
+Un cliente dado de alta sin conexión sigue siendo **provisorio** (id negativo) hasta que el alta sube y el mapeo baja
+por el espejo: horas o días en un club sin internet. En ese lapso el mostrador puede corregirlo (un teléfono mal
+anotado, un documento que faltaba, darlo de baja): `editar` actualiza la fila local y encola **`cliente_club.edicion`**.
+
+- **Siempre detrás del alta, nunca reescribiendo el payload pendiente.** No se toca la operación `cliente_club.alta`
+  aunque todavía no haya subido: el worker puede tenerla en vuelo, reescribirla no es atómico con el envío, y habría dos
+  caminos (alta pendiente / alta subida) donde hoy hay uno. El outbox sube por `(node_id, sequence)` (ADR-020 de
+  libraedge), así que la edición llega después del alta y su mapeo ya existe. Si el alta quedó en revisión manual, la
+  edición también (`SinMapeo`) y se reintenta en orden al resolverla.
+- **Payload `version 1`**: `cliente_id` (negativo), `antes` y `despues` (los mismos campos, sólo los que
+  **cambiaron**) y `editada_at`. Los campos son `nombre`, `telefono`, `email`, `documento`, `cuit`,
+  `observaciones`, `activo` y `acepta_avisos`. `antes` es lo que el nodo tenía al editar: es la **base** de la
+  comparación del central.
+- **Qué hace el central** (`aplicar_cliente_edicion`): traduce el id con el mapeo y compara, campo por campo, el valor
+  actual del central con la base del nodo. Si ya es el valor nuevo, no hace nada (idempotente); si sigue siendo la base,
+  lo cambia; si es **otro** valor —alguien lo editó en el central mientras tanto, o el alta se unió a un cliente que el
+  central ya tenía con otros datos— **no aplica nada**: toda la operación va a revisión manual (`EdicionEnConflicto`,
+  con el campo, lo del central y lo del nodo), y quien opera el central la reintenta o la descarta
+  (`libraedge-central revision`). **A confirmar con el humano**: la alternativa es «gana el último por campo».
+- **No vuelve a deduplicar**: cambiar el `documento` o el email no busca a otra persona (el maestro no tiene clave
+  única); un duplicado se junta a mano, como siempre.
+- Un cliente **definitivo** (id positivo, el del central) sigue sin editarse en el nodo. Y borrar un provisorio tampoco:
+  se lo da de baja (`activo = false`), que es una edición.
+
 ## En el nodo: las guardas
 
 `clientes` es una tabla que el nodo espeja, y con `AltaEnNodo("clientes")` en el aprovisionamiento sólo deja escribir
 las filas con id negativo (ADR-019 de libraedge: cualquier otra da SQLSTATE `LE001`). Lo que la base rechazaría con un
 500 se contesta antes con un 409 claro:
 
-- editar o borrar un cliente: **409 `sin_conexion`** si el nodo no está en línea (misma decisión que con las reservas
-  del central) y **409 `solo_en_el_central`** si lo está. Un cliente provisorio tampoco se edita: la operación que ya
-  se encoló llevaría los datos viejos y el cambio se perdería cuando baje el definitivo;
+- editar o borrar un cliente **del central**: **409 `sin_conexion`** si el nodo no está en línea (misma decisión que con
+  las reservas del central) y **409 `solo_en_el_central`** si lo está. Un cliente **provisorio** se edita (ver arriba)
+  pero no se borra (**409 `solo_en_el_central`**: se lo da de baja);
 - registrarse en el portal de jugadores: **409 `solo_en_el_central`** (el portal es público y no corre en el equipo del
   local).
 
@@ -97,6 +125,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from libracore.nodo_offline import SinConexion, SoloEnElCentral
+from sqlalchemy.orm.exc import StaleDataError
 
 from app.servicios import reservas_nodo
 
@@ -108,7 +137,13 @@ VERSION = 1
 SCHEMA_VERSION = 1
 
 TIPO_CLIENTE_ALTA = "cliente_club.alta"
-TIPOS = (TIPO_CLIENTE_ALTA,)
+TIPO_CLIENTE_EDICION = "cliente_club.edicion"
+TIPOS = (TIPO_CLIENTE_ALTA, TIPO_CLIENTE_EDICION)
+
+#: Los datos del cliente que el mostrador corrige, y que viajan en `cliente_club.edicion`: los del alta.
+CAMPOS_DE_TEXTO = ("nombre", "telefono", "email", "documento", "cuit", "observaciones")
+CAMPOS_BOOLEANOS = ("activo", "acepta_avisos")
+CAMPOS_EDITABLES = CAMPOS_DE_TEXTO + CAMPOS_BOOLEANOS
 
 #: El `aggregate_type` de la operación (el `aggregate_id` es `<node_id>:cliente_club:<id>`).
 AGREGADO_CLIENTE = "cliente_club"
@@ -130,7 +165,10 @@ MENSAJE_DEL_CENTRAL = (
     "Los clientes se editan y se borran desde el central, no desde el equipo del local: desde acá sólo se dan de alta."
 )
 MENSAJE_PROVISORIO = (
-    "Este cliente se dio de alta sin conexión y todavía no subió al central: corregilo desde la web cuando suba."
+    "Un cliente dado de alta sin conexión se puede corregir, pero no borrar hasta que suba al central: dalo de baja."
+)
+MENSAJE_YA_SUBIO = (
+    "Este cliente ya subió al central y recibió su número definitivo: actualizá la lista y corregilo desde ahí."
 )
 MENSAJE_PORTAL_SOLO_EN_EL_CENTRAL = (
     "El portal de jugadores es del central: el equipo del local no registra cuentas."
@@ -144,6 +182,15 @@ class ClienteDelNodoError(ValueError):
 
 class AltaDeClienteInvalida(ClienteDelNodoError):
     """El payload de `cliente_club.alta` no se entiende o trae algo que el central no puede escribir."""
+
+
+class EdicionDeClienteInvalida(ClienteDelNodoError):
+    """El payload de `cliente_club.edicion` no se entiende o trae algo que el central no puede escribir."""
+
+
+class EdicionEnConflicto(ClienteDelNodoError):
+    """Alguien cambió en el central un campo que el nodo también corrigió (o el alta se unió a un cliente con otros
+    datos): no se aplica nada y la operación espera a quien opera el central (revisión manual)."""
 
 
 # ── La configuración: qué es un nodo y cómo se encola ────────────────────────
@@ -168,12 +215,15 @@ class ClientesEnNodo:
       queda (un cliente que se da de alta en el nodo y no sube no es «a medias»: el central no lo ve y la próxima
       reserva a su nombre se rechaza). Lo normal es encolar en el outbox.
     - `en_linea`: si el nodo ve al central. Sólo decide qué 409 se contesta (ver «En el nodo: las guardas»).
+    - `al_editar_cliente`: `(conn, datos)`, como `al_crear_cliente` para la corrección de un cliente provisorio: corre
+      adentro de la transacción de la edición y, si levanta, el cambio no queda.
     """
 
     nodo: Callable[[], str | None]
     id_provisorio: Callable[[Any], int]
     al_crear_cliente: Callable[[Any, dict], None] = _nada
     en_linea: Callable[[], bool] = _sin_conexion
+    al_editar_cliente: Callable[[Any, dict], None] = _nada
 
 
 _configuracion: ClientesEnNodo | None = None
@@ -241,8 +291,14 @@ def desde_el_outbox(outbox) -> ClientesEnNodo:
         if local is not None:
             encolar_alta(conn, local, datos)
 
+    def al_editar_cliente(conn, datos: dict) -> None:
+        local = outbox.nodo()
+        if local is not None:
+            encolar_edicion(conn, local, datos)
+
     return ClientesEnNodo(
-        nodo=nodo, id_provisorio=id_provisorio, al_crear_cliente=al_crear_cliente, en_linea=outbox.en_linea
+        nodo=nodo, id_provisorio=id_provisorio, al_crear_cliente=al_crear_cliente, en_linea=outbox.en_linea,
+        al_editar_cliente=al_editar_cliente,
     )
 
 
@@ -252,6 +308,13 @@ def encolar_alta(conn, nodo, datos: Mapping[str, Any]):
     from libracommerce.erp.offline_caja import _encolar
 
     return _encolar(conn, nodo, TIPO_CLIENTE_ALTA, AGREGADO_CLIENTE, datos["cliente_id"], datos)
+
+
+def encolar_edicion(conn, nodo, datos: Mapping[str, Any]):
+    """Encola `cliente_club.edicion` **dentro de la transacción de `conn`**. Va al mismo agregado que el alta."""
+    from libracommerce.erp.offline_caja import _encolar
+
+    return _encolar(conn, nodo, TIPO_CLIENTE_EDICION, AGREGADO_CLIENTE, datos["cliente_id"], datos)
 
 
 # ── En el nodo: el alta ──────────────────────────────────────────────────────
@@ -307,6 +370,64 @@ def agregar(sesion, cliente):
     return cliente
 
 
+def _limpio(campo: str, valor: Any) -> Any:
+    """El valor de un campo como viaja y como se compara: el texto sin espacios de los bordes y `None` si queda vacío;
+    los booleanos, `bool` (un `acepta_avisos` nulo es `True`, como en el alta)."""
+    if campo in CAMPOS_BOOLEANOS:
+        return True if valor is None else bool(valor)
+    if valor is None:
+        return None
+    return str(valor).strip() or None
+
+
+def datos_de_edicion(cliente_id: int, antes: Mapping[str, Any], despues: Mapping[str, Any], *,
+                     editada_at: datetime | None = None) -> dict:
+    """El payload de `cliente_club.edicion`: sólo los campos que cambiaron, con su valor anterior (la base de la
+    comparación del central) y el nuevo."""
+    return {
+        "version": VERSION,
+        "cliente_id": cliente_id,
+        "antes": dict(antes),
+        "despues": dict(despues),
+        "editada_at": _iso(editada_at or datetime.now(UTC)),
+    }
+
+
+def editar(sesion, cliente, datos: Mapping[str, Any]) -> bool:
+    """Aplica `datos` (los campos de `ClienteEntrada`) al `cliente` y devuelve si **encoló** una edición.
+
+    Fuera de un nodo, o con un cliente del central, es el `setattr` de siempre y nada más (la guarda
+    `exigir_cliente_editable` ya dejó afuera al del central en un nodo). Con un cliente **provisorio** en un nodo,
+    además de actualizar la fila local encola `cliente_club.edicion` **en la misma transacción**, con sólo lo que
+    cambió; si no cambió nada, no encola nada. Si el encolado falla, el cambio tampoco queda. No commitea.
+
+    Si entre que se leyó el cliente y se guardó el nodo le recibió su id definitivo (la fila provisoria desapareció),
+    levanta `SoloEnElCentral` (409): se corrige ya desde la lista nueva."""
+    if not en_un_nodo() or not es_provisorio(cliente.id):
+        for campo, valor in datos.items():
+            setattr(cliente, campo, valor)
+        return False
+
+    antes = {c: _limpio(c, getattr(cliente, c)) for c in CAMPOS_EDITABLES if c in datos}
+    despues = {c: _limpio(c, datos[c]) for c in antes}
+    cambiados = [c for c in antes if antes[c] != despues[c]]
+    for campo, valor in datos.items():
+        setattr(cliente, campo, valor)
+    if not cambiados:
+        return False
+    try:
+        sesion.flush()
+    except StaleDataError as exc:
+        sesion.rollback()
+        raise SoloEnElCentral(MENSAJE_YA_SUBIO) from exc
+    conn = reservas_nodo.conexion_de_la_sesion(sesion)
+    if _configuracion is not None:
+        _configuracion.al_editar_cliente(
+            conn, datos_de_edicion(cliente.id, {c: antes[c] for c in cambiados}, {c: despues[c] for c in cambiados})
+        )
+    return True
+
+
 # ── En el nodo: las guardas ──────────────────────────────────────────────────
 
 
@@ -318,9 +439,28 @@ def _en_linea() -> bool:
         return False
 
 
+def _exigir_del_central() -> None:
+    """Lo que se contesta cuando el cliente es del central: `SinConexion` (409 `sin_conexion`) si el nodo no está en
+    línea, `SoloEnElCentral` (409 `solo_en_el_central`) si lo está."""
+    if _en_linea():
+        raise SoloEnElCentral(MENSAJE_DEL_CENTRAL)
+    raise SinConexion(MENSAJE_SIN_CONEXION)
+
+
+def exigir_cliente_editable(cliente_id: int) -> None:
+    """En un nodo, editar un cliente sólo se puede si es **provisorio** (se dio de alta en este nodo: su corrección
+    sube como `cliente_club.edicion`). El del central es de sólo lectura. Fuera de un nodo no hace nada.
+
+    Levanta `SinConexion` (409 `sin_conexion`) si el nodo no está en línea, y `SoloEnElCentral` (409
+    `solo_en_el_central`) si lo está."""
+    if not en_un_nodo() or es_provisorio(cliente_id):
+        return
+    _exigir_del_central()
+
+
 def exigir_cliente_modificable(cliente_id: int) -> None:
-    """En un nodo, editar o borrar un cliente no se puede (el del central es de sólo lectura, el provisorio ya subió
-    con sus datos). Fuera de un nodo no hace nada.
+    """En un nodo, **borrar** un cliente no se puede: el del central es de sólo lectura y el provisorio ya subió con su
+    alta (se lo da de baja, que es una edición). Fuera de un nodo no hace nada.
 
     Levanta `SinConexion` (409 `sin_conexion`) si el nodo no está en línea, y `SoloEnElCentral` (409
     `solo_en_el_central`) si lo está o si el cliente todavía es provisorio."""
@@ -328,9 +468,7 @@ def exigir_cliente_modificable(cliente_id: int) -> None:
         return
     if es_provisorio(cliente_id):
         raise SoloEnElCentral(MENSAJE_PROVISORIO)
-    if _en_linea():
-        raise SoloEnElCentral(MENSAJE_DEL_CENTRAL)
-    raise SinConexion(MENSAJE_SIN_CONEXION)
+    _exigir_del_central()
 
 
 def exigir_central_para_el_portal() -> None:
@@ -413,6 +551,67 @@ def _datos_de_alta(operacion) -> dict:
         "acepta_avisos": _booleano(datos, "acepta_avisos", operacion, por_defecto=True),
         "observaciones": observaciones,
         "creada_at": _fecha(datos, "creada_at", operacion),
+    }
+
+
+def _valor_editado(campo: str, valor: Any, operacion, *, obligatorio: bool = False) -> Any:
+    """Un valor de `antes` o `despues` de `cliente_club.edicion`, validado con los mismos límites que el alta. Los
+    textos llegan ya sin espacios de los bordes y `None` si estaban vacíos."""
+    quien = f"la edición del nodo {operacion.node_id}"
+    if campo in CAMPOS_BOOLEANOS:
+        if not isinstance(valor, bool):
+            raise EdicionDeClienteInvalida(f"{campo} {valor!r} de {quien} no es un booleano")
+        return valor
+    if valor is None:
+        if obligatorio:
+            raise EdicionDeClienteInvalida(f"{quien} deja {campo} vacío")
+        return None
+    if not isinstance(valor, str):
+        raise EdicionDeClienteInvalida(f"{campo} {valor!r} de {quien} no es un texto")
+    valor = valor.strip()
+    if not valor:
+        if obligatorio:
+            raise EdicionDeClienteInvalida(f"{quien} deja {campo} vacío")
+        return None
+    if len(valor) > _LARGOS.get(campo, 10_000_000):
+        raise EdicionDeClienteInvalida(f"{campo} de {quien} pasa de {_LARGOS[campo]} caracteres")
+    return valor
+
+
+def _datos_de_edicion(operacion) -> dict:
+    """Valida el payload de `cliente_club.edicion` y lo devuelve con los tipos de Python."""
+    if operacion.operation_type != TIPO_CLIENTE_EDICION:
+        raise EdicionDeClienteInvalida(f"se esperaba {TIPO_CLIENTE_EDICION}, llegó {operacion.operation_type!r}")
+    if operacion.schema_version != SCHEMA_VERSION:
+        raise EdicionDeClienteInvalida(
+            f"schema {operacion.schema_version} de {TIPO_CLIENTE_EDICION} desconocido (se entiende {SCHEMA_VERSION})"
+        )
+    datos = operacion.payload
+    if datos.get("version") != VERSION:
+        raise EdicionDeClienteInvalida(
+            f"versión {datos.get('version')!r} de los datos de {TIPO_CLIENTE_EDICION} desconocida "
+            f"(se entiende {VERSION})"
+        )
+    id_nodo = datos.get("cliente_id")
+    if isinstance(id_nodo, bool) or not isinstance(id_nodo, int) or id_nodo >= 0:
+        # Defensa en profundidad: `traducir_id` deja pasar un id positivo tal cual, y el nodo no edita clientes del
+        # central. Una edición con un id definitivo editaría a otra persona.
+        raise EdicionDeClienteInvalida(
+            f"el cliente_id {id_nodo!r} de la edición del nodo {operacion.node_id} no es un id provisorio (un entero "
+            "negativo): el nodo sólo sube ediciones de clientes que dio de alta"
+        )
+    antes, despues = datos.get("antes"), datos.get("despues")
+    if not isinstance(antes, dict) or not isinstance(despues, dict) or not despues:
+        raise EdicionDeClienteInvalida("la edición no trae `antes` y `despues`, o no cambia ningún campo")
+    if set(antes) != set(despues):
+        raise EdicionDeClienteInvalida("`antes` y `despues` de la edición no tienen los mismos campos")
+    desconocidos = sorted(set(despues) - set(CAMPOS_EDITABLES))
+    if desconocidos:
+        raise EdicionDeClienteInvalida(f"la edición trae campos que no se editan: {', '.join(desconocidos)}")
+    return {
+        "cliente_id": id_nodo,
+        "antes": {c: _valor_editado(c, antes[c], operacion) for c in despues},
+        "despues": {c: _valor_editado(c, despues[c], operacion, obligatorio=c == "nombre") for c in despues},
     }
 
 
@@ -548,14 +747,74 @@ def aplicar_cliente_alta(conn, operacion) -> None:
         raise ClienteDelNodoError(str(exc)) from exc
 
 
+def _en_texto(campo: str, valor: Any) -> str:
+    """Un valor para el mensaje de un conflicto."""
+    return "(vacío)" if valor is None else repr(valor)
+
+
+def aplicar_cliente_edicion(conn, operacion) -> None:
+    """Aplica `cliente_club.edicion` sobre el cliente que el alta del nodo dejó mapeado.
+
+    Traduce el id con el mapeo (si el alta no se aplicó, `SinMapeo`: revisión manual, y se reintenta en orden al
+    resolverla) y compara, **campo por campo**, el valor del central con la base (`antes`) del nodo:
+
+    - ya es el valor nuevo: no hace nada (idempotente: el outbox entrega al menos una vez, y la revisión se reintenta);
+    - sigue siendo la base: lo cambia;
+    - es **otro** valor: alguien lo cambió en el central mientras tanto. La regla conservadora es **no aplicar nada** de
+      la operación (ni siquiera los campos sin conflicto) y mandarla entera a revisión manual (`EdicionEnConflicto`),
+      con lo que tiene el central y lo que quería el nodo. A confirmar con el humano (ADR-022, segundo addendum).
+
+    Corre en la transacción del receptor y bloquea la fila (`FOR UPDATE`). Los errores son `ValueError`."""
+    from libraedge import mapeo
+
+    datos = _datos_de_edicion(operacion)
+    node_id, id_nodo = operacion.node_id, datos["cliente_id"]
+    id_central = mapeo.traducir_id(conn, node_id, TABLA_CLIENTES, id_nodo)
+    campos = list(datos["despues"])
+    fila = conn.execute(
+        f"SELECT {', '.join(campos)} FROM clientes WHERE id = ? FOR UPDATE", (id_central,)
+    ).fetchone()
+    if fila is None:
+        raise ClienteDelNodoError(
+            f"el cliente {id_central} (el {id_nodo} del nodo {node_id}) ya no existe en el central"
+        )
+
+    cambios: dict[str, Any] = {}
+    en_conflicto: list[str] = []
+    for campo, actual in zip(campos, fila, strict=True):
+        actual = _valor_editado(campo, actual, operacion)
+        nuevo = datos["despues"][campo]
+        if actual == nuevo:
+            continue
+        if actual == datos["antes"][campo]:
+            cambios[campo] = nuevo
+        else:
+            en_conflicto.append(
+                f"{campo}: el central tiene {_en_texto(campo, actual)}, el nodo lo cambió de "
+                f"{_en_texto(campo, datos['antes'][campo])} a {_en_texto(campo, nuevo)}"
+            )
+    if en_conflicto:
+        raise EdicionEnConflicto(
+            f"el nodo {node_id} corrigió al cliente {id_central} (el {id_nodo} del nodo) y en el central ya era otro "
+            f"dato: {'; '.join(en_conflicto)}. No se aplicó nada: reintentar si se resuelve a mano, o descartar"
+        )
+    if not cambios:
+        return
+    asignaciones = ", ".join(f"{campo} = ?" for campo in cambios)
+    conn.execute(
+        f"UPDATE clientes SET {asignaciones}, updated_at = now() WHERE id = ?", (*cambios.values(), id_central)
+    )
+
+
 def aplicadores() -> dict[str, Callable[[Any, Any], None]]:
-    """`{operation_type: (conn, operacion) -> None}` de `cliente_club.alta`, para el despachador del central."""
-    return {TIPO_CLIENTE_ALTA: aplicar_cliente_alta}
+    """`{operation_type: (conn, operacion) -> None}` de `cliente_club.alta` y `cliente_club.edicion`, para el
+    despachador del central."""
+    return {TIPO_CLIENTE_ALTA: aplicar_cliente_alta, TIPO_CLIENTE_EDICION: aplicar_cliente_edicion}
 
 
 def registrar_en(despachador):
-    """Registra `cliente_club.alta` en un `libraedge.sync.despacho.Despachador` (el mismo en que
-    `libracommerce.erp.offline.registrar_en` y `reservas_nodo.registrar_en` registraron los suyos) y lo devuelve.
+    """Registra `cliente_club.alta` y `cliente_club.edicion` en un `libraedge.sync.despacho.Despachador` (el mismo en
+    que `libracommerce.erp.offline.registrar_en` y `reservas_nodo.registrar_en` registraron los suyos) y lo devuelve.
     Registrar dos veces un tipo falla al arrancar (es la regla del `Despachador`)."""
     for tipo, aplicador in aplicadores().items():
         despachador.registrar(tipo, SCHEMA_VERSION, aplicador)
