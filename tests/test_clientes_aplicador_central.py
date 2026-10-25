@@ -23,8 +23,15 @@ from libraedge.sync.despacho import Despachador
 
 from app.models.maestros import Cliente
 from app.servicios import clientes_nodo, reservas_nodo
-from app.servicios.clientes_nodo import TIPO_CLIENTE_ALTA, AltaDeClienteInvalida, ClienteDelNodoError
-from tests.clientes_nodo_apoyo import NODO, alta, operacion_alta
+from app.servicios.clientes_nodo import (
+    TIPO_CLIENTE_ALTA,
+    TIPO_CLIENTE_EDICION,
+    AltaDeClienteInvalida,
+    ClienteDelNodoError,
+    EdicionDeClienteInvalida,
+    EdicionEnConflicto,
+)
+from tests.clientes_nodo_apoyo import NODO, alta, edicion, operacion_alta, operacion_edicion
 from tests.reservas_nodo_apoyo import (  # noqa: F401  (fixture)
     a_las,
     central,
@@ -40,6 +47,20 @@ def aplicar(conn, payload: dict, **kw) -> None:
     """Aplica un `cliente_club.alta` como el receptor: en la transacción de `conn`, que se confirma al final."""
     clientes_nodo.aplicar_cliente_alta(conn, operacion_alta(payload, **kw))
     conn.commit()
+
+
+def aplicar_edicion(conn, payload: dict, **kw) -> None:
+    """Aplica un `cliente_club.edicion` como el receptor: en la transacción de `conn`, que se confirma al final."""
+    clientes_nodo.aplicar_cliente_edicion(conn, operacion_edicion(payload, **kw))
+    conn.commit()
+
+
+def _fila(conn, id_central: int) -> tuple:
+    """`(nombre, telefono, email, documento, cuit, activo, acepta_avisos, observaciones)` de un cliente del central."""
+    return tuple(conn.execute(
+        "SELECT nombre, telefono, email, documento, cuit, activo, acepta_avisos, observaciones FROM clientes "
+        "WHERE id = ?", (id_central,),
+    ).fetchone())
 
 
 def _clientes(conn) -> list[tuple]:
@@ -349,6 +370,225 @@ def test_del_nodo_al_central_el_alta_y_la_reserva_suben_en_orden_y_quedan_enlaza
     assert central.execute("SELECT nombre FROM clientes WHERE id = ?", (id_cliente,)).fetchone()[0] == "Juan Pérez"
 
 
+# ── Editar un cliente provisorio (ADR-022, segundo addendum) ─────────────────
+
+
+def _alta_aplicada(central, id_nodo: int = -1, **datos) -> int:
+    """Aplica el alta de «Juan Pérez» (con lo que se pida cambiar) y devuelve el id que le dio el central."""
+    base = {"telefono": "11 5555 1234", "email": "juan@example.com", "documento": "30123456"}
+    aplicar(central, alta(id_nodo, datos.pop("nombre", "Juan Pérez"), **{**base, **datos}))
+    return traducir_id(central, NODO, "clientes", id_nodo)
+
+
+def test_la_edicion_cambia_al_cliente_que_el_alta_dejo_mapeado(sesion, central):
+    id_central = _alta_aplicada(central)
+
+    aplicar_edicion(
+        central, edicion(-1, antes={"telefono": "11 5555 1234", "activo": True},
+                         despues={"telefono": "11 5555 9999", "activo": False}),
+    )
+
+    nombre, telefono, email, documento, _cuit, activo, avisos, _obs = _fila(central, id_central)
+    assert (nombre, telefono, email, documento, activo, avisos) == (
+        "Juan Pérez", "11 5555 9999", "juan@example.com", "30123456", False, True
+    ), "cambia lo editado y nada más"
+    assert central.execute("SELECT updated_at > created_at FROM clientes WHERE id = ?", (id_central,)).fetchone()[0]
+
+
+def test_aplicar_la_edicion_dos_veces_es_lo_mismo_que_una(sesion, central):
+    """El outbox entrega al menos una vez, y la revisión manual se reintenta."""
+    id_central = _alta_aplicada(central)
+    for _ in range(3):
+        aplicar_edicion(central, edicion(-1, antes={"telefono": "11 5555 1234"}, despues={"telefono": "11 1"}))
+    assert _fila(central, id_central)[1] == "11 1"
+
+
+def test_un_campo_vacio_en_el_nodo_deja_null_en_el_central(sesion, central):
+    id_central = _alta_aplicada(central)
+    aplicar_edicion(central, edicion(-1, antes={"email": "juan@example.com"}, despues={"email": None}))
+    assert _fila(central, id_central)[2] is None
+
+
+def test_dos_ediciones_seguidas_se_encadenan_porque_la_base_de_la_segunda_es_la_primera(sesion, central):
+    id_central = _alta_aplicada(central)
+    aplicar_edicion(central, edicion(-1, antes={"telefono": "11 5555 1234"}, despues={"telefono": "11 1"}), secuencia=2)
+    aplicar_edicion(central, edicion(-1, antes={"telefono": "11 1"}, despues={"telefono": "11 2"}), secuencia=3)
+    assert _fila(central, id_central)[1] == "11 2"
+
+
+def test_la_edicion_no_toca_a_otro_cliente_ni_al_de_otro_nodo(sesion, central):
+    uno = _alta_aplicada(central, -1)
+    aplicar(central, alta(-1, "Del club 2", telefono="11 5555 1234"), node_id="club-2")
+    del_club_2 = traducir_id(central, "club-2", "clientes", -1)
+
+    aplicar_edicion(central, edicion(-1, antes={"telefono": "11 5555 1234"}, despues={"telefono": "11 1"}))
+
+    assert _fila(central, uno)[1] == "11 1"
+    assert _fila(central, del_club_2)[1] == "11 5555 1234"
+
+
+# Conflicto: alguien editó el mismo cliente en el central mientras el nodo estaba sin conexión.
+
+
+def test_si_el_central_cambio_el_mismo_campo_no_se_aplica_nada_y_va_a_revision(sesion, central):
+    id_central = _alta_aplicada(central)
+    central.execute("UPDATE clientes SET telefono = '11 0000 0000' WHERE id = ?", (id_central,))
+    central.commit()
+    antes = _fila(central, id_central)
+
+    with pytest.raises(EdicionEnConflicto, match="telefono") as error:
+        aplicar_edicion(
+            central, edicion(-1, antes={"telefono": "11 5555 1234", "nombre": "Juan Pérez"},
+                             despues={"telefono": "11 5555 9999", "nombre": "Juan P."}),
+        )
+
+    mensaje = str(error.value)
+    assert "11 0000 0000" in mensaje and "11 5555 9999" in mensaje, "dice qué hay y qué quería el nodo"
+    assert isinstance(error.value, ValueError), "el receptor lo manda a revisión manual"
+    central.rollback()
+    assert _fila(central, id_central) == antes, "ni siquiera el campo sin conflicto (el nombre) se aplica"
+
+
+def test_si_el_central_ya_tiene_el_valor_que_el_nodo_quiere_no_es_conflicto(sesion, central):
+    """Dos personas corrigieron lo mismo: el central ya está bien."""
+    id_central = _alta_aplicada(central)
+    central.execute("UPDATE clientes SET telefono = '11 1' WHERE id = ?", (id_central,))
+    central.commit()
+    aplicar_edicion(central, edicion(-1, antes={"telefono": "11 5555 1234"}, despues={"telefono": "11 1"}))
+    assert _fila(central, id_central)[1] == "11 1"
+
+
+def test_un_campo_que_el_central_cambio_pero_el_nodo_no_toco_no_choca(sesion, central):
+    """El conflicto es por campo: el central editó el email y el nodo el teléfono. Son cambios que se juntan."""
+    id_central = _alta_aplicada(central)
+    central.execute("UPDATE clientes SET email = 'nuevo@example.com' WHERE id = ?", (id_central,))
+    central.commit()
+    aplicar_edicion(central, edicion(-1, antes={"telefono": "11 5555 1234"}, despues={"telefono": "11 1"}))
+    fila = _fila(central, id_central)
+    assert (fila[1], fila[2]) == ("11 1", "nuevo@example.com")
+
+
+def test_la_edicion_sobre_un_cliente_que_el_alta_unio_a_otro_con_distintos_datos_va_a_revision(sesion, central):
+    """El alta se unió a la ficha que el central ya tenía («no toca sus datos»). Corregir ahí el teléfono del nodo
+    pisaría el dato de otra ficha: es conflicto, no una edición."""
+    existente = _del_central(central, "Juan Pérez", documento="30123456")
+    central.execute("UPDATE clientes SET telefono = '11 7777 7777' WHERE id = ?", (existente,))
+    central.commit()
+    aplicar(central, alta(-1, "Juancho", documento="30123456", telefono="11 5555 1234"))
+    assert traducir_id(central, NODO, "clientes", -1) == existente
+
+    with pytest.raises(EdicionEnConflicto):
+        aplicar_edicion(central, edicion(-1, antes={"telefono": "11 5555 1234"}, despues={"telefono": "11 5555 9999"}))
+    central.rollback()
+    assert _fila(central, existente)[1] == "11 7777 7777"
+
+
+def test_una_edicion_en_revision_se_aplica_al_reintentar_cuando_ya_no_hay_conflicto(sesion, central):
+    id_central = _alta_aplicada(central)
+    central.execute("UPDATE clientes SET telefono = '11 0000 0000' WHERE id = ?", (id_central,))
+    central.commit()
+    payload = edicion(-1, antes={"telefono": "11 5555 1234"}, despues={"telefono": "11 5555 9999"})
+    with pytest.raises(EdicionEnConflicto):
+        aplicar_edicion(central, payload)
+    central.rollback()
+
+    # Quien opera el central acuerda el dato (vuelve a la base del nodo) y reintenta la misma operación.
+    central.execute("UPDATE clientes SET telefono = '11 5555 1234' WHERE id = ?", (id_central,))
+    central.commit()
+    aplicar_edicion(central, payload)
+    assert _fila(central, id_central)[1] == "11 5555 9999"
+
+
+# Lo que no se puede aplicar: revisión manual, sin escribir nada.
+
+
+def test_una_edicion_sin_el_alta_aplicada_es_sin_mapeo_y_entra_al_reintentar_en_orden(sesion, central):
+    from libraedge.mapeo import SinMapeo
+
+    payload = edicion(-1, antes={"telefono": "11 5555 1234"}, despues={"telefono": "11 1"})
+    with pytest.raises(SinMapeo):
+        aplicar_edicion(central, payload)
+    central.rollback()
+
+    id_central = _alta_aplicada(central)
+    aplicar_edicion(central, payload)
+    assert _fila(central, id_central)[1] == "11 1"
+
+
+def test_una_edicion_de_un_cliente_que_ya_no_existe_es_revision_manual(sesion, central):
+    anotar_mapeo(central, NODO, "clientes", -1, 987654)
+    central.commit()
+    with pytest.raises(ClienteDelNodoError, match="ya no existe"):
+        aplicar_edicion(central, edicion(-1, antes={"telefono": None}, despues={"telefono": "11 1"}))
+
+
+@pytest.mark.parametrize(
+    ("cambio", "fragmento"),
+    [
+        ({"cliente_id": 5}, "no es un id provisorio"),
+        ({"cliente_id": 0}, "no es un id provisorio"),
+        ({"cliente_id": True}, "no es un id provisorio"),
+        ({"cliente_id": "-1"}, "no es un id provisorio"),
+        ({"despues": {}, "antes": {}}, "no cambia ningún campo"),
+        ({"despues": None}, "no trae"),
+        ({"antes": {"telefono": None, "email": None}}, "no tienen los mismos campos"),
+        ({"antes": {"id": 1}, "despues": {"id": 2}}, "no se editan: id"),
+        ({"antes": {"created_at": "x"}, "despues": {"created_at": "y"}}, "no se editan: created_at"),
+        ({"despues": {"nombre": ""}, "antes": {"nombre": "Juan"}}, "deja nombre vacío"),
+        ({"despues": {"nombre": None}, "antes": {"nombre": "Juan"}}, "deja nombre vacío"),
+        ({"despues": {"nombre": "x" * 121}, "antes": {"nombre": "Juan"}}, "pasa de 120"),
+        ({"despues": {"cuit": "9" * 14}, "antes": {"cuit": None}}, "pasa de 13"),
+        ({"despues": {"telefono": 5}, "antes": {"telefono": None}}, "no es un texto"),
+        ({"despues": {"activo": "no"}, "antes": {"activo": True}}, "no es un booleano"),
+        ({"despues": {"acepta_avisos": None}, "antes": {"acepta_avisos": True}}, "no es un booleano"),
+        ({"version": 2}, "desconocida"),
+    ],
+)
+def test_una_edicion_que_no_se_entiende_es_un_value_error_y_no_escribe_nada(sesion, central, cambio, fragmento):
+    id_central = _alta_aplicada(central)
+    antes = _fila(central, id_central)
+    payload = {**edicion(-1, antes={"telefono": "11 5555 1234"}, despues={"telefono": "11 1"}), **cambio}
+
+    with pytest.raises(EdicionDeClienteInvalida, match=fragmento):
+        aplicar_edicion(central, payload)
+
+    central.rollback()
+    assert _fila(central, id_central) == antes
+    assert issubclass(EdicionDeClienteInvalida, ValueError)
+
+
+def test_una_edicion_con_un_id_positivo_no_edita_a_un_cliente_del_central(sesion, central):
+    """Defensa en profundidad: `traducir_id` deja pasar un id definitivo tal cual y el nodo no edita a los del
+    central."""
+    del_central = _del_central(central, "Del central", documento="20111222")
+    with pytest.raises(EdicionDeClienteInvalida, match="no es un id provisorio"):
+        aplicar_edicion(central, edicion(del_central, antes={"nombre": "Del central"}, despues={"nombre": "Otro"}))
+    central.rollback()
+    assert _fila(central, del_central)[0] == "Del central"
+
+
+def test_un_schema_o_un_tipo_de_edicion_desconocido_se_rechaza(sesion, central):
+    payload = edicion(-1, antes={"telefono": None}, despues={"telefono": "11 1"})
+    with pytest.raises(EdicionDeClienteInvalida, match="schema 2"):
+        aplicar_edicion(central, payload, schema_version=2)
+    with pytest.raises(EdicionDeClienteInvalida, match="se esperaba"):
+        aplicar_edicion(central, payload, tipo=TIPO_CLIENTE_ALTA)
+
+
+def test_el_despachador_real_aplica_el_alta_y_la_edicion_en_orden(sesion, central):
+    despachador = reservas_nodo.registrar_en(clientes_nodo.registrar_en(Despachador()))
+    assert despachador.versiones(TIPO_CLIENTE_EDICION) == (1,)
+
+    despachador(central, operacion_alta(alta(-1, "Juan Pérez", telefono="11 5555 1234")))
+    cambio = edicion(-1, antes={"telefono": "11 5555 1234"}, despues={"telefono": "11 1"})
+    despachador(central, operacion_edicion(cambio))
+    central.commit()
+
+    ((_, nombre, *_),) = _clientes(central)
+    assert nombre == "Juan Pérez"
+    assert central.execute("SELECT telefono FROM clientes").fetchone()[0] == "11 1"
+
+
 # ── El despachador ───────────────────────────────────────────────────────────
 
 
@@ -363,7 +603,9 @@ def test_registrar_en_suma_el_tipo_sin_chocar_con_el_de_libracommerce():
     clientes_nodo.registrar_en(despachador)
     reservas_nodo.registrar_en(despachador)
 
-    assert {TIPO_CLIENTE_ALTA, "cliente.alta", "reserva.creada", "reserva.estado"} <= set(despachador.tipos())
+    assert {TIPO_CLIENTE_ALTA, TIPO_CLIENTE_EDICION, "cliente.alta", "reserva.creada", "reserva.estado"} <= set(
+        despachador.tipos()
+    )
     assert despachador.versiones(TIPO_CLIENTE_ALTA) == (1,)
     with pytest.raises(ValueError, match="ya hay un manejador"):
         clientes_nodo.registrar_en(despachador)

@@ -731,18 +731,65 @@ que `/api/reservas/series/listado`.
 - **A quién considera la misma persona** (justificado con lo que el producto ya usa para identificar a alguien; no hay clave única sobre `clientes`): primero `documento`, después `cuit` (los dos datos «para facturar», normalizados sin puntos ni guiones), y última `email` (es lo que ata a una persona con su cuenta del portal, `uq_cuentas_jugador_email`, pero una familia puede compartir uno). La primera clave que encuentra gana, siempre sobre un cliente **activo y con id del central**; **se descarta la coincidencia si los dos traen un `documento` o un `cuit` distinto** (mismo email, personas distintas). **No se deduplica por nombre ni por teléfono**: dos «Juan Pérez» sin documento ni email son dos clientes; fusionar de más ata una reserva a otra persona y no se nota, duplicar de menos se junta a mano. Si encuentra a la persona, **usa su ficha y no toca sus datos** (el central es la autoridad del maestro).
 - **El orden**: el alta se encola en el request que precede a la reserva, y el nodo sube por `(node_id, sequence)` (ADR-020 de libraedge), así que llega antes que la `reserva.creada` que lleva su id provisorio. Si el alta quedó en revisión manual, la reserva se rechaza (`VinculoNoSincronizado`) en vez de quedar a nombre de nadie y se reintenta en orden. `tests/test_clientes_aplicador_central.py` recorre el camino completo: alta y reserva en el nodo, el despachador real aplicándolas en orden, y la reserva atada al cliente definitivo.
 - **El reapuntado** lo hace `libraedge` cuando baja el mapeo, con `AltaEnNodo("clientes")` en el aprovisionamiento: lee las FK del catálogo (`reservas.cliente_id`, `series.cliente_id`, `cuentas_de_jugador.cliente_id`). `tests/test_clientes_en_el_nodo.py` ata que **toda columna `cliente_id` tenga su FK a `clientes`**: una que guardara el id sin FK quedaría apuntando a un provisorio que ya no existe, y habría que declararla como `Referencia`.
-- **Guardas en el nodo** (son consecuencia de la anterior; sin ellas la base rechazaría con un 500, SQLSTATE `LE001`): editar o borrar un cliente da 409 `sin_conexion` sin conexión y 409 `solo_en_el_central` con ella; un cliente **provisorio** tampoco se edita (la operación ya llevó sus datos: el cambio se perdería cuando baje el definitivo). El portal de jugadores (`portal.registrar`, que crea su propio `Cliente`) da 409 `solo_en_el_central`: es público y no corre en el equipo del local.
+- **Guardas en el nodo** (son consecuencia de la anterior; sin ellas la base rechazaría con un 500, SQLSTATE `LE001`): editar o borrar un cliente da 409 `sin_conexion` sin conexión y 409 `solo_en_el_central` con ella; un cliente **provisorio** tampoco se edita (la operación ya llevó sus datos: el cambio se perdería cuando baje el definitivo) — **superado por el segundo addendum**: el provisorio sí se edita; el definitivo y el borrado siguen igual. El portal de jugadores (`portal.registrar`, que crea su propio `Cliente`) da 409 `solo_en_el_central`: es público y no corre en el equipo del local.
 - Consecuencias:
   - **Cableado sobre el PR 11 (ADR-023)**: `app/offline.configurar_clientes()` (junto a `configurar_reservas`, desde `crear_app`); `sincronizacion_offline.registrar_clientes` en el despachador del central; `AltaEnNodo("clientes")` en `ALTAS_EN_EL_NODO` (`clientes_nodo.altas_en_nodo()`); y `clientes` **sale de `TABLAS_SOLO_LECTURA`**, que el PR 11 había declarado maestro de sólo lectura: sin eso la base del nodo rechazaría el alta provisoria. Por la misma razón el router de clientes no lleva la guarda general `escritura_solo_en_el_central` de los maestros (`maestros.CON_ALTA_EN_NODO`): el `POST /api/clientes` de un nodo era 409 `solo_en_el_central` y ahora da de alta; editar y borrar siguen siendo 409 por la guarda propia de `clientes_nodo`.
   - Con `libraedge` ya como dependencia (PR 11), los tests corren siempre; los de las piezas simulan el nodo y `tests/test_nodo_clientes.py` usa el armado real de la app.
 - Abierto:
-  - **Editar un cliente dado de alta en el nodo** (corregir un teléfono mal anotado) espera a que suba y baje el definitivo. Si se quiere desde el mostrador sin conexión hace falta una operación `cliente_club.editado` que el central aplique sobre el mapeado.
+  - ✅ **Resuelto el 2026-10-25 (segundo addendum, abajo): `cliente_club.edicion`.** Estaba abierto así: editar un cliente dado de alta en el nodo (corregir un teléfono mal anotado) esperaba a que subiera y bajara el definitivo.
   - **El pago de una reserva dada en el nodo** sigue sin subir (ya estaba abierto en ADR-022): mientras tanto, cancelar desde el nodo una reserva que luego queda en conflicto no tiene seña que devolver en el central.
   - **Un cliente del central con documento repetido** (el maestro no tiene clave única) se resuelve por el de menor id.
 
   - **Cancelar un conflicto sigue la política de cancelación de la sucursal.** El conflicto no es culpa del jugador; si a la mitad de la ventana se le cobra la seña, es una decisión de negocio que no está tomada.
   - **Clientes del dominio dados de alta en el nodo** (`clientes`, no `clients` de LibraCore) no tienen id provisorio: una reserva nueva a un cliente nuevo hoy usa la secuencia local y chocaría con el central. Sale con su propia operación; el aplicador de `reserva.creada` ya traduce el `cliente_id` negativo.
 
+
+### Segundo addendum a ADR-022 (2026-10-25): editar en el nodo un cliente provisorio — `cliente_club.edicion`
+
+- Estado: aplicada en este PR. **Sin migración.** Cierra el «Abierto» del primer addendum. Fuera de un nodo no cambia nada (`PUT /api/clientes/{id}` sigue siendo el `setattr` de siempre).
+- Contexto: un cliente dado de alta sin conexión es **provisorio** (id negativo) hasta que el alta sube y el mapeo baja por el espejo: en un club sin internet, horas o días. Si el mostrador anota mal un teléfono en ese lapso, la única salida era esperar. Hoy `PUT` daba 409 `solo_en_el_central` para todo cliente.
+- Qué ya existía (se miró antes): el molde de `reserva.estado` (`reservas_nodo.aplicar_reserva_estado`: traduce con el mapeo, `SinMapeo` si el alta no se aplicó), `cliente_club.alta` y su `ClientesEnNodo`, la revisión manual de LibraEdge (`libraedge.sync.revision`: listar, reintentar, descartar) y el receptor, que no vuelve a llamar al aplicador de una operación `applied` (`duplicate`).
+
+**1. Qué se puede editar en el nodo.**
+
+- **Un cliente provisorio**: sí, con y sin conexión. La fila local se actualiza y se encola **`cliente_club.edicion`** en la misma transacción (`clientes_nodo.editar`, `conexion_de_la_sesion`): si el encolado falla, el cambio tampoco queda. Si no cambió ningún campo (los espacios de los bordes y `""` contra `NULL` no cuentan), no encola nada.
+- **Un cliente definitivo** (el del central): **sigue sin poderse** (409 `sin_conexion` / `solo_en_el_central`). No es trivial ni seguro: su fila es del espejo (la base del nodo la rechaza con `LE001`), y editarla exigiría una segunda copia local de la edición pendiente que el espejo pisaría en el ciclo siguiente.
+- **Borrar un provisorio**: sigue siendo 409 `solo_en_el_central` (su alta ya está en el outbox). Se lo **da de baja** (`activo = false`), que es una edición y sí sube.
+- La guarda del ABM se partió en dos (`exigir_cliente_editable` / `exigir_cliente_modificable`) y `construir_abm` recibe `exigir_editable` y `editar_item`.
+
+**2. El orden: siempre detrás del alta, nunca reescribiendo el alta pendiente.**
+
+- Decisión: la edición es **otra operación** que se encola después; no se reescribe el payload de un `cliente_club.alta` que todavía no subió. Razones: el worker puede tener el alta en vuelo y reescribirla no es atómico con el envío; así hay **un solo camino** (alta, edición, edición…) sea cual sea el estado del alta, con el mismo `aggregate_id` (`<nodo>:cliente_club:<id provisorio>`), y queda la huella de cada corrección. El costo es una fila más en el outbox.
+- El outbox sube por `(node_id, sequence)` (ADR-020 de libraedge), así que el central aplica el alta —y anota el mapeo— antes que la edición. Si el alta quedó en revisión manual, la edición también (`SinMapeo`) y se reintenta en orden al resolverla.
+
+**3. La operación.**
+
+- `cliente_club.edicion`, `schema_version = 1`. Payload `version 1`: `cliente_id` (siempre **negativo**: el central rechaza un id positivo, porque `traducir_id` lo dejaría pasar y editaría a otra persona), `antes` y `despues` (los mismos campos, **sólo los que cambiaron**: `nombre`, `telefono`, `email`, `documento`, `cuit`, `observaciones`, `activo`, `acepta_avisos`) y `editada_at`.
+- `antes` es lo que el nodo tenía al editar: es la **base de comparación** del central. Una segunda edición seguida tiene como `antes` el resultado de la primera.
+- Registrada en el despachador del central junto con el alta (`clientes_nodo.aplicadores`). No va por `cliente.alta`/`cliente.edicion` de libracommerce, que son de los `clients` del buffet.
+
+**4. Qué hace el central (`aplicar_cliente_edicion`) y el conflicto.**
+
+- Traduce el id con `libraedge_mapeo` y bloquea la fila (`FOR UPDATE`). Compara **campo por campo** el valor actual con `antes` y `despues`:
+  - ya es `despues` → no hace nada (**idempotente**: el outbox entrega al menos una vez y la revisión manual se reintenta);
+  - sigue siendo `antes` → lo cambia (y `updated_at`);
+  - es **otro valor** → alguien lo editó en el central mientras el nodo estaba sin conexión (o el alta se unió a una ficha del central con otros datos, ver ADR-022 punto 2: «usa su ficha y no toca sus datos»): **conflicto**.
+- **Regla ante un conflicto (la conservadora): no se aplica nada de la operación —ni siquiera los campos sin conflicto— y toda ella va a revisión manual** (`EdicionEnConflicto`, un `ValueError`: el nodo no traba la cola). El motivo dice, por campo, qué tiene el central y qué quería el nodo. Quien opera el central la **reintenta** (si acordó el dato) o la **descarta** con motivo (`libraedge-central revision`). No se pierde nada y no se pisa el dato de quien editó en el central; la corrección del nodo queda visible. Dos cambios en campos **distintos** no chocan: se juntan.
+- ⚠️ **A confirmar con el humano**: la alternativa es «gana el último por campo» (la edición del nodo pisaría al central por llegar más tarde). Es una decisión de negocio (¿vale más el dato anotado en el mostrador con la persona delante o el que se cargó en la web?); se eligió lo que no pierde datos. Cambiarla es tocar un `if` de `aplicar_cliente_edicion`.
+- **No vuelve a deduplicar**: cambiar el `documento`, el `cuit` o el email no busca a otra persona (el maestro no tiene clave única); un duplicado se junta a mano, como siempre.
+- Si el central dio de baja al cliente (`activo = false`) y el nodo corrige otro campo, se aplica: la baja no es un conflicto salvo que el nodo también haya tocado `activo`.
+
+**5. Pantalla.**
+
+- La lista de Clientes y el formulario del nodo ya mostraban «Editar» para todos (el backend lo rechazaba). Ahora un provisorio lleva la etiqueta **«Provisorio»** del kit (`EtiquetaDePersonaDelNodo`, libra-ui v0.181.0, ADR-095) en la lista y en el título del formulario, y el formulario avisa que los cambios suben junto con el alta y que, para sacarlo de las listas, se desmarca «Activo».
+
+- Consecuencias:
+  - **Ventana corta de pérdida visible**: cuando baja el mapeo, el espejo reapunta y **borra la fila provisoria** y trae la del central; si la edición todavía no se aplicó allá, el mostrador vuelve a ver el dato viejo hasta que suba (sigue en el outbox y se aplica). Si el mapeo baja mientras alguien guarda, el `PUT` da 409 `solo_en_el_central` («ya recibió su número definitivo, actualizá la lista») en vez de un 500 (`StaleDataError`).
+  - Tests: `tests/test_clientes_en_el_nodo.py` (nodo: solo lo que cambió, sin cambios no encola, con y sin conexión, el definitivo sigue en 409, borrar el provisorio, el encolado atómico, orden alta-edición en el outbox real, 409 por fila desaparecida), `tests/test_clientes_aplicador_central.py` (aplica, idempotencia, cadena de ediciones, conflicto por campo, unión a ficha existente, reintento, sin mapeo, id positivo, payloads inválidos, despachador real) y `tests/test_nodo_clientes.py` (de punta a punta por el receptor real: alta y corrección, la edición sola espera el alta, conflicto a revisión y reintento). En el frontend, `Clientes.test.tsx` y `FormularioDeCliente.test.tsx`.
+- Abierto:
+  - **Conflicto: revisión manual o «gana el último por campo»** (punto 4): a confirmar con el humano.
+  - **Editar un cliente del central en el nodo** (definitivo): sigue en el central; si se quisiera, hace falta una operación que no dependa del mapeo y un cuidado con el espejo.
+  - **Borrar un provisorio** (hoy se da de baja): requeriría cancelar el alta pendiente, que ya puede haber subido.
 
 ## ADR-023 — LibraClub sin conexión: el buffet, la caja, el pago de una reserva y la factura conjunta en el nodo de LibraEdge
 
