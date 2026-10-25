@@ -15,14 +15,22 @@ import { createLayout } from 'libra-ui/Layout'
 import { ICONOS } from 'libra-ui/iconos-identidad'
 import { TITULO_COLA } from 'libra-ui/cola-del-nodo'
 import { TEXTO_CARTEL_SIN_CONEXION_CON_COLA, useConexionDelNodo } from 'libra-ui/nodo-offline'
-import { CalendarClock, CupSoda, LayoutGrid, Repeat, Trophy, Undo2 } from 'lucide-react'
+import { CalendarClock, CupSoda, GitCompareArrows, LayoutGrid, Repeat, Trophy, Undo2 } from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
 import { useSucursal } from '@/context/SucursalContext'
 import { SelectorDeSucursal } from '@/components/SelectorDeSucursal'
 import { WORDMARK } from '@/branding'
+import { useClientesParaRevisar } from '@/lib/clientes-en-conflicto'
 
-type Usuario = { role?: string; name?: string; username?: string; sucursal?: string; esNodo?: boolean }
+type Usuario = {
+  role?: string
+  name?: string
+  username?: string
+  sucursal?: string
+  esNodo?: boolean
+  clientesParaRevisar?: number
+}
 
 /** La sesión, más el nombre de la sucursal activa.
  *
@@ -44,10 +52,12 @@ function useAuthConSucursal() {
   // Es lo que deja que el menú muestre «Cola de comprobantes» únicamente en un nodo (`hideFor` más abajo): `navSections` es un array
   // de módulo y no puede preguntar por hooks, pero `useAuth` sí corre dentro del sidebar.
   const { esNodo } = useConexionDelNodo()
+  // Cuántos clientes esperan que alguien elija entre lo de la web y lo de la PC del club (ADR-022): el número del menú.
+  const clientesParaRevisar = useClientesParaRevisar()
   const elegida = sucursales.find((s) => s.id === actual)
   return {
     ...sesion,
-    user: sesion.user ? { ...sesion.user, sucursal: elegida?.nombre, esNodo } : null,
+    user: sesion.user ? { ...sesion.user, sucursal: elegida?.nombre, esNodo, clientesParaRevisar } : null,
   }
 }
 
@@ -104,6 +114,17 @@ const Cascaron = createLayout<Usuario>({
       label: 'Maestros',
       items: [
         { to: '/clientes', label: 'Clientes', icon: ICONOS.clientes },
+        // Sólo aparece cuando hay algo para elegir: cambios de un cliente cargados en la PC del club que chocan con los de la web
+        // (ADR-022, tercer addendum). Sin pendientes no hay entrada, y en la PC del club la lista viene vacía.
+        {
+          to: '/clientes/conflictos',
+          label: 'Clientes por revisar',
+          icon: GitCompareArrows,
+          // La pantalla de cada cliente cuelga de la lista: el menú sigue marcado adentro.
+          activoEn: ['/clientes/conflictos'],
+          hideFor: (u) => !u.clientesParaRevisar,
+          badge: (u) => u.clientesParaRevisar || undefined,
+        },
         { to: '/canchas', label: 'Canchas', icon: LayoutGrid },
         { to: '/tarifas', label: 'Tarifas', icon: ICONOS.listasDePrecio },
         // 🔑 Los mostradores son configuración, como las canchas y las tarifas:

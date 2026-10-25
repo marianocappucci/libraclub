@@ -55,12 +55,12 @@ describe('el menú usa el catálogo de íconos de identidad', () => {
   })
 
   it('🔴 ninguna entrada propia del producto usa el ícono de un concepto del catálogo', () => {
-    // Las entradas que no son del catálogo (Turnos fijos, Torneos, Canchas, Buffet, Horario de atención, Devoluciones) no pueden repetir un
+    // Las entradas que no son del catálogo (Turnos fijos, Torneos, Canchas, Buffet, Horario de atención, Devoluciones, Clientes por revisar) no pueden repetir un
     // dibujo del catálogo: `Horario de atención` era `Clock`, que es del turno de caja.
     const delCatalogo = new Set(Object.values(ICONOS).map((i) => (i as { displayName?: string }).displayName))
     // `startsWith('/')`: el parser del kit lee `to: '…'` y también el `producto: 'libraclub'` del `createLayout` (termina en «to:»).
     const propias = [...iconosDelNav(leer('components/Layout.tsx'))].filter(([ruta]) => ruta.startsWith('/') && !(ruta in MENU))
-    expect(propias.map(([ruta]) => ruta).sort()).toEqual(['/buffet', '/canchas', '/devoluciones', '/horarios', '/torneos', '/turnos-fijos'])
+    expect(propias.map(([ruta]) => ruta).sort()).toEqual(['/buffet', '/canchas', '/clientes/conflictos', '/devoluciones', '/horarios', '/torneos', '/turnos-fijos'])
     const choques = propias.filter(([, icono]) => {
       const dn = (lucide as unknown as Record<string, { displayName?: string } | undefined>)[icono]?.displayName ?? icono
       return delCatalogo.has(dn)

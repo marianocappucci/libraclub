@@ -17,6 +17,7 @@ const CLIENTES = [
 
 beforeEach(() => {
   vi.stubGlobal('fetch', async (url: string) => {
+    if (url === '/api/clientes-en-conflicto') return { ok: true, status: 200, json: async () => [] } as Response
     if (url === '/api/clientes/ausentismo/reincidentes') {
       return { ok: true, status: 200, json: async () => ({
         umbral: 3, dias: 90,
@@ -32,6 +33,7 @@ afterEach(() => vi.unstubAllGlobals())
 describe('clientes dados de alta sin conexión en el listado', () => {
   it('el de id negativo lleva la etiqueta «Provisorio» y los del central no', async () => {
     vi.stubGlobal('fetch', async (url: string) => {
+      if (url === '/api/clientes-en-conflicto') return { ok: true, status: 200, json: async () => [] } as Response
       if (url === '/api/clientes/ausentismo/reincidentes') {
         return { ok: true, status: 200, json: async () => ({ umbral: 3, dias: 90, reincidentes: [] }) } as Response
       }
@@ -65,5 +67,43 @@ describe('ausentismo en el listado de clientes', () => {
     await screen.findByText('4 ausencias · última 05-09-2026')
     expect(screen.getAllByText(/ausencias/)).toHaveLength(1)
     expect(screen.getByText('Ana Gómez')).toBeInTheDocument()
+  })
+})
+
+describe('aviso de clientes por revisar (ADR-022, tercer addendum)', () => {
+  const EDICION = {
+    operacion_id: 'club-1:2', cliente_id: 7, cliente_nombre: 'Juan Pérez', recibida_at: null,
+    campos: [], en_conflicto: 1, se_puede_resolver: true,
+  }
+
+  function responderCon(lista: unknown[]) {
+    vi.stubGlobal('fetch', async (url: string) => {
+      if (url === '/api/clientes-en-conflicto') return { ok: true, status: 200, json: async () => lista } as Response
+      if (url === '/api/clientes/ausentismo/reincidentes') {
+        return { ok: true, status: 200, json: async () => ({ umbral: 3, dias: 90, reincidentes: [] }) } as Response
+      }
+      return { ok: true, status: 200, json: async () => CLIENTES } as Response
+    })
+  }
+
+  it('sin cambios que choquen no dibuja nada', async () => {
+    responderCon([])
+    render(<MemoryRouter><Clientes /></MemoryRouter>)
+    await screen.findByText('Juan Pérez')
+    expect(screen.queryByRole('status', { name: 'Clientes por revisar' })).toBeNull()
+  })
+
+  it('con uno, avisa y lleva a la lista', async () => {
+    responderCon([EDICION])
+    render(<MemoryRouter><Clientes /></MemoryRouter>)
+    const aviso = await screen.findByRole('status', { name: 'Clientes por revisar' })
+    expect(aviso).toHaveTextContent('Hay 1 cliente con cambios de la PC del club que chocan con los de la web.')
+    expect(screen.getByRole('link', { name: 'Revisar' })).toHaveAttribute('href', '/clientes/conflictos')
+  })
+
+  it('con varios, cuenta', async () => {
+    responderCon([EDICION, { ...EDICION, operacion_id: 'club-1:5' }])
+    render(<MemoryRouter><Clientes /></MemoryRouter>)
+    expect(await screen.findByText(/Hay 2 clientes con cambios/)).toBeInTheDocument()
   })
 })

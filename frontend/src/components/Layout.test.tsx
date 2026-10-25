@@ -88,6 +88,30 @@ describe('cascarón de LibraClub', () => {
     }
   })
 
+  it('«Clientes por revisar» aparece en el menú, con su número, sólo si hay cambios que chocan (ADR-022)', async () => {
+    vi.stubGlobal('fetch', async () => ({ ok: true, status: 200, json: async () => [{}, {}] }) as Response)
+    try {
+      montar()
+      const enlace = await screen.findByRole('link', { name: /Clientes por revisar/ })
+      expect(enlace).toHaveAttribute('href', '/clientes/conflictos')
+      expect(enlace.closest('li')).toHaveTextContent('2')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('sin cambios que choquen, el menú no ofrece «Clientes por revisar»', async () => {
+    vi.stubGlobal('fetch', async () => ({ ok: true, status: 200, json: async () => [] }) as Response)
+    try {
+      montar()
+      // Se espera al menú ya armado antes de afirmar la ausencia, para no pasar por no haber dibujado todavía.
+      expect(await screen.findByRole('link', { name: 'Clientes' })).toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: /Clientes por revisar/ })).not.toBeInTheDocument()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('🔑 muestra la sucursal activa, que el selector ya no tiene a la vista', async () => {
     montar()
     expect(await screen.findByText('Complejo Centro')).toBeInTheDocument()

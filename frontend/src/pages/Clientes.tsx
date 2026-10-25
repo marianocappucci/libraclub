@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ColumnDef } from 'libra-ui/data-table'
 import { DataTable, sortableHeader } from 'libra-ui/data-table'
 import { EncabezadoDePantalla } from 'libra-ui/acciones'
+import { Link } from 'react-router-dom'
 import { Plus } from 'lucide-react'
 
 import { clientes as api } from '@/lib/api'
@@ -13,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 import { useReincidentes } from '@/lib/ausentismo'
+import { useClientesParaRevisar } from '@/lib/clientes-en-conflicto'
 import { fecha } from '@/lib/fechas'
 import { ICONOS } from 'libra-ui/iconos-identidad'
 import { EtiquetaDePersonaDelNodo } from 'libra-ui/EtiquetaProvisorio'
@@ -27,6 +29,8 @@ export function Clientes() {
   // Quién viene faltando sin avisar. Es un aviso y nada más: no lo da de baja
   // ni le impide reservar. Ver `lib/ausentismo.ts`.
   const { porCliente } = useReincidentes()
+  // Cambios cargados en la PC del club que chocan con los de la web: se avisa acá, donde se mira a los clientes.
+  const paraRevisar = useClientesParaRevisar()
 
   // 🔑 Clientes es el ÚNICO maestro que un encargado puede escribir. El backend
   // lo gatea con `require_staff` y no con `require_admin`: si pidiera admin, no
@@ -157,6 +161,23 @@ export function Clientes() {
           {filas.length} {filas.length === 1 ? 'cliente' : 'clientes'} en total
         </span>
       </div>
+
+      {paraRevisar > 0 && (
+        <section
+          role="status"
+          aria-label="Clientes por revisar"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+        >
+          <p>
+            {paraRevisar === 1
+              ? 'Hay 1 cliente con cambios de la PC del club que chocan con los de la web.'
+              : `Hay ${paraRevisar} clientes con cambios de la PC del club que chocan con los de la web.`}
+          </p>
+          <Button asChild size="sm" variant="outline">
+            <Link to="/clientes/conflictos">Revisar</Link>
+          </Button>
+        </section>
+      )}
 
       <AvisoDeError mensaje={error} />
 

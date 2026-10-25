@@ -84,7 +84,8 @@ anotado, un documento que faltaba, darlo de baja): `editar` actualiza la fila lo
   lo cambia; si es **otro** valor —alguien lo editó en el central mientras tanto, o el alta se unió a un cliente que el
   central ya tenía con otros datos— **no aplica nada**: toda la operación va a revisión manual (`EdicionEnConflicto`,
   con el campo, lo del central y lo del nodo), y quien opera el central la reintenta o la descarta
-  (`libraedge-central revision`). **A confirmar con el humano**: la alternativa es «gana el último por campo».
+  (`libraedge-central revision`) o, desde la web, la resuelve a mano eligiendo cuál queda en cada campo
+  (`ediciones_en_conflicto`, ADR-022 tercer addendum).
 - **No vuelve a deduplicar**: cambiar el `documento` o el email no busca a otra persona (el maestro no tiene clave
   única); un duplicado se junta a mano, como siempre.
 - Un cliente **definitivo** (id positivo, el del central) sigue sin editarse en el nodo. Y borrar un provisorio tampoco:
@@ -752,6 +753,29 @@ def _en_texto(campo: str, valor: Any) -> str:
     return "(vacío)" if valor is None else repr(valor)
 
 
+#: Qué pasa con un campo de `cliente_club.edicion` frente a lo que hoy tiene el central.
+CAMPO_IGUAL = "igual"  # ya tiene el valor nuevo: no hay nada que hacer
+CAMPO_SE_APLICA = "se_aplica"  # sigue como estaba cuando el nodo lo corrigió: se cambia
+CAMPO_EN_CONFLICTO = "conflicto"  # alguien lo cambió en el central: hay que elegir
+
+
+def clasificar_campo(antes: Any, despues: Any, actual: Any) -> str:
+    """La regla de la edición, en un solo lugar (la usan `aplicar_cliente_edicion` y la resolución a mano de
+    `ediciones_en_conflicto`): ya es `despues` → `CAMPO_IGUAL`; sigue siendo `antes` → `CAMPO_SE_APLICA`; es otro
+    valor → `CAMPO_EN_CONFLICTO`. Los tres valores ya vienen normalizados (`_valor_editado`)."""
+    if actual == despues:
+        return CAMPO_IGUAL
+    if actual == antes:
+        return CAMPO_SE_APLICA
+    return CAMPO_EN_CONFLICTO
+
+
+def leer_edicion(operacion) -> dict:
+    """El payload validado de un `cliente_club.edicion` (`cliente_id`, `antes`, `despues`), para quien no lo aplica:
+    la resolución a mano de un conflicto. Levanta `EdicionDeClienteInvalida` si no se entiende."""
+    return _datos_de_edicion(operacion)
+
+
 def aplicar_cliente_edicion(conn, operacion) -> None:
     """Aplica `cliente_club.edicion` sobre el cliente que el alta del nodo dejó mapeado.
 
@@ -762,7 +786,8 @@ def aplicar_cliente_edicion(conn, operacion) -> None:
     - sigue siendo la base: lo cambia;
     - es **otro** valor: alguien lo cambió en el central mientras tanto. La regla conservadora es **no aplicar nada** de
       la operación (ni siquiera los campos sin conflicto) y mandarla entera a revisión manual (`EdicionEnConflicto`),
-      con lo que tiene el central y lo que quería el nodo. A confirmar con el humano (ADR-022, segundo addendum).
+      con lo que tiene el central y lo que quería el nodo. Quien opera la web elige cuál queda en cada campo
+      (`ediciones_en_conflicto`, ADR-022 tercer addendum).
 
     Corre en la transacción del receptor y bloquea la fila (`FOR UPDATE`). Los errores son `ValueError`."""
     from libraedge import mapeo
@@ -784,11 +809,10 @@ def aplicar_cliente_edicion(conn, operacion) -> None:
     for campo, actual in zip(campos, fila, strict=True):
         actual = _valor_editado(campo, actual, operacion)
         nuevo = datos["despues"][campo]
-        if actual == nuevo:
-            continue
-        if actual == datos["antes"][campo]:
+        estado = clasificar_campo(datos["antes"][campo], nuevo, actual)
+        if estado == CAMPO_SE_APLICA:
             cambios[campo] = nuevo
-        else:
+        elif estado == CAMPO_EN_CONFLICTO:
             en_conflicto.append(
                 f"{campo}: el central tiene {_en_texto(campo, actual)}, el nodo lo cambió de "
                 f"{_en_texto(campo, datos['antes'][campo])} a {_en_texto(campo, nuevo)}"

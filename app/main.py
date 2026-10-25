@@ -73,6 +73,7 @@ from app.config import Config, misma_base
 from app.models.maestros import Sucursal
 from app.routers import (
     admin,
+    clientes_en_conflicto,
     conflictos,
     disponibilidad,
     eventos,
@@ -436,6 +437,8 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # Las reservas en conflicto (ADR-022). Prefijo propio y no `/api/reservas/conflictos`: `GET /api/reservas/{id}`
     # lo leería como un id.
     app.include_router(conflictos.router)
+    # Los cambios de clientes en conflicto (ADR-022, tercer addendum): ver los dos valores y elegir cuál queda.
+    app.include_router(clientes_en_conflicto.router)
     # Los torneos. Sin `dependencies`: definir y sortear son de admin —cambian
     # lo que el complejo se comprometió a jugar— e inscribir, programar y cargar
     # resultados son de mostrador. Cada endpoint declara el suyo.
