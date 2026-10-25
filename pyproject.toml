@@ -102,7 +102,8 @@ dependencies = [
     # v1.191.0 -> v1.192.0 (2026-10-24): costuras de caja: corregir, extra y gancho del central (ADR-080). Sin migracion.
     # v1.192.0 -> v1.192.1 (2026-10-24): un ciclo con el candado del esquema da deadlock en 1 s, no a los 120 s (ADR-081). Sin migracion.
     # v1.192.1 -> v1.194.0 (2026-10-25): unir-bases con libraauth en el core (ADR-082), GestioLibra y MedLibra de una sola base y tabla de modulos del producto (ADR-083). Sin migracion.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.194.0",
+    # v1.194.0 -> v1.195.0 (2026-10-25): `GET /api/nodo/conexion` sin puerto de ventas (`build_conexion_del_nodo_router`) y una sola forma del 202 «en cola» (`respuesta_en_cola`) (ADR-084). Sin migracion.
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.195.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.

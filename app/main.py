@@ -50,6 +50,7 @@ from libracore.docs_api import cerrar_docs_de_la_api
 from libracore.errores import instalar_registro_de_errores
 from libracore.estado_del_sistema import build_estado_del_sistema_router
 from libracore.mp_config_router import build_mp_config_router
+from libracore.nodo_conexion_router import build_conexion_del_nodo_router
 from libracore.nodo_offline import SinConexion, SoloEnElCentral
 from libracore.resguardo_enlace import build_resguardo_enlace_router
 from libracore.respaldo import Instancia
@@ -597,6 +598,14 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     app.include_router(
         build_cola_del_nodo_router(cola=offline.cola(), usuario_actual=require_staff, resolver_con=require_admin),
         dependencies=[Depends(exigir_base)],
+    )
+    # Lo que el cartel «sin conexión» de libra-ui necesita saber (`GET /api/nodo/conexion`, libracore ADR-084): si esta
+    # instancia es un nodo y si tiene conexión. Antes la pantalla se lo preguntaba a la cola, que trae una lista de
+    # pedidos que no usa. Cualquier usuario de la instancia (la pantalla lo lee en cuanto carga la sesión); no lee
+    # `arca_config`, así que no pide `exigir_base`.
+    app.include_router(
+        build_conexion_del_nodo_router(conexion=offline.CONEXION, usuario_actual=get_current_user),
+        dependencies=[Depends(require_staff)],
     )
 
     # La caja por turno. Sin `dependencies` acá: cada endpoint declara su rol —

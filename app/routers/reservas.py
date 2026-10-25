@@ -12,6 +12,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
+from libracore.cola_arca_respuesta import respuesta_en_cola
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -378,7 +379,8 @@ def _facturar_en_el_nodo(reserva: Reserva, usuario: dict):
     🔴 **No emite directo**: `facturar_reserva` numera con `get_next_numero_with_arca`, que sin ARCA cae a la
     numeración local, y un número local choca con el de ARCA y con el del central (libracore ADR-074). Con conexión
     sale en el momento y contesta **201** con la factura, igual que el central; sin conexión (o si se corta a mitad)
-    contesta **202** con `{"en_cola": true, "estado", "mensaje"}` y sale sola cuando vuelve."""
+    contesta **202** con la forma única del motor (`libracore.cola_arca_respuesta`, ADR-084: `{en_cola, codigo, estado,
+    pedido_id, mensaje, motivo}`) y sale sola cuando vuelve."""
     try:
         resultado = servicio_facturar_desde_el_nodo(reserva, int(usuario["id"]))
     except servicio_facturacion.FacturacionNoConfigurada as e:
@@ -396,9 +398,7 @@ def _facturar_en_el_nodo(reserva: Reserva, usuario: dict):
             cae_vto=factura.get("cae_vto") or "",
         ).model_dump(mode="json"))
     pedido = resultado["pedido"]
-    return JSONResponse(status_code=202, content={
-        "en_cola": True, "estado": pedido["estado"], "pedido_id": pedido["id"], "mensaje": resultado["mensaje"],
-    })
+    return respuesta_en_cola(pedido, mensaje=resultado["mensaje"])
 
 
 @router.post("/{reserva_id}/facturar", response_model=FacturaSalida, status_code=201)
