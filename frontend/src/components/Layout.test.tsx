@@ -134,6 +134,14 @@ describe('cascarón de LibraClub', () => {
     // SMTP lo exige por dentro, así que a un encargado el link le daría 403.
     expect(screen.queryByRole('link', { name: 'Configuración' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Log de actividad' })).not.toBeInTheDocument()
+    // El panel del dueño tampoco: `GET /api/admin/panel-del-dueno` es de admin y trae nombres de clientes.
+    expect(screen.queryByRole('link', { name: 'Panel del dueño' })).not.toBeInTheDocument()
+  })
+
+  it('al admin le ofrece el Panel del dueño, en Administración', async () => {
+    montar()
+    const link = await screen.findByRole('link', { name: 'Panel del dueño' })
+    expect(link).toHaveAttribute('href', '/panel-del-dueno')
   })
 
   it('🔴 la marca y el nombre de la sidebar llevan las clases de marca', async () => {

@@ -30,6 +30,8 @@ from libracore.db import cierre_diario as db_cierre_diario
 from libracore.db import core as libracore_core
 from libracore.db import reportes as db_reportes
 from libracore.db import turnos as db_turnos
+from libracore.db.caja import sql_no_anulado
+from libracore.fechas import rango_por_dia
 
 from app import offline
 from app.tiempo import hoy
@@ -601,6 +603,63 @@ def _id_de_referencia(referencia: str | None) -> int | None:
             m = re.match(r"-?\d+(?=-)", referencia[len(prefijo):])
             return int(m.group()) if m else None
     return None
+
+
+def cobros_netos_por_reserva(desde_fecha: str | None = None) -> dict[int, Decimal]:
+    """Cuánto quedó en la caja por cada reserva: lo cobrado menos lo devuelto.
+
+    Es lo que el panel del dueño necesita (`servicios/panel_del_dueno.py`) y que
+    `cobrado_de_reservas` no da: aquella pregunta por **unas reservas** y arma un
+    `LIKE` por cada una, que con las miles de un período es una consulta
+    imposible; ésta lee **todas las que tengan movimientos** de una vez y deja
+    que el llamador se quede con las suyas.
+
+    🔑 **Las devoluciones restan.** Una seña devuelta (`devolucion-lc-<id>-…`, un
+    egreso) deja de ser un ingreso del complejo: sin restarla, cancelar un turno
+    con devolución seguiría figurando como plata ganada. Mismas referencias que
+    usa `cobrado_de_reservas` para los ingresos —`reserva-<id>-…` del mostrador y
+    `lc-<id>-…` del QR y del portal—, y los movimientos anulados no cuentan
+    (`sql_no_anulado`, como en el arqueo).
+
+    `desde_fecha` (ISO) acota por la **fecha del movimiento** y no por la de la
+    reserva, que no está en esta tabla: el llamador elige una cota que alcance a
+    la seña más anticipada que le interese. `None` lee todo el historial.
+
+    ⚠️ En un nodo, un cobro hecho antes de que la reserva recibiera su id
+    definitivo lleva el provisorio (negativo) en la referencia y acá se atribuye a
+    ese id (ver `_ids_equivalentes`): el llamador no lo encuentra y no lo cuenta.
+    """
+    patrones = (
+        f"{PREFIJO_COBRO_DE_RESERVA}%",
+        f"{PREFIJO_COBRO_POR_QR}%",
+        f"{PREFIJO_DEVOLUCION}{PREFIJO_COBRO_POR_QR}%",
+    )
+    condiciones = [sql_no_anulado(), "(" + " OR ".join("referencia LIKE ?" for _ in patrones) + ")"]
+    parametros: list = list(patrones)
+    c_fecha, p_fecha = rango_por_dia("fecha", desde_fecha, None)
+    condiciones += c_fecha
+    parametros += p_fecha
+    conexion = libracore_core.get_connection()
+    try:
+        filas = conexion.execute(
+            "SELECT tipo, referencia, monto FROM caja_movimientos"
+            f" WHERE {' AND '.join(condiciones)}",
+            tuple(parametros),
+        ).fetchall()
+    finally:
+        conexion.close()
+    netos: dict[int, Decimal] = {}
+    for tipo, referencia, monto in filas:
+        if tipo == "ingreso":
+            reserva_id, signo = _id_de_referencia(referencia), 1
+        elif tipo == "egreso" and (referencia or "").startswith(PREFIJO_DEVOLUCION):
+            reserva_id, signo = _id_de_referencia(referencia[len(PREFIJO_DEVOLUCION):]), -1
+        else:
+            continue
+        if reserva_id is None:
+            continue
+        netos[reserva_id] = netos.get(reserva_id, Decimal("0")) + signo * Decimal(str(monto))
+    return netos
 
 
 def total_cobrado(reserva_id: int) -> Decimal:

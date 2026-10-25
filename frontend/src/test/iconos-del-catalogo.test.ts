@@ -25,6 +25,8 @@ const MENU: Record<string, Concepto> = {
   '/tarifas': 'listasDePrecio',
   '/cajas': 'cajas',
   '/sucursales': 'sucursales',
+  // El panel del dueño (F5, ADR-027): el tablero de la instancia, `LayoutDashboard`, como en los demás productos.
+  '/panel-del-dueno': 'dashboard',
   '/facturas': 'comprobantes',
   // La cola de ARCA del nodo (libra-ui ADR-094): `Inbox`, el concepto «comprobantes a facturar» del catálogo, igual que su título.
   '/cola': 'comprobantesAFacturar',

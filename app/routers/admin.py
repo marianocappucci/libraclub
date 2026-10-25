@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -20,9 +20,15 @@ from app.db import obtener_sesion
 from app.models.enums import ESTADOS_QUE_OCUPAN, EstadoReserva
 from app.models.maestros import Cancha, Sucursal
 from app.models.reservas import Reserva
+from app.servicios import panel_del_dueno
 from app.tiempo import TZ, hoy
 
 router = APIRouter(prefix="/admin", tags=["panel del dueño"])
+
+#: El panel del dueño de la pantalla (F5, ADR-027) cuelga de `/api/admin`, y no del
+#: `/admin` de arriba: lo pide el contrato con `libra-panel` y la SPA sólo habla con
+#: `/api`. Es un router aparte porque un prefijo es de todo el router.
+router_api = APIRouter(prefix="/api/admin", tags=["panel del dueño"])
 
 
 def _rango(desde: date, hasta: date) -> tuple[datetime, datetime]:
@@ -114,3 +120,43 @@ def resumen(
         "hasta": fin.isoformat(),
         "sucursales": sorted(por_sucursal.values(), key=lambda s: str(s["nombre"])),
     }
+
+
+#: Cuántos días mira el panel si no le piden un rango: los últimos 30, contando hoy.
+DIAS_POR_DEFECTO = 30
+
+
+@router_api.get("/panel-del-dueno")
+def panel_del_dueno_de_la_instancia(
+    desde: date | None = Query(default=None),
+    hasta: date | None = Query(default=None),
+    sucursal_id: int | None = Query(default=None),
+    cancha_id: int | None = Query(default=None),
+    sesion: Session = Depends(obtener_sesion),
+    _: object = Depends(require_admin_o_servicio),
+) -> dict[str, object]:
+    """Ocupación por franja, ingresos, cancelaciones y ausentes, **abiertos por sucursal**.
+
+    Es el mismo bloque que `GET /api/resumen` manda como `club`, más lo que sólo
+    tiene sentido en la pantalla: el top de clientes con más ausentes y el total
+    de la instancia (`total`, con las franjas de todas las sucursales juntas).
+    `cancha_id` acota la ocupación y nada más — ver `panel_del_dueno.calcular`.
+
+    Mismo guard que el resto del admin: dueño o admin. **No** abre con la
+    credencial del panel (`LIBRA_PANEL_TOKEN`): esa sólo sirve para `/api/resumen`.
+    """
+    fin = hasta or hoy()
+    inicio = desde or fin - timedelta(days=DIAS_POR_DEFECTO - 1)
+    if sucursal_id is not None and sesion.get(Sucursal, sucursal_id) is None:
+        raise HTTPException(404, "no existe esa sucursal")
+    if cancha_id is not None:
+        cancha = sesion.get(Cancha, cancha_id)
+        if cancha is None or (sucursal_id is not None and cancha.sucursal_id != sucursal_id):
+            raise HTTPException(404, "no existe esa cancha en esa sucursal")
+    try:
+        return panel_del_dueno.calcular(
+            sesion, inicio, fin,
+            sucursal_id=sucursal_id, cancha_id=cancha_id, detallado=True,
+        )
+    except panel_del_dueno.PeriodoInvalido as e:
+        raise HTTPException(422, str(e)) from e

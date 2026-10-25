@@ -153,6 +153,9 @@ const Cascaron = createLayout<Usuario>({
     {
       label: 'Administración',
       items: [
+        // Primero: es lo que el dueño abre antes que nada. `adminOnly` porque el backend lo contesta sólo a un admin
+        // (`GET /api/admin/panel-del-dueno`): a un encargado el link le daría 403.
+        { to: '/panel-del-dueno', label: 'Panel del dueño', icon: ICONOS.dashboard, adminOnly: true },
         // Sucursales **no** lleva `adminOnly`: el listado lo puede ver un
         // encargado (`staff`) y lo que el backend gatea con `require_admin` es
         // el alta, la edición y la baja. La pantalla ya esconde esos botones

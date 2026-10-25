@@ -448,6 +448,8 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     app.include_router(disponibilidad.router)
     app.include_router(usuarios_router.router, dependencies=_DEL_CENTRAL)
     app.include_router(admin.router, dependencies=_DEL_CENTRAL)
+    # El panel del dueño de la pantalla (F5, ADR-027). Es una lectura: se puede abrir en un nodo.
+    app.include_router(admin.router_api)
 
     # Los dos logs —actividad y accesos— para la pantalla compartida. El router
     # no se gatea a sí mismo: el vocabulario de roles es del producto.
