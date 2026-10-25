@@ -23,7 +23,7 @@ import type { PartidoDeTorneo } from '@/lib/api'
 
 // Todo en rem, para que escale con la tipografía del usuario.
 /** Ancho de la tarjeta de un partido. */
-export const ANCHO_DE_PARTIDO = 17
+export const ANCHO_DE_PARTIDO = 19
 /** Ancho del hueco entre dos columnas, por donde pasan las líneas. */
 export const ANCHO_DEL_CABLE = 2.5
 /** Alto de la tarjeta. Fijo: dos competidores y una línea de cancha y horario. */

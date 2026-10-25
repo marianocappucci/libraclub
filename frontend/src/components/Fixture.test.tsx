@@ -176,6 +176,6 @@ describe('el cuadro scrollea solo', () => {
     const { cuadro } = montar(16)
     expect(cuadro.parentElement).toHaveClass('overflow-x-auto')
     // Cuatro columnas de 17rem y tres huecos de 2.5rem.
-    expect(cuadro.style.width).toBe('75.5rem')
+    expect(cuadro.style.width).toBe('83.5rem')
   })
 })
