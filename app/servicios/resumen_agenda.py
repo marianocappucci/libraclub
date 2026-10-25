@@ -81,6 +81,18 @@ def horas_disponibles(sesion: Session, desde: date, hasta: date) -> float:
     return round(total / 60, 2)
 
 
+def rango_local(desde: date, hasta: date) -> tuple[datetime, datetime]:
+    """`[inicio, fin)` en instantes: de las 00:00 locales de `desde` a las 00:00 del día siguiente a `hasta`.
+
+    Lo comparten este resumen y el del panel del dueño (`panel_del_dueno.py`): un
+    solo lugar donde se decide que el rango es en hora del complejo e inclusivo.
+    """
+    return (
+        datetime.combine(desde, datetime.min.time(), tzinfo=TZ),
+        datetime.combine(hasta + timedelta(days=1), datetime.min.time(), tzinfo=TZ),
+    )
+
+
 def resumen_agenda(sesion: Session, desde: str, hasta: str) -> dict:
     """Reservas, ocupación y cancelaciones del período.
 
@@ -92,8 +104,7 @@ def resumen_agenda(sesion: Session, desde: str, hasta: str) -> dict:
     """
     desde_d = date.fromisoformat(desde)
     hasta_d = date.fromisoformat(hasta)
-    inicio = datetime.combine(desde_d, datetime.min.time(), tzinfo=TZ)
-    fin = datetime.combine(hasta_d + timedelta(days=1), datetime.min.time(), tzinfo=TZ)
+    inicio, fin = rango_local(desde_d, hasta_d)
 
     def _contar(estados):
         filas = sesion.execute(

@@ -19,7 +19,9 @@ const SRC = join(process.cwd(), 'src')
 // Cuelgan de `/caja` pero son otro concepto del catálogo de íconos de identidad (ADR-035): el turno de caja es `Clock` y la caja por medio es
 // `Coins`, no `Wallet` (la caja). El auditor las compara con el ícono de su prefijo del menú y las marcaría; `iconos-del-catalogo.test.ts`
 // afirma que llevan el ícono del catálogo que les toca.
-const OTRO_CONCEPTO = ['/caja/turnos', '/caja/turnos/:id', '/caja/por-medio']
+const OTRO_CONCEPTO = ['/caja/turnos', '/caja/turnos/:id', '/caja/por-medio', '/clientes/conflictos/:operacionId']
+// `/clientes/conflictos/:operacionId` es el detalle de «Clientes por revisar» (su propia entrada del menú, con su ícono), pero el auditor
+// resuelve un detalle por el primer segmento de la ruta y lo compara con `/clientes`.
 
 describe('el icono del título sale del sidebar', () => {
   it('🔴 ninguna pantalla usa un icono distinto al de su entrada del menú', () => {

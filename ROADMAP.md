@@ -87,6 +87,13 @@ instancias.
 
 Gate: un dueño con dos instancias y cinco sucursales viendo cinco filas, no dos.
 
+**Del lado de LibraClub: hecho** (2026-10-25, ADR-027). `GET /api/resumen` trae la
+clave `club` (una fila por sucursal: ocupación, franjas, ingresos contra el período
+anterior, canceladas, ausentes y origen) y la pantalla «Panel del dueño»
+(`GET /api/admin/panel-del-dueno`) la abre por sucursal, con el mapa de calor y el
+top de ausentes. **Falta** el consumo en `libra-panel` (sumar entre instancias a
+partir de `horas_abiertas` y `horas_reservadas`, no de los porcentajes).
+
 ## F6 — Producto
 
 Socios y abonos, clases y escuelas, ~~torneos~~, eventos, analítica de

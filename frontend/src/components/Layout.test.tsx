@@ -88,6 +88,30 @@ describe('cascarón de LibraClub', () => {
     }
   })
 
+  it('«Clientes por revisar» aparece en el menú, con su número, sólo si hay cambios que chocan (ADR-022)', async () => {
+    vi.stubGlobal('fetch', async () => ({ ok: true, status: 200, json: async () => [{}, {}] }) as Response)
+    try {
+      montar()
+      const enlace = await screen.findByRole('link', { name: /Clientes por revisar/ })
+      expect(enlace).toHaveAttribute('href', '/clientes/conflictos')
+      expect(enlace.closest('li')).toHaveTextContent('2')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('sin cambios que choquen, el menú no ofrece «Clientes por revisar»', async () => {
+    vi.stubGlobal('fetch', async () => ({ ok: true, status: 200, json: async () => [] }) as Response)
+    try {
+      montar()
+      // Se espera al menú ya armado antes de afirmar la ausencia, para no pasar por no haber dibujado todavía.
+      expect(await screen.findByRole('link', { name: 'Clientes' })).toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: /Clientes por revisar/ })).not.toBeInTheDocument()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('🔑 muestra la sucursal activa, que el selector ya no tiene a la vista', async () => {
     montar()
     expect(await screen.findByText('Complejo Centro')).toBeInTheDocument()
@@ -110,6 +134,14 @@ describe('cascarón de LibraClub', () => {
     // SMTP lo exige por dentro, así que a un encargado el link le daría 403.
     expect(screen.queryByRole('link', { name: 'Configuración' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Log de actividad' })).not.toBeInTheDocument()
+    // El panel del dueño tampoco: `GET /api/admin/panel-del-dueno` es de admin y trae nombres de clientes.
+    expect(screen.queryByRole('link', { name: 'Panel del dueño' })).not.toBeInTheDocument()
+  })
+
+  it('al admin le ofrece el Panel del dueño, en Administración', async () => {
+    montar()
+    const link = await screen.findByRole('link', { name: 'Panel del dueño' })
+    expect(link).toHaveAttribute('href', '/panel-del-dueno')
   })
 
   it('🔴 la marca y el nombre de la sidebar llevan las clases de marca', async () => {
