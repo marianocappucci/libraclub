@@ -148,6 +148,9 @@ def test_sin_conexion_la_factura_conjunta_va_a_la_cola_y_no_numera_local(
     cuerpo = r.json()
     assert cuerpo["en_cola"] is True and cuerpo["estado"] == "esperando"
     assert "conexión" in cuerpo["mensaje"]
+    # La forma única del 202 (libracore ADR-084): gana `codigo` y `motivo` sobre la de antes; el kit la lee igual.
+    assert set(cuerpo) == {"en_cola", "codigo", "estado", "pedido_id", "mensaje", "motivo"}
+    assert cuerpo["codigo"] == "en_cola" and cuerpo["pedido_id"] == filas("SELECT id FROM cola_arca")[0][0]
     assert _facturas() == []
     assert (arca_que_responde.numerar, arca_que_responde.cae) == (0, 0)
     assert filas("SELECT origen_tipo, origen_id, estado, fecha_ref FROM cola_arca") == [

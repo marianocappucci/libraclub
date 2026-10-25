@@ -40,7 +40,7 @@ vi.mock('libra-ui/api-client', async (original) => {
 })
 
 const { Ruteo } = await import('../App')
-const { _reiniciarConexionDelNodo } = await import('libra-ui/nodo-offline')
+const { _reiniciarConexionDelNodo, RUTA_CONEXION_DEL_NODO } = await import('libra-ui/nodo-offline')
 
 type Pedido = Record<string, unknown>
 
@@ -55,13 +55,19 @@ function pedido(extra: Pedido): Pedido {
 /** Lo que contesta `GET /api/nodo/cola`. */
 let cola: Record<string, unknown>
 
+/** Lo que contesta `GET /api/nodo/conexion` (libracore ADR-084): lo mismo que la cola sabe de la conexión, sin la lista de pedidos. */
+const conexion = () => ({ es_nodo: cola.es_nodo, en_linea: cola.en_linea, node_id: cola.node_id, a_facturar: 0 })
+
 beforeEach(() => {
   _reiniciarConexionDelNodo()
   usuario = sesion
   cola = { es_nodo: true, en_linea: false, node_id: 'nodo-1', cuentas: {}, a_revisar: 0, pedidos: [] }
   get.mockReset()
-  get.mockImplementation((ruta: string) =>
-    ruta.startsWith('/api/nodo/cola') ? Promise.resolve(cola) : Promise.reject(new Error(`ruta no esperada: ${ruta}`)))
+  get.mockImplementation((ruta: string) => {
+    if (ruta.startsWith(RUTA_CONEXION_DEL_NODO)) return Promise.resolve(conexion())
+    if (ruta.startsWith('/api/nodo/cola')) return Promise.resolve(cola)
+    return Promise.reject(new Error(`ruta no esperada: ${ruta}`))
+  })
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(
     new Response('null', { status: 200, headers: { 'content-type': 'application/json' } }))))
 })
@@ -151,11 +157,11 @@ describe('el menú y el cartel', () => {
     expect(document.querySelector('[data-slot="cartel-sin-conexion"]')).toBeNull()
   })
 
-  it('el cartel consulta la cola de LibraClub y no la `/api/nodo/conexion`, que este producto no monta', async () => {
+  it('el cartel consulta `/api/nodo/conexion` y no la cola con `?limite=1` (libracore ADR-084)', async () => {
     enLaRuta('/cola')
-    await waitFor(() => expect(get).toHaveBeenCalled())
+    await waitFor(() => expect(get).toHaveBeenCalledWith('/api/nodo/conexion'))
     const rutas = get.mock.calls.map((c) => String(c[0]))
-    expect(rutas.some((r) => r.startsWith('/api/nodo/cola'))).toBe(true)
-    expect(rutas).not.toContain('/api/nodo/conexion')
+    expect(RUTA_CONEXION_DEL_NODO).toBe('/api/nodo/conexion')
+    expect(rutas).not.toContain('/api/nodo/cola?limite=1')
   })
 })
