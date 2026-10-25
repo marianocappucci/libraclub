@@ -15,18 +15,64 @@ from datetime import date
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Column,
     Date,
     Enum,
     ForeignKey,
     Index,
     Integer,
     String,
+    Table,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Anotable, Auditable, Base
 from app.models.enums import Deporte, EstadoTorneo, EtapaTorneo, FormatoTorneo
+
+#: Las canchas de un evento. Una tabla de enlace y nada más: no tiene datos
+#: propios, y `ON DELETE CASCADE` de los dos lados porque borrar una cancha o un
+#: evento no puede dejar un enlace colgado.
+canchas_de_evento = Table(
+    "eventos_canchas",
+    Base.metadata,
+    Column("evento_id", ForeignKey("eventos.id", ondelete="CASCADE"), primary_key=True),
+    Column("cancha_id", ForeignKey("canchas.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
+class Evento(Base, Auditable, Anotable):
+    """Un campeonato que agrupa varias categorías (ADR-024).
+
+    🔑 **Cada categoría es un `Torneo`**, con sus zonas, su grilla y su campeón;
+    el evento sólo les pone lo que tienen en común: **las fechas y las canchas**.
+    Un club arma «Americano de primavera» con Caballeros 5ta, Caballeros 6ta y
+    Damas el mismo fin de semana, en las mismas canchas, y cada categoría se
+    sortea y se juega sola. Modelarlo como un torneo gigante con una columna
+    «categoría» en cada competidor habría mezclado en una sola tabla de
+    posiciones a gente que nunca se cruza.
+
+    Las fechas del evento **mandan**: al crear una categoría se copian y, si el
+    evento las cambia, se actualizan en todas. Con las canchas pasa lo mismo en
+    el momento de programar un partido (`servicios/torneos.programar`).
+    """
+
+    __tablename__ = "eventos"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sucursal_id: Mapped[int] = mapped_column(
+        ForeignKey("sucursales.id", ondelete="RESTRICT"), nullable=False
+    )
+    nombre: Mapped[str] = mapped_column(String(120), nullable=False)
+    desde: Mapped[date] = mapped_column(Date, nullable=False)
+    hasta: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("sucursal_id", "nombre", name="uq_eventos_sucursal_nombre"),
+        CheckConstraint("hasta IS NULL OR hasta >= desde", name="ck_eventos_rango"),
+        Index("ix_eventos_sucursal", "sucursal_id"),
+    )
 
 
 class Torneo(Base, Auditable, Anotable):
@@ -41,6 +87,15 @@ class Torneo(Base, Auditable, Anotable):
     `zonas`. Un CHECK lo garantiza en vez de dejarlos en 1 y 0 para los otros
     formatos: un número que miente es peor que un `NULL`, porque el que lo lee
     no tiene forma de saber que no significa nada.
+
+    **El americano (ADR-024)** son tres decisiones por torneo, todas sobre
+    columnas que ya estaban o que se suman acá:
+
+    - *cómo se juega el partido*: `sets_para_ganar` (1 = un set, 2 = al mejor de
+      tres) más `games_por_set` (6 o 9; `NULL` = no se controlan los games);
+    - *qué pasa después de las zonas*: o `clasifican_por_zona` pasan a las llaves
+      o `termina_en_zonas` y el primero de cada zona es su campeón;
+    - *de qué categoría es*: `categoria` suelta o, además, `evento_id`.
     """
 
     __tablename__ = "torneos"
@@ -81,9 +136,31 @@ class Torneo(Base, Auditable, Anotable):
     #: Cuántos parciales hay que ganar. 1 = fútbol (un resultado), 2 = al mejor
     #: de tres, 3 = al mejor de cinco.
     sets_para_ganar: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    #: A cuántos games se juega cada set en pádel y tenis: 6 (con tie-break en
+    #: 6-6) o 9 (con tie-break en 8-8). `NULL` = no se controla el marcador de
+    #: cada set, que es lo que hacían los torneos anteriores y lo que sigue
+    #: valiendo en fútbol y en el resto de los deportes.
+    games_por_set: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     cantidad_zonas: Mapped[int | None] = mapped_column(Integer, nullable=True)
     clasifican_por_zona: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: «Termina en las zonas»: no hay llaves y el primero de cada zona es el
+    #: campeón de su zona. 🔑 **Es un booleano explícito y no un
+    #: `clasifican_por_zona` en `NULL`**: un `NULL` en un torneo por zonas se
+    #: leería como «se olvidó de cargarlo». Con `termina_en_zonas` el
+    #: `clasifican_por_zona` es `NULL` —no hay a quién clasificar— y el CHECK lo
+    #: exige.
+    termina_en_zonas: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+
+    #: La categoría de un torneo suelto o de uno de un evento: «Caballeros 5ta»,
+    #: «Damas», «Mixto». Texto libre: el catálogo cambia de club en club.
+    categoria: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    #: El evento al que pertenece como categoría. `NULL` = torneo suelto.
+    evento_id: Mapped[int | None] = mapped_column(
+        ForeignKey("eventos.id", ondelete="RESTRICT"), nullable=True
+    )
 
     #: La semilla del sorteo. 🔑 **Se guarda para que el sorteo sea auditable**:
     #: con este número y la lista de inscriptos, cualquiera reproduce el mismo
@@ -110,13 +187,35 @@ class Torneo(Base, Auditable, Anotable):
         #
         # ⚠️ El tope de 2 clasificados no es arbitrario: es hasta dónde llega la
         # regla de cruce de `fixture.orden_de_clasificados`. Ver su docstring.
+        #
+        # Un torneo por zonas o pasa a llaves —y dice cuántos— o termina en las
+        # zonas —y no tiene a nadie que clasificar—.
         CheckConstraint(
-            "(formato = 'zonas' AND cantidad_zonas >= 2 "
-            " AND clasifican_por_zona BETWEEN 1 AND 2) "
+            "(formato = 'zonas' AND cantidad_zonas IS NOT NULL AND cantidad_zonas >= 2 AND ("
+            "  (NOT termina_en_zonas AND clasifican_por_zona IS NOT NULL "
+            "   AND clasifican_por_zona BETWEEN 1 AND 2) "
+            "  OR (termina_en_zonas AND clasifican_por_zona IS NULL))) "
             "OR (formato <> 'zonas' AND cantidad_zonas IS NULL "
-            " AND clasifican_por_zona IS NULL)",
+            " AND clasifican_por_zona IS NULL AND NOT termina_en_zonas)",
             name="ck_torneos_zonas_coherente",
         ),
+        # Los games por set son de pádel y de tenis, y de los dos tamaños que
+        # se juegan en un americano.
+        CheckConstraint(
+            "games_por_set IS NULL OR "
+            "(games_por_set IN (6, 9) AND deporte IN ('padel', 'tenis'))",
+            name="ck_torneos_games_por_set",
+        ),
+        # Una categoría no se repite dentro de un evento: dos «Caballeros 5ta»
+        # en el mismo campeonato es un error de carga, no dos categorías.
+        Index(
+            "uq_torneos_evento_categoria",
+            "evento_id",
+            "categoria",
+            unique=True,
+            postgresql_where="evento_id IS NOT NULL",
+        ),
+        Index("ix_torneos_evento", "evento_id"),
         Index("ix_torneos_sucursal", "sucursal_id"),
     )
 

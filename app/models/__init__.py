@@ -25,11 +25,13 @@ from app.models.reservas import WHERE_OCUPA, WHERE_OCUPA_CENTRAL, WHERE_OCUPA_NO
 from app.models.tarifas import Tarifa
 from app.models.torneos import (
     Competidor,
+    Evento,
     IntegranteDeCompetidor,
     ParcialDePartido,
     PartidoDeTorneo,
     Torneo,
     Zona,
+    canchas_de_evento,
 )
 
 __all__ = [
@@ -48,6 +50,7 @@ __all__ = [
     "EstadoReserva",
     "EstadoTorneo",
     "EtapaTorneo",
+    "Evento",
     "Feriado",
     "FormatoTorneo",
     "IntegranteDeCompetidor",
@@ -64,4 +67,5 @@ __all__ = [
     "WHERE_OCUPA",
     "WHERE_OCUPA_CENTRAL",
     "WHERE_OCUPA_NODO",
+    "canchas_de_evento",
 ]

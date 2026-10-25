@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin, require_staff
@@ -23,7 +23,7 @@ from app.db import obtener_sesion
 from app.models.enums import EtapaTorneo
 from app.models.maestros import Cancha
 from app.models.reservas import Reserva
-from app.models.torneos import Competidor, PartidoDeTorneo, Torneo, Zona
+from app.models.torneos import Competidor, Evento, PartidoDeTorneo, Torneo, Zona
 from app.schemas.torneos import (
     CompetidorEntrada,
     CompetidorSalida,
@@ -92,7 +92,15 @@ def listar(
     consulta = select(Torneo).order_by(Torneo.desde.desc(), Torneo.id.desc())
     if sucursal_id is not None:
         consulta = consulta.where(Torneo.sucursal_id == sucursal_id)
-    torneos = list(sesion.scalars(consulta).all())
+    return torneos_en_lista(sesion, list(sesion.scalars(consulta).all()))
+
+
+def torneos_en_lista(sesion: Session, torneos: list[Torneo]) -> list[TorneoEnLista]:
+    """Los torneos con lo que la lista muestra sin abrirlos.
+
+    Es público dentro del paquete porque lo usa también la pantalla de un evento,
+    que lista sus categorías con el mismo detalle.
+    """
     if not torneos:
         return []
 
@@ -109,11 +117,18 @@ def listar(
         select(Competidor).where(Competidor.torneo_id.in_(ids))
     ):
         inscriptos[competidor.torneo_id] += 1
+    eventos = {
+        e.id: e.nombre
+        for e in sesion.scalars(
+            select(Evento).where(
+                Evento.id.in_({t.evento_id for t in torneos if t.evento_id is not None})
+            )
+        )
+    }
 
     salida = []
     for torneo in torneos:
         propios = partidos[torneo.id]
-        ganador = servicio.campeon(sesion, torneo)
         salida.append(
             TorneoEnLista(
                 **TorneoSalida.model_validate(torneo).model_dump(),
@@ -123,10 +138,29 @@ def listar(
                 sin_programar=sum(
                     1 for p in propios if p.reserva_id is None and not p.finalizado
                 ),
-                campeon=ganador.nombre if ganador else None,
+                campeon=_quien_gano(sesion, torneo),
+                evento=eventos.get(torneo.evento_id) if torneo.evento_id else None,
             )
         )
     return salida
+
+
+def _quien_gano(sesion: Session, torneo: Torneo) -> str | None:
+    """El campeón en una línea, para la lista.
+
+    Con un solo campeón es su nombre. En un torneo que termina en las zonas hay
+    uno por zona, y se dicen todos los que ya se conocen: «Zona A: Pérez / García».
+    """
+    if torneo.termina_en_zonas:
+        ganadores = servicio.campeones_de_zonas(sesion, torneo)
+        if not ganadores:
+            return None
+        return " · ".join(
+            f"{zona}: {competidor.nombre}" if zona else competidor.nombre
+            for zona, competidor in ganadores
+        )
+    ganador = servicio.campeon(sesion, torneo)
+    return ganador.nombre if ganador else None
 
 
 @router.post("", response_model=TorneoSalida, status_code=201)
@@ -135,11 +169,38 @@ def crear(
     sesion: Session = Depends(obtener_sesion),
     _: object = Depends(require_admin),
 ):
-    torneo = Torneo(**datos.model_dump())
+    campos = datos.model_dump()
+    if datos.evento_id is not None:
+        evento = sesion.get(Evento, datos.evento_id)
+        if evento is None:
+            raise HTTPException(404, "No existe ese evento.")
+        if evento.sucursal_id != datos.sucursal_id:
+            raise HTTPException(422, "El evento es de otra sucursal.")
+        # 🔑 Las fechas las manda el evento, no el pedido: es lo que hace que
+        # todas sus categorías jueguen los mismos días.
+        campos["desde"], campos["hasta"] = evento.desde, evento.hasta
+        _sin_categoria_repetida(sesion, evento.id, datos.categoria)
+    torneo = Torneo(**campos)
     sesion.add(torneo)
     sesion.commit()
     sesion.refresh(torneo)
     return torneo
+
+
+def _sin_categoria_repetida(
+    sesion: Session, evento_id: int, categoria: str | None, salvo: int | None = None
+) -> None:
+    """Dos categorías iguales en un evento son un error de carga: 409."""
+    if not categoria:
+        return
+    consulta = select(Torneo.id).where(
+        Torneo.evento_id == evento_id,
+        func.lower(Torneo.categoria) == categoria.lower(),
+    )
+    if salvo is not None:
+        consulta = consulta.where(Torneo.id != salvo)
+    if sesion.scalar(consulta) is not None:
+        raise HTTPException(409, f"El evento ya tiene la categoría «{categoria}».")
 
 
 @router.get("/{torneo_id}", response_model=TorneoSalida)
@@ -160,7 +221,20 @@ def editar(
 ):
     """Corrige lo que no toca el cuadro. El formato no está acá a propósito."""
     torneo = _torneo(sesion, torneo_id)
-    for campo, valor in datos.model_dump().items():
+    if torneo.evento_id is not None:
+        evento = sesion.get(Evento, torneo.evento_id)
+        if evento is not None and (datos.desde, datos.hasta) != (evento.desde, evento.hasta):
+            raise HTTPException(
+                422,
+                "Las fechas de una categoría las define el evento: cambialas en el evento.",
+            )
+    if "categoria" in datos.model_fields_set:
+        if torneo.evento_id is not None:
+            if not datos.categoria:
+                raise HTTPException(422, "Una categoría de un evento necesita su categoría.")
+            _sin_categoria_repetida(sesion, torneo.evento_id, datos.categoria, salvo=torneo.id)
+        torneo.categoria = datos.categoria
+    for campo, valor in datos.model_dump(exclude={"categoria"}).items():
         setattr(torneo, campo, valor)
     sesion.commit()
     sesion.refresh(torneo)

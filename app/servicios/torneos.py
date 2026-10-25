@@ -19,7 +19,13 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.enums import EstadoReserva, EstadoTorneo, EtapaTorneo, FormatoTorneo
+from app.models.enums import (
+    Deporte,
+    EstadoReserva,
+    EstadoTorneo,
+    EtapaTorneo,
+    FormatoTorneo,
+)
 from app.models.maestros import Cancha
 from app.models.torneos import (
     Competidor,
@@ -28,8 +34,9 @@ from app.models.torneos import (
     PartidoDeTorneo,
     Torneo,
     Zona,
+    canchas_de_evento,
 )
-from app.servicios import fixture
+from app.servicios import desempate, fixture, sets_de_games
 from app.servicios import reservas as servicio_reservas
 
 #: Puntos de la tabla. 3/1/0, que es lo que usa cualquier torneo de fútbol de
@@ -37,6 +44,11 @@ from app.servicios import reservas as servicio_reservas
 #: y ordenar por puntos es lo mismo que ordenar por partidos ganados.
 PUNTOS_POR_GANAR = 3
 PUNTOS_POR_EMPATAR = 1
+
+#: Los deportes que se juegan por sets y games. Sólo en ellos rige el orden de
+#: zona con cara a cara y diferencia de sets (`servicios/desempate.py`) y puede
+#: un torneo fijar `games_por_set`. En el resto, un parcial son goles o puntos.
+DEPORTES_DE_SETS = frozenset({Deporte.PADEL, Deporte.TENIS})
 
 #: Los nombres de las zonas, en orden. Con más de 26 zonas —que no va a pasar—
 #: se sigue con AA, AB…
@@ -266,6 +278,11 @@ def generar_playoff(sesion: Session, torneo: Torneo) -> None:
     """
     if torneo.formato is not FormatoTorneo.ZONAS:
         raise EstadoDelTorneo("Sólo un torneo por zonas tiene playoff.")
+    if torneo.termina_en_zonas:
+        raise EstadoDelTorneo(
+            "Este torneo termina en las zonas: el primero de cada zona es el "
+            "campeón de su zona y no hay playoff."
+        )
     if torneo.estado is not EstadoTorneo.SORTEADO:
         raise EstadoDelTorneo("El torneo no está en condiciones de largar el playoff.")
 
@@ -329,6 +346,7 @@ def programar(
     cancha = sesion.get(Cancha, cancha_id)
     if cancha is None:
         raise TorneoInvalido("No existe esa cancha.")
+    _validar_cancha_del_evento(sesion, torneo, cancha)
     minutos = duracion_min or cancha.duracion_turno_min
 
     punto = sesion.begin_nested()
@@ -361,6 +379,30 @@ def programar(
         raise
     punto.commit()
     return partido
+
+
+def _validar_cancha_del_evento(sesion: Session, torneo: Torneo, cancha: Cancha) -> None:
+    """Una categoría de un evento se juega en las canchas del evento.
+
+    Es lo que hace real el «mismas canchas» del evento (ADR-024): sin esta
+    guarda, la lista de canchas del evento sería una sugerencia que la primera
+    categoría en apuro ignora, y las otras se quedan sin esa cancha. Un evento
+    **sin canchas cargadas** no restringe nada.
+    """
+    if torneo.evento_id is None:
+        return
+    permitidas = set(
+        sesion.scalars(
+            select(canchas_de_evento.c.cancha_id).where(
+                canchas_de_evento.c.evento_id == torneo.evento_id
+            )
+        ).all()
+    )
+    if permitidas and cancha.id not in permitidas:
+        raise TorneoInvalido(
+            f"{cancha.nombre} no es una de las canchas de este evento. "
+            "Elegí una de las del evento o sumala en el evento."
+        )
 
 
 def desprogramar(sesion: Session, partido: PartidoDeTorneo) -> PartidoDeTorneo:
@@ -481,6 +523,14 @@ def _resolver_ganador(
             f"{len(parciales)} parciales."
         )
 
+    if torneo.games_por_set is not None:
+        # 🔑 Antes de contar sets: «6-5» se rechaza con la regla del torneo y no
+        # con un «el ganador tiene que llevarse 2 parciales» que no explica nada.
+        for numero, (a, b) in enumerate(parciales, start=1):
+            motivo = sets_de_games.error_del_set(torneo.games_por_set, numero, a, b)
+            if motivo:
+                raise TorneoInvalido(motivo)
+
     gana_a = sum(1 for a, b in parciales if a > b)
     gana_b = sum(1 for a, b in parciales if b > a)
     empatados = len(parciales) - gana_a - gana_b
@@ -491,6 +541,13 @@ def _resolver_ganador(
         raise TorneoInvalido("Un set no puede terminar empatado.")
 
     if gana_a == gana_b:
+        if torneo.games_por_set is not None and para_ganar > 1:
+            # Con los games controlados, un 1-1 en sets es un partido al que le
+            # falta el set decisivo, no un empate: en pádel no los hay, y
+            # guardarlo como tal le daría un punto a cada pareja en la zona.
+            raise TorneoInvalido(
+                f"Falta el set decisivo: el partido se gana con {para_ganar} sets."
+            )
         if partido.etapa is EtapaTorneo.LLAVES:
             raise TorneoInvalido(
                 "Una llave no puede terminar empatada: alguien tiene que pasar."
@@ -568,10 +625,13 @@ def _cerrar_si_termino(sesion: Session, torneo: Torneo) -> None:
     partidos = partidos_de(sesion, torneo)
     if not partidos or any(not p.finalizado for p in partidos):
         return
-    if torneo.formato is FormatoTorneo.ZONAS and not any(
-        p.etapa is EtapaTorneo.LLAVES for p in partidos
+    if (
+        torneo.formato is FormatoTorneo.ZONAS
+        and not torneo.termina_en_zonas
+        and not any(p.etapa is EtapaTorneo.LLAVES for p in partidos)
     ):
-        # Terminaron los grupos pero falta el playoff: el torneo no terminó.
+        # Terminaron los grupos pero falta el playoff: el torneo no terminó. Si
+        # el torneo termina en las zonas, no hay playoff que esperar.
         return
     torneo.estado = EstadoTorneo.FINALIZADO
     sesion.flush()
@@ -593,7 +653,32 @@ def campeon(sesion: Session, torneo: Torneo) -> Competidor | None:
     tablas = tabla_de_posiciones(sesion, torneo)
     if not tablas or not tablas[0].filas:
         return None
+    if torneo.termina_en_zonas and len(tablas) > 1:
+        # Cada zona tiene su campeón y no hay un cruce que elija uno: ver
+        # `campeones_de_zonas`.
+        return None
     return sesion.get(Competidor, tablas[0].filas[0].competidor_id)
+
+
+def campeones_de_zonas(
+    sesion: Session, torneo: Torneo
+) -> list[tuple[str | None, Competidor]]:
+    """El campeón de cada zona que ya terminó, en un torneo que termina en las zonas.
+
+    🔑 **Una zona tiene campeón apenas se juega su último partido**, no cuando
+    termina todo el torneo: el sábado a la tarde la Zona A ya sabe quién ganó
+    aunque la B siga jugando. Un torneo con llaves devuelve vacío — su campeón es
+    el de la final (`campeon`).
+    """
+    if not torneo.termina_en_zonas:
+        return []
+    ganadores = []
+    for tabla in tabla_de_posiciones(sesion, torneo):
+        if tabla.completa and tabla.filas:
+            ganador = sesion.get(Competidor, tabla.filas[0].competidor_id)
+            if ganador is not None:
+                ganadores.append((tabla.nombre, ganador))
+    return ganadores
 
 
 # ── Tabla de posiciones ─────────────────────────────────────────────────────
@@ -613,6 +698,12 @@ class FilaDePosiciones:
     en_contra: int
     diferencia: int
     puntos: int
+    #: Los sets ganados y perdidos. Sólo en pádel y tenis —`None` en el resto, donde
+    #: un parcial no es un set— y es el segundo criterio de desempate después del
+    #: cara a cara (`servicios/desempate.py`).
+    sets_a_favor: int | None = None
+    sets_en_contra: int | None = None
+    diferencia_sets: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -621,6 +712,11 @@ class TablaDeZona:
     #: `None` en una liga, que no tiene zonas.
     nombre: str | None
     filas: list[FilaDePosiciones]
+    #: Si ya se jugaron todos los partidos de la zona. Es lo que permite decir
+    #: «campeón de la zona» sin esperar al resto del torneo.
+    completa: bool = False
+    #: Si las columnas de sets y el orden con cara a cara valen para esta tabla.
+    con_sets: bool = False
 
 
 def tabla_de_posiciones(sesion: Session, torneo: Torneo) -> list[TablaDeZona]:
@@ -628,30 +724,45 @@ def tabla_de_posiciones(sesion: Session, torneo: Torneo) -> list[TablaDeZona]:
 
     Incluye a los que todavía no jugaron: una tabla que esconde al que no debutó
     hace que el encargado crea que se olvidó de inscribirlo.
+
+    En **pádel y tenis** se suman los sets y el orden es el del americano: partidos
+    ganados, cara a cara entre dos empatados, diferencia de sets, de games y games
+    a favor (`servicios/desempate.py`). En el resto, puntos, diferencia y a favor.
     """
+    con_sets = torneo.deporte in DEPORTES_DE_SETS
     competidores = competidores_de(sesion, torneo)
-    partidos = [
-        p
-        for p in partidos_de(sesion, torneo)
-        if p.etapa is EtapaTorneo.GRUPOS and p.finalizado
+    de_grupos = [
+        p for p in partidos_de(sesion, torneo) if p.etapa is EtapaTorneo.GRUPOS
     ]
+    partidos = [p for p in de_grupos if p.finalizado]
 
     acumulado: dict[int, dict[str, int]] = {
-        c.id: dict(jugados=0, ganados=0, empatados=0, perdidos=0, a_favor=0, en_contra=0)
+        c.id: dict(
+            jugados=0, ganados=0, empatados=0, perdidos=0, a_favor=0, en_contra=0,
+            sets_a_favor=0, sets_en_contra=0,
+        )
         for c in competidores
     }
+    #: Quién ganó cada cruce, para el cara a cara. Un par se juega una vez por
+    #: zona, así que la clave no necesita el número de fecha.
+    ganadores: dict[frozenset[int], int | None] = {}
     for partido in partidos:
         a, b = partido.competidor_a_id, partido.competidor_b_id
         if a is None or b is None or a not in acumulado or b not in acumulado:
             continue
+        ganadores[frozenset((a, b))] = partido.ganador_id
         favor_a = sum(p.puntos_a for p in partido.parciales)
         favor_b = sum(p.puntos_b for p in partido.parciales)
-        lados = ((a, favor_a, favor_b), (b, favor_b, favor_a))
-        for propio, favor, contra in lados:
+        sets_a = sum(1 for p in partido.parciales if p.puntos_a > p.puntos_b)
+        sets_b = sum(1 for p in partido.parciales if p.puntos_b > p.puntos_a)
+        lados = ((a, favor_a, favor_b, sets_a, sets_b), (b, favor_b, favor_a, sets_b, sets_a))
+        for propio, favor, contra, s_favor, s_contra in lados:
             fila = acumulado[propio]
             fila["jugados"] += 1
             fila["a_favor"] += favor
             fila["en_contra"] += contra
+            fila["sets_a_favor"] += s_favor
+            fila["sets_en_contra"] += s_contra
             if partido.ganador_id is None:
                 fila["empatados"] += 1
             elif partido.ganador_id == propio:
@@ -667,11 +778,16 @@ def tabla_de_posiciones(sesion: Session, torneo: Torneo) -> list[TablaDeZona]:
         select(Zona).where(Zona.torneo_id == torneo.id)
     ).all()}
 
+    def ganador_entre(x: int, y: int) -> int | None:
+        return ganadores.get(frozenset((x, y)))
+
     tablas = []
     for zona_id in sorted(por_zona, key=lambda z: (z is not None, z or 0)):
         filas = []
         for competidor in por_zona[zona_id]:
-            datos = acumulado[competidor.id]
+            datos = dict(acumulado[competidor.id])
+            sets_favor = datos.pop("sets_a_favor")
+            sets_contra = datos.pop("sets_en_contra")
             filas.append(
                 FilaDePosiciones(
                     competidor_id=competidor.id,
@@ -682,15 +798,28 @@ def tabla_de_posiciones(sesion: Session, torneo: Torneo) -> list[TablaDeZona]:
                         datos["ganados"] * PUNTOS_POR_GANAR
                         + datos["empatados"] * PUNTOS_POR_EMPATAR
                     ),
+                    sets_a_favor=sets_favor if con_sets else None,
+                    sets_en_contra=sets_contra if con_sets else None,
+                    diferencia_sets=sets_favor - sets_contra if con_sets else None,
                 )
             )
-        # Puntos, después diferencia, después lo hecho a favor, y por último el
-        # nombre para que el orden sea estable: sin ese último criterio, dos
-        # competidores con todo igual se intercambian entre consultas y la
-        # pantalla parece cambiar sola.
-        filas.sort(key=lambda f: (-f.puntos, -f.diferencia, -f.a_favor, f.nombre))
+        if con_sets:
+            filas = desempate.ordenar_zona(filas, ganador_entre)
+        else:
+            # Puntos, después diferencia, después lo hecho a favor, y por último
+            # el nombre para que el orden sea estable: sin ese último criterio,
+            # dos competidores con todo igual se intercambian entre consultas y
+            # la pantalla parece cambiar sola.
+            filas.sort(key=lambda f: (-f.puntos, -f.diferencia, -f.a_favor, f.nombre))
+        propios = [p for p in de_grupos if p.zona_id == zona_id]
         tablas.append(
-            TablaDeZona(zona_id=zona_id, nombre=nombres.get(zona_id), filas=filas)
+            TablaDeZona(
+                zona_id=zona_id,
+                nombre=nombres.get(zona_id),
+                filas=filas,
+                completa=bool(propios) and all(p.finalizado for p in propios),
+                con_sets=con_sets,
+            )
         )
     return tablas
 

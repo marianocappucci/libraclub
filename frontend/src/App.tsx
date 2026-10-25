@@ -26,6 +26,7 @@ import { Devoluciones } from '@/pages/Devoluciones'
 import { MpBandeja } from '@/pages/MpBandeja'
 import { Sucursales } from '@/pages/Sucursales'
 import { Tarifas } from '@/pages/Tarifas'
+import { Evento } from '@/pages/Evento'
 import { Torneo } from '@/pages/Torneo'
 import { Torneos } from '@/pages/Torneos'
 import { TurnosFijos } from '@/pages/TurnosFijos'
@@ -109,6 +110,11 @@ function Backoffice() {
           {/* El detalle va acá y no anidado: no comparte nada con el listado
               salvo el camino, y anidarlo obligaría a un Outlet para nada. */}
           <Route path="/torneos/:id" element={<Torneo />} />
+          {/* El evento cuelga de `/torneos` y no de una ruta propia: es la misma
+              sección del menú —un campeonato con sus categorías— y así hereda
+              su ícono y su entrada activa. Tiene un segmento más que
+              `/torneos/:id`, así que no se pisan. */}
+          <Route path="/torneos/eventos/:id" element={<Evento />} />
           <Route path="/horarios" element={<Horarios />} />
           <Route path="/clientes" element={<Clientes />} />
           <Route path="/sucursales" element={<Sucursales />} />
