@@ -7,7 +7,7 @@ nunca):
 
 | Rutas | Quién entra |
 |---|---|
-| `libraedge.sync.api.RUTAS_AUTENTICADAS_POR_NODO` (`/sync/v1/push`, `pull`, `ticket-arca`, `carga-inicial`) |
+| `libraedge.sync.api.RUTAS_AUTENTICADAS_POR_NODO` (push, pull, ticket-arca, carga-inicial, estado-operaciones) |
 PÚBLICA, secreto del nodo: ni sesión ni rol | | `POST /sync/v1/vinculacion` (el canje del código) | PÚBLICA: la llama
 el instalador | | `/api/nodos-offline*` («Sucursal sin internet») | ADMIN |
 | `GET /api/nodo/conexion`, `GET /api/nodo/cola` y `POST /api/nodo/cola/emitir` | STAFF (mostrador) |
@@ -66,6 +66,7 @@ PEDIDOS_DEL_NODO = {
     ("GET", "/sync/v1/pull"): {"params": {"node_id": "x"}},
     ("POST", "/sync/v1/ticket-arca"): {"json": {"node_id": "x"}},
     ("GET", "/sync/v1/carga-inicial"): {"params": {"node_id": "x"}},
+    ("POST", "/sync/v1/estado-operaciones"): {"json": {"node_id": "x", "operation_ids": ["x:1"]}},
 }
 
 
