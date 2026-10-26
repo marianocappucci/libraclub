@@ -1,4 +1,5 @@
-"""Los cambios de clientes en conflicto: verlos y elegir cuál queda (ADR-022, tercer addendum).
+"""Los cambios de clientes por revisar: verlos y elegir cuál queda, aplicarlos o descartarlos (ADR-022, tercer y cuarto
+addendum). La lista trae las que chocan y las que ya no chocan (`ya_no_choca`).
 
 Molde: `routers/conflictos.py` (las reservas en conflicto). La pantalla es de LibraClub (`ClientesEnConflicto` y
 `ResolverConflictoDeCliente`); acá está la API. Es sólo del central: en la PC del club la lista viene vacía y resolver
@@ -50,6 +51,8 @@ class EdicionSalida(BaseModel):
     campos: list[CampoSalida]
     #: Cuántos campos piden elegir. Si es 0, ya no choca nada y guardar aplica lo que falta.
     en_conflicto: int
+    #: Sigue en revisión pero hoy no hay nada para elegir: se puede aplicar (o descartar) sin riesgo.
+    ya_no_choca: bool
     #: Si esta instancia puede resolverla (la web sí, la PC del club no).
     se_puede_resolver: bool
 
@@ -61,9 +64,18 @@ class Resolucion(BaseModel):
     vistos: dict[str, Any]
 
 
+class Descarte(BaseModel):
+    #: Lo que la pantalla mostró de la web en cada campo de la edición. Si cambió, no se descarta nada.
+    vistos: dict[str, Any]
+
+
 class ResultadoSalida(BaseModel):
     #: Los campos que se cambiaron en el cliente.
     aplicados: list[str]
+
+
+class DescarteSalida(BaseModel):
+    descartada: bool = True
 
 
 def _a_salida(edicion: EdicionEnRevision) -> EdicionSalida:
@@ -74,6 +86,7 @@ def _a_salida(edicion: EdicionEnRevision) -> EdicionSalida:
         recibida_at=edicion.recibida_at,
         campos=[CampoSalida(**vars(c)) for c in edicion.campos],
         en_conflicto=len(edicion.en_conflicto),
+        ya_no_choca=edicion.ya_no_choca,
         se_puede_resolver=True,
     )
 
@@ -97,8 +110,9 @@ def _traducir(exc: Exception) -> HTTPException:
 
 @router.get("", response_model=list[EdicionSalida])
 def listar(sesion: Session = Depends(obtener_sesion), _: object = Depends(require_staff)):
-    """Las ediciones de clientes que esperan que alguien elija, de la más vieja a la más nueva. En la PC del club, vacía
-    (la revisión es de la web)."""
+    """Las ediciones de clientes que esperan a alguien, de la más vieja a la más nueva: las que chocan (hay que
+    elegir) y las que ya no chocan (`ya_no_choca`: se aplican o se descartan). En la PC del club, vacía (la revisión
+    es de la web)."""
     if clientes_nodo.en_un_nodo():
         return []
     return [_a_salida(e) for e in ediciones_en_conflicto.listar(sesion)]
@@ -106,7 +120,8 @@ def listar(sesion: Session = Depends(obtener_sesion), _: object = Depends(requir
 
 @router.get("/{operacion_id}", response_model=EdicionSalida)
 def ver(operacion_id: str, sesion: Session = Depends(obtener_sesion), _: object = Depends(require_staff)):
-    """Una edición con los dos valores de cada campo, para elegir. 409 `solo_en_el_central` en la PC del club."""
+    """Una edición con los dos valores de cada campo, para elegir (o para aplicar, si ya no choca). 409
+    `solo_en_el_central` en la PC del club."""
     _exigir_la_web()
     try:
         return _a_salida(ediciones_en_conflicto.detalle(sesion, operacion_id))
@@ -123,9 +138,9 @@ def resolver(
     sesion: Session = Depends(obtener_sesion),
     usuario: dict = Depends(require_staff),
 ):
-    """Aplica lo elegido en una sola transacción y da la edición por resuelta. Resolverla dos veces da 409
-    `ya_resuelta` y no aplica nada otra vez; si el cliente cambió de nuevo en la web, 409 `cambio_en_la_web`. Sólo en
-    la web (409 `solo_en_el_central` en la PC del club)."""
+    """Aplica lo elegido en una sola transacción y da la edición por resuelta (si ya no choca, `elecciones` va vacío y
+    se aplica lo que falta). Resolverla dos veces da 409 `ya_resuelta` y no aplica nada otra vez; si el cliente cambió
+    de nuevo en la web, 409 `cambio_en_la_web`. Sólo en la web (409 `solo_en_el_central` en la PC del club)."""
     _exigir_la_web()
     try:
         crudo = usuario.get("id")
@@ -142,3 +157,28 @@ def resolver(
         raise _traducir(exc) from exc
     sesion.commit()
     return ResultadoSalida(aplicados=aplicados)
+
+
+@router.post("/{operacion_id}/descartar", response_model=DescarteSalida)
+def descartar(
+    operacion_id: str,
+    datos: Descarte,
+    sesion: Session = Depends(obtener_sesion),
+    usuario: dict = Depends(require_staff),
+):
+    """Cierra la edición sin aplicarla: el cliente queda como está en la web. **No tiene vuelta atrás.** Mismas
+    garantías que `resolver`: 409 `ya_resuelta` si otra persona llegó antes, 409 `cambio_en_la_web` si el cliente
+    cambió desde que se mostró la pantalla (puede haber vuelto a chocar). Sólo en la web (409 `solo_en_el_central` en
+    la PC del club)."""
+    _exigir_la_web()
+    try:
+        ediciones_en_conflicto.descartar(
+            sesion,
+            operacion_id,
+            datos.vistos,
+            usuario=str(usuario.get("username") or usuario.get("name") or "desconocido"),
+        )
+    except (EdicionNoEncontrada, EdicionYaResuelta, EleccionInvalida, CambioEnLaWeb) as exc:
+        sesion.rollback()
+        raise _traducir(exc) from exc
+    return DescarteSalida()

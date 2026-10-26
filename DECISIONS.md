@@ -810,11 +810,41 @@ que `/api/reservas/series/listado`.
 
 - Consecuencias:
   - La copia de la operación **en el outbox de la PC del club** sigue en `manual_review` hasta que alguien corra `libraedge-nodo revision reenviar <operation_id>` en esa PC: el central contesta `duplicate` y la confirma. Esta pantalla no lo hace (no hay ruta del central al nodo para eso, libraedge ADR-024). El cliente de la PC igual recibe sus datos definitivos por el espejo.
-  - Una edición que dejó de chocar (la web volvió al valor anterior) no aparece en la lista aunque siga en revisión: se aplica con `libraedge-central revision reintentar`.
+  - ~~Una edición que dejó de chocar (la web volvió al valor anterior) no aparece en la lista aunque siga en revisión: se aplica con `libraedge-central revision reintentar`.~~ Resuelto el 2026-10-26: aparece en la lista y se aplica o se descarta desde la pantalla (cuarto addendum).
   - Si dos ediciones seguidas del mismo cliente chocan (la segunda parte del resultado de la primera), se resuelven por separado, de la más vieja a la más nueva.
   - Tests: `tests/test_clientes_en_conflicto.py` y, en el frontend, `ResolverConflictoDeCliente.test.tsx`, `ClientesEnConflicto.test.tsx`, `Clientes.test.tsx`, `Layout.test.tsx`.
 - Abierto:
   - **Reenviar desde la PC del club** sin la línea de comandos: hoy es `libraedge-nodo revision reenviar` (libraedge).
+
+### Cuarto addendum a ADR-022 (2026-10-26): las ediciones que dejaron de chocar también están en la pantalla — aplicarlas o descartarlas
+
+- Estado: aplicada en este PR. **Sin migración**, sin cambios en LibraEdge. Cierra la consecuencia que dejó el tercer addendum («una edición que dejó de chocar no aparece en la lista»). Pedido del humano (2026-10-26): si alguien vuelve el dato de la web al valor anterior, la edición sigue en `manual_review` pero ya no choca, y sólo se resolvía con `libraedge-central revision reintentar`, por línea de comandos.
+- Qué ya existía (se miró antes): todo el tercer addendum. `resolver` **ya** sabía aplicar una edición sin campos en `conflicto` (`elecciones` vacías: aplica los `se_aplica`, cierra con `revision.reintentar`) y `detalle` no filtraba por conflicto. Lo que faltaba era **verla**: `listar` descartaba lo que no tenía ningún campo en conflicto. No hay un segundo camino de aplicación.
+
+**1. Qué entra en la lista.**
+
+- Una operación `cliente_club.edicion` en `manual_review` que **se puede mostrar**: el payload se entiende, el alta ya se aplicó (hay mapeo) y el cliente existe. De ésas, hay dos clases (`EdicionEnRevision.ya_no_choca`): **choca** (algún campo en `conflicto`: hay que elegir) y **ya no choca** (ninguno: se aplica o se descarta). `GET /api/clientes-en-conflicto` suma `ya_no_choca` a cada ítem; `en_conflicto == 0` equivale.
+- **Afuera**, porque la pantalla no puede resolverlas con seguridad (siguen por `libraedge-central revision`): (a) el alta todavía no se aplicó (`SinMapeo`; se reintenta en orden al resolver el alta; si el alta se aplica después, la edición **entra sola** como «ya no choca»); (b) un payload que no se entiende (schema/versión desconocidos, un tipo de dato inválido); (c) el cliente ya no existe en la web. En (b) y (c) reintentar volvería a fallar y descartar es una decisión de quien opera el central, no algo para ofrecer sin ver qué se pierde.
+- Una edición cuyos campos ya están **todos iguales** en la web también entra («Ya está todo igual en la web»): aplicarla no cambia nada y la da por resuelta.
+
+**2. Aplicar (`POST .../resolver`, sin cambios de contrato).** Con `elecciones: {}` y `vistos`. Mismas garantías de siempre, reusando el mismo código: una transacción con la fila del cliente en `FOR UPDATE`, el estado vuelto a mirar con el candado (409 `ya_resuelta`), el control optimista con `vistos` en **todos** los campos (409 `cambio_en_la_web`) y la fila en `actividad_log` (el texto dice «se aplicó a mano lo que se cargó en la PC del club (ya no chocaba)»). Lo común con `descartar` se factorizó en `_vista_con_candado`.
+
+**3. Descartar (`POST .../descartar`, nuevo).** Cuerpo `{vistos}`. Deja la operación `discarded` con `libraedge.sync.revision.descartar` (con motivo, fijo, y quién: `resuelto_por`, `resolucion`) y **no toca al cliente**: queda como está en la web. **No tiene vuelta atrás**: la pantalla lo confirma con un diálogo. Las mismas garantías que aplicar: una transacción con el cliente bloqueado, 409 `ya_resuelta` si otra persona llegó antes (también si ya estaba aplicada) y 409 `cambio_en_la_web` con `vistos` —**no se descarta algo que la persona no vio**: si entre que abrió la pantalla y confirmó el dato volvió a chocar, primero lo ve—. `revision.descartar` commitea; la fila de `actividad_log` se escribe antes, en la misma transacción, y confirman juntas (`editar` / `cliente`, «se descartó lo que se cargó en la PC del club», sin diff). La PC del club, si reenvía la operación, recibe `rejected: descartada en el central: <motivo>` (el motivo es «Descartada a mano desde la web: el cliente se dejó como estaba en la web.»). El servicio no restringe descartar a las que ya no chocan (con `vistos` al día, lo que la pantalla vio es lo que hay); la pantalla sólo lo ofrece ahí.
+- Permisos como siempre: `require_staff`; en la PC del club la lista viene vacía y ver, aplicar y descartar dan 409 `solo_en_el_central`.
+
+**4. Pantalla** (textos sin jerga: «la PC del club» y «la web»; kit `libra-ui`: `BadgeEstado`, `TituloPantalla`, `EncabezadoDePantalla`; `ConfirmDialog` del repo; modo claro y oscuro).
+
+- La lista marca cada cliente: «Hay que elegir» (tono atención) o «Ya no choca: se puede aplicar» (tono ok), con qué datos hay para elegir o para aplicar.
+- El detalle de uno que ya no choca dice «Ya no choca», muestra lo que se aplica («Se aplican»: valor de la web → valor de la PC) y lo que ya está igual, y ofrece **«Aplicar cambios de la PC»** y **«Descartar»** (diálogo «Descartar los cambios de la PC … No se puede deshacer»). Sin radios: no hay nada que elegir.
+- **Si volvió a chocar entre que se abrió y se guardó** (aplicar o descartar), el servidor contesta 409 `cambio_en_la_web`, la pantalla muestra el aviso y **recarga con lo de ahora: la elección por campo** («Guardar elección», sin «Descartar»). Al revés, una que chocaba y dejó de chocar mientras se miraba da 409 con lo viejo y, recargada, ofrece aplicar.
+- **El aviso de Clientes y el número del menú cuentan las dos clases** (`useResumenDeClientesParaRevisar`: `total`, `chocan`, `yaNoChocan`). El aviso dice cuántas son de cada una («Hay 3 clientes con cambios de la PC del club para revisar: 2 chocan con los de la web y 1 ya no choca y se puede aplicar»).
+
+- Consecuencias:
+  - La copia de la operación en el outbox de la PC del club sigue como en el tercer addendum: aplicada o descartada en el central, la PC la cierra con `libraedge-nodo revision reenviar` (el cierre automático es del motor, en otro PR).
+  - Descartar no se puede deshacer: el cambio cargado en la PC se pierde (queda la constancia en `sync_inbox`, con el payload, y en `actividad_log`).
+  - Tests: `tests/test_clientes_en_conflicto.py` (46; 23 nuevos: aparece la que dejó de chocar, las dos clases y el conteo, la que ya está toda igual, la que esperaba su alta, las que quedan afuera, aplicar, descartar, 409 `ya_resuelta` y `cambio_en_la_web` en los dos, `actividad_log`, reenvío de una descartada, permisos y 409 `solo_en_el_central`) y, en el frontend, `ClientesEnConflicto.test.tsx`, `ResolverConflictoDeCliente.test.tsx`, `Clientes.test.tsx`, `Layout.test.tsx` y `clientes-en-conflicto.test.ts`.
+- Abierto:
+  - **Descartar una edición que se entiende pero no se puede aplicar** (alta sin aplicar, payload inválido, cliente borrado) sin la línea de comandos: hoy sigue siendo `libraedge-central revision descartar`.
 
 ## ADR-023 — LibraClub sin conexión: el buffet, la caja, el pago de una reserva y la factura conjunta en el nodo de LibraEdge
 

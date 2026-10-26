@@ -1,4 +1,5 @@
-"""Los cambios de clientes en conflicto: ver los dos valores y elegir cuál queda (ADR-022, tercer addendum).
+"""Los cambios de clientes por revisar: ver los dos valores y elegir cuál queda (ADR-022, tercer addendum) y, cuando
+el dato de la web volvió al valor anterior y ya no choca, aplicarlos o descartarlos (cuarto addendum).
 
 Se arma el conflicto como en la vida real: el alta y la edición de la PC del club pasan por el receptor real del central
 (`SyncReceiver` con el despachador de la app) y la edición, que choca con lo que alguien cambió en la web, queda en
@@ -85,6 +86,42 @@ def conflicto(central):
     return id_cliente
 
 
+@pytest.fixture
+def ya_no_choca(central, conflicto):
+    """El mismo caso, pero alguien volvió el teléfono y el email de la web a lo que había antes (111 y a@x.com): ninguno
+    choca ya, la edición sigue en revisión manual y los tres datos se aplican. Devuelve el id del cliente en la web."""
+    _web(central, conflicto, telefono="111", email="a@x.com")
+    assert _estado_en_inbox(central)[0] == "manual_review"
+    return conflicto
+
+
+#: Lo que la pantalla mostró de la web cuando ya no chocaba.
+VISTOS_SIN_CHOQUE = {"telefono": "111", "email": "a@x.com", "documento": None}
+
+
+def _aplicar(api_staff, **extra):
+    """El `resolver` de la pantalla de una edición que ya no choca: sin elecciones, con lo que vio de la web."""
+    cuerpo = {"elecciones": {}, "vistos": VISTOS_SIN_CHOQUE, **extra}
+    return api_staff.post(f"{URL}/{OPERACION}/resolver", json=cuerpo)
+
+
+def _descartar(api_staff, vistos=None):
+    vistos = VISTOS_SIN_CHOQUE if vistos is None else vistos
+    return api_staff.post(f"{URL}/{OPERACION}/descartar", json={"vistos": vistos})
+
+
+def _otro_conflicto(central) -> int:
+    """Ana, otro cliente de la misma PC del club, con un teléfono que choca (operaciones `club-1:3` y `club-1:4`)."""
+    _subir(central, operacion_alta(alta(-2, "Ana", telefono="111"), secuencia=3))
+    id_ana = central.execute("SELECT id FROM clientes WHERE nombre = 'Ana'").fetchone()[0]
+    _web(central, id_ana, telefono="222")
+    resultados = _subir(central, operacion_edicion(
+        edicion(-2, antes={"telefono": "111"}, despues={"telefono": "333"}), secuencia=4
+    ))
+    assert resultados == ["rejected"]
+    return id_ana
+
+
 def _elegir(api_staff, central, **extra):
     """El cuerpo de un `resolver` como lo manda la pantalla: lo que ve hoy la web en cada campo y la elección."""
     cuerpo = {
@@ -129,6 +166,108 @@ def test_el_detalle_muestra_lo_mismo(api_staff, central, conflicto):
     respuesta = api_staff.get(f"{URL}/{OPERACION}")
     assert respuesta.status_code == 200, respuesta.text
     assert respuesta.json() == api_staff.get(URL).json()[0]
+
+
+def test_la_que_choca_no_se_marca_como_que_ya_no_choca(api_staff, central, conflicto):
+    (item,) = api_staff.get(URL).json()
+    assert item["ya_no_choca"] is False and item["en_conflicto"] == 2
+
+
+def test_la_que_dejo_de_chocar_sigue_en_la_lista_marcada_aparte(api_staff, central, ya_no_choca):
+    """Sigue en `manual_review` pero la web volvió al valor anterior: antes no aparecía y sólo salía por la línea de
+    comandos. Ahora está en la lista, marcada como que ya no choca, con los tres datos por aplicar."""
+    respuesta = api_staff.get(URL)
+    assert respuesta.status_code == 200, respuesta.text
+    (item,) = respuesta.json()
+
+    assert item["operacion_id"] == OPERACION and item["cliente_id"] == ya_no_choca
+    assert item["ya_no_choca"] is True and item["en_conflicto"] == 0 and item["se_puede_resolver"] is True
+    assert {c["campo"]: c["estado"] for c in item["campos"]} == {
+        "telefono": "se_aplica", "email": "se_aplica", "documento": "se_aplica"
+    }
+    por_campo = {c["campo"]: c for c in item["campos"]}
+    assert (por_campo["telefono"]["web"], por_campo["telefono"]["pc"]) == ("111", "333")
+    assert _estado_en_inbox(central)[0] == "manual_review"
+
+
+def test_la_lista_trae_las_dos_clases_y_el_conteo_las_suma(api_staff, central, ya_no_choca):
+    """El aviso de Clientes y el número del menú cuentan `len(lista)`: tiene que sumar las que chocan y las que no."""
+    _otro_conflicto(central)
+
+    lista = api_staff.get(URL).json()
+
+    assert [(e["cliente_nombre"], e["ya_no_choca"], e["en_conflicto"]) for e in lista] == [
+        ("Juan Pérez", True, 0), ("Ana", False, 1),
+    ]
+
+
+def test_el_detalle_de_la_que_dejo_de_chocar_muestra_lo_que_se_aplica(api_staff, central, ya_no_choca):
+    respuesta = api_staff.get(f"{URL}/{OPERACION}")
+    assert respuesta.status_code == 200, respuesta.text
+    assert respuesta.json() == api_staff.get(URL).json()[0]
+    assert respuesta.json()["ya_no_choca"] is True
+
+
+def test_si_todo_ya_esta_igual_en_la_web_tambien_aparece_y_aplicarla_la_da_por_resuelta(api_staff, central, conflicto):
+    _web(central, conflicto, telefono="333", email="pc@x.com", documento="30123456")
+    (item,) = api_staff.get(URL).json()
+    assert item["ya_no_choca"] is True and {c["estado"] for c in item["campos"]} == {"igual"}
+
+    respuesta = _aplicar(api_staff, vistos={"telefono": "333", "email": "pc@x.com", "documento": "30123456"})
+
+    assert respuesta.status_code == 200 and respuesta.json()["aplicados"] == []
+    assert _estado_en_inbox(central)[0] == "applied"
+    assert api_staff.get(URL).json() == []
+
+
+def test_la_edicion_que_esperaba_su_alta_entra_sola_cuando_el_alta_se_aplica(api_staff, central):
+    """Llegó antes que su alta (`SinMapeo`) y quedó en revisión; cuando el alta se aplica ya hay número definitivo y no
+    choca nada: aparece como una que se puede aplicar."""
+    central.execute("TRUNCATE sync_inbox, libraedge_mapeo, actividad_log RESTART IDENTITY")
+    central.commit()
+    assert _subir(central, operacion_edicion(edicion(-1, antes={"telefono": "1"}, despues={"telefono": "2"}))) == [
+        "rejected"
+    ]
+    assert api_staff.get(URL).json() == []
+
+    assert _subir(central, operacion_alta(alta(-1, "Juan Pérez", telefono="1"))) == ["accepted"]
+
+    (item,) = api_staff.get(URL).json()
+    assert item["ya_no_choca"] is True and item["cliente_nombre"] == "Juan Pérez"
+    assert _aplicar(api_staff, vistos={"telefono": "1"}).status_code == 200
+    cliente = central.execute("SELECT telefono FROM clientes WHERE nombre = 'Juan Pérez'").fetchone()
+    assert cliente[0] == "2"
+
+
+def test_las_que_la_pantalla_no_puede_mostrar_quedan_afuera(api_staff, central):
+    """Sin la que se entienda no hay nada seguro que aplicar: el alta sin aplicar, un payload que no se entiende y un
+    cliente que ya no existe en la web siguen por `libraedge-central revision`."""
+    central.execute("TRUNCATE sync_inbox, libraedge_mapeo, actividad_log RESTART IDENTITY")
+    central.commit()
+    # (1) La edición llega antes que su alta: no hay número definitivo.
+    assert _subir(central, operacion_edicion(edicion(-1, antes={"telefono": "1"}, despues={"telefono": "2"}))) == [
+        "rejected"
+    ]
+    # (2) Un payload que no se entiende (un teléfono que no es texto), con su alta ya aplicada.
+    assert _subir(central, operacion_alta(alta(-2, "Ana", telefono="111"), secuencia=3)) == ["accepted"]
+    assert _subir(central, operacion_edicion(
+        edicion(-2, antes={"telefono": "111"}, despues={"telefono": 333}), secuencia=4
+    )) == ["rejected"]
+    # (3) El cliente de la web ya no existe.
+    assert _subir(central, operacion_alta(alta(-3, "Beto"), secuencia=5)) == ["accepted"]
+    id_beto = central.execute("SELECT id FROM clientes WHERE nombre = 'Beto'").fetchone()[0]
+    assert _subir(central, operacion_edicion(
+        edicion(-3, antes={"telefono": None}, despues={"telefono": "5"}), secuencia=6
+    )) == ["accepted"]
+    central.execute("DELETE FROM clientes WHERE id = ?", (id_beto,))
+    central.commit()
+    assert _subir(central, operacion_edicion(
+        edicion(-3, antes={"telefono": "5"}, despues={"telefono": "6"}), secuencia=7
+    )) == ["rejected"]
+
+    en_revision = central.execute("SELECT count(*) FROM sync_inbox WHERE status = 'manual_review'").fetchone()[0]
+    assert en_revision == 3, "las tres siguen esperando"
+    assert api_staff.get(URL).json() == []
 
 
 def test_una_edicion_sin_choque_no_es_un_conflicto(api_staff, central):
@@ -300,6 +439,165 @@ def test_una_baja_elegida_a_mano(api_staff, central):
     assert cliente["nombre"] == "Ana María" and cliente["activo"] is False
 
 
+# ── Aplicar una que ya no choca ──────────────────────────────────────────────
+
+
+def test_aplicar_la_que_dejo_de_chocar(api_staff, central, ya_no_choca):
+    respuesta = _aplicar(api_staff)
+    assert respuesta.status_code == 200, respuesta.text
+    assert sorted(respuesta.json()["aplicados"]) == ["documento", "email", "telefono"]
+
+    cliente = _cliente(central, ya_no_choca)
+    assert (cliente["telefono"], cliente["email"], cliente["documento"]) == ("333", "pc@x.com", "30123456")
+    estado, por, resolucion = _estado_en_inbox(central)
+    assert estado == "applied" and por == "encargado" and resolucion == "reintentada y aplicada"
+    assert api_staff.get(URL).json() == [], "ya no está en la lista"
+
+
+def test_aplicar_la_que_dejo_de_chocar_queda_en_el_log_de_actividad(api_staff, central, ya_no_choca):
+    assert _aplicar(api_staff).status_code == 200
+    ((usuario, accion, entidad, entidad_id, descripcion, cambios),) = _actividad(central)
+
+    assert (usuario, accion, entidad, entidad_id) == ("encargado", "editar", "cliente", str(ya_no_choca))
+    assert "Juan Pérez" in descripcion and "ya no chocaba" in descripcion
+    assert json.loads(cambios) == {"telefono": ["111", "333"], "email": ["a@x.com", "pc@x.com"],
+                                   "documento": [None, "30123456"]}
+
+
+def test_aplicar_dos_veces_la_que_dejo_de_chocar_no_aplica_dos_veces(api_staff, central, ya_no_choca):
+    assert _aplicar(api_staff).status_code == 200
+    _web(central, ya_no_choca, telefono="777")
+
+    segunda = _aplicar(api_staff)
+
+    assert segunda.status_code == 409 and segunda.json()["detail"]["codigo"] == "ya_resuelta"
+    assert _cliente(central, ya_no_choca)["telefono"] == "777"
+    assert len(_actividad(central)) == 1
+
+
+def test_si_volvio_a_chocar_mientras_tanto_aplicar_da_409_y_no_pisa(api_staff, central, ya_no_choca):
+    """La pantalla mostró «ya no choca»; antes de guardar alguien cambió el teléfono en la web. No se aplica nada."""
+    _web(central, ya_no_choca, telefono="999")
+
+    respuesta = _aplicar(api_staff)
+
+    assert respuesta.status_code == 409, respuesta.text
+    detalle = respuesta.json()["detail"]
+    assert detalle["codigo"] == "cambio_en_la_web" and "Teléfono" in detalle["mensaje"]
+    cliente = _cliente(central, ya_no_choca)
+    assert (cliente["telefono"], cliente["email"], cliente["documento"]) == ("999", "a@x.com", None)
+    assert _estado_en_inbox(central)[0] == "manual_review" and _actividad(central) == []
+    # Recargada, la pantalla ve que ahora sí choca y muestra la elección por campo.
+    nuevo = api_staff.get(f"{URL}/{OPERACION}").json()
+    assert nuevo["ya_no_choca"] is False
+    assert {c["campo"]: c["estado"] for c in nuevo["campos"]} == {
+        "telefono": "conflicto", "email": "se_aplica", "documento": "se_aplica"
+    }
+    sin_elegir = _aplicar(api_staff, vistos={"telefono": "999", "email": "a@x.com", "documento": None})
+    assert sin_elegir.status_code == 422 and "Teléfono" in sin_elegir.json()["detail"]
+    elegida = _aplicar(
+        api_staff, elecciones={"telefono": "pc"}, vistos={"telefono": "999", "email": "a@x.com", "documento": None}
+    )
+    assert elegida.status_code == 200, elegida.text
+    assert _cliente(central, ya_no_choca)["telefono"] == "333"
+
+
+def test_la_que_chocaba_y_dejo_de_chocar_se_resuelve_igual_tras_recargar(api_staff, central, conflicto):
+    """Al revés: la pantalla se abrió con el choque (222 / web@x.com) y la web volvió atrás. Pisar lo viejo da 409; con
+    lo que muestra la pantalla recargada, se aplica."""
+    _web(central, conflicto, telefono="111", email="a@x.com")
+
+    vieja = _elegir(api_staff, central)
+    assert vieja.status_code == 409 and vieja.json()["detail"]["codigo"] == "cambio_en_la_web"
+
+    nuevo = api_staff.get(f"{URL}/{OPERACION}").json()
+    assert nuevo["ya_no_choca"] is True
+    assert _aplicar(api_staff).status_code == 200
+    assert _cliente(central, conflicto)["telefono"] == "333"
+
+
+def test_aplicar_hay_que_mandar_lo_que_vio(api_staff, central, ya_no_choca):
+    assert _aplicar(api_staff, vistos={"telefono": "111"}).status_code == 422
+    assert _estado_en_inbox(central)[0] == "manual_review"
+
+
+# ── Descartar una que ya no choca ────────────────────────────────────────────
+
+
+def test_descartar_deja_la_operacion_descartada_y_el_cliente_como_esta(api_staff, central, ya_no_choca):
+    respuesta = _descartar(api_staff)
+    assert respuesta.status_code == 200, respuesta.text
+    assert respuesta.json() == {"descartada": True}
+
+    cliente = _cliente(central, ya_no_choca)
+    assert (cliente["telefono"], cliente["email"], cliente["documento"]) == ("111", "a@x.com", None)
+    estado, por, resolucion = _estado_en_inbox(central)
+    assert (estado, por) == ("discarded", "encargado") and resolucion.startswith("Descartada a mano desde la web")
+    assert api_staff.get(URL).json() == []
+
+
+def test_descartar_queda_en_el_log_de_actividad(api_staff, central, ya_no_choca):
+    assert _descartar(api_staff).status_code == 200
+    ((usuario, accion, entidad, entidad_id, descripcion, cambios),) = _actividad(central)
+    assert (usuario, accion, entidad, entidad_id) == ("encargado", "editar", "cliente", str(ya_no_choca))
+    assert "Juan Pérez" in descripcion and "descartó" in descripcion and cambios is None
+
+
+def test_descartar_dos_veces_o_aplicar_una_descartada_da_409(api_staff, central, ya_no_choca):
+    assert _descartar(api_staff).status_code == 200
+
+    otra = _descartar(api_staff)
+    aplicar = _aplicar(api_staff)
+
+    assert otra.status_code == 409 and otra.json()["detail"]["codigo"] == "ya_resuelta"
+    assert aplicar.status_code == 409 and aplicar.json()["detail"]["codigo"] == "ya_resuelta"
+    assert _cliente(central, ya_no_choca)["telefono"] == "111", "no se aplicó nada"
+    assert len(_actividad(central)) == 1
+
+
+def test_una_aplicada_no_se_puede_descartar(api_staff, central, ya_no_choca):
+    assert _aplicar(api_staff).status_code == 200
+    respuesta = _descartar(api_staff)
+    assert respuesta.status_code == 409 and respuesta.json()["detail"]["codigo"] == "ya_resuelta"
+    assert _estado_en_inbox(central)[0] == "applied"
+
+
+def test_descartar_si_volvio_a_chocar_da_409_y_no_descarta(api_staff, central, ya_no_choca):
+    """No se tira a la basura algo que la persona no vio: si el dato volvió a chocar, primero lo ve."""
+    _web(central, ya_no_choca, telefono="999")
+
+    respuesta = _descartar(api_staff)
+
+    assert respuesta.status_code == 409 and respuesta.json()["detail"]["codigo"] == "cambio_en_la_web"
+    assert _estado_en_inbox(central)[0] == "manual_review" and _actividad(central) == []
+    assert api_staff.get(f"{URL}/{OPERACION}").json()["ya_no_choca"] is False
+
+
+def test_descartar_hay_que_mandar_lo_que_vio(api_staff, central, ya_no_choca):
+    assert _descartar(api_staff, vistos={"telefono": "111"}).status_code == 422
+    assert api_staff.post(f"{URL}/{OPERACION}/descartar", json={}).status_code == 422
+    assert _estado_en_inbox(central)[0] == "manual_review"
+
+
+def test_descartar_una_que_no_existe_da_404(api_staff, central, ya_no_choca):
+    assert api_staff.post(f"{URL}/club-1:99/descartar", json={"vistos": {}}).status_code == 404
+
+
+def test_la_pc_del_club_que_reenvia_una_descartada_recibe_el_motivo(api_staff, central, ya_no_choca):
+    """El central no la vuelve a aplicar: le contesta que se descartó y por qué."""
+    from app.routers.sincronizacion_offline import despachador
+
+    assert _descartar(api_staff).status_code == 200
+    reenviada = operacion_edicion(edicion(
+        -1,
+        antes={"telefono": "111", "email": "a@x.com", "documento": None},
+        despues={"telefono": "333", "email": "pc@x.com", "documento": "30123456"},
+    ))
+    r = SyncReceiver(central, despachador=despachador).accept(reenviada)
+    assert r.result == "rejected" and "descartada en el central" in (r.error or "")
+    assert _cliente(central, ya_no_choca)["telefono"] == "111"
+
+
 # ── Permisos ─────────────────────────────────────────────────────────────────
 
 
@@ -308,6 +606,7 @@ def test_hace_falta_sesion(api, central, conflicto):
     assert api.get(URL).status_code in (401, 403)
     assert api.get(f"{URL}/{OPERACION}").status_code in (401, 403)
     assert api.post(f"{URL}/{OPERACION}/resolver", json={"elecciones": {}, "vistos": {}}).status_code in (401, 403)
+    assert api.post(f"{URL}/{OPERACION}/descartar", json={"vistos": {}}).status_code in (401, 403)
 
 
 def test_el_admin_tambien_puede(api, central, conflicto):
@@ -328,6 +627,23 @@ def test_en_la_pc_del_club_la_lista_viene_vacia_y_resolver_da_409(api_staff, cen
     assert resolver.status_code == 409 and resolver.json()["detail"]["codigo"] == "solo_en_el_central"
     assert _cliente(central, conflicto)["telefono"] == "222", "no se aplicó nada"
     assert _estado_en_inbox(central)[0] == "manual_review"
+
+
+def test_el_admin_tambien_puede_descartar(api, central, ya_no_choca):
+    respuesta = api.post(f"{URL}/{OPERACION}/descartar", json={"vistos": VISTOS_SIN_CHOQUE})
+    assert respuesta.status_code == 200, respuesta.text
+
+
+def test_en_la_pc_del_club_no_se_aplica_ni_se_descarta_lo_que_ya_no_choca(
+    api_staff, central, ya_no_choca, nodo_clientes
+):
+    assert clientes_nodo.en_un_nodo()
+    assert api_staff.get(URL).json() == []
+
+    for respuesta in (api_staff.get(f"{URL}/{OPERACION}"), _aplicar(api_staff), _descartar(api_staff)):
+        assert respuesta.status_code == 409 and respuesta.json()["detail"]["codigo"] == "solo_en_el_central"
+    assert _cliente(central, ya_no_choca)["telefono"] == "111", "no se aplicó nada"
+    assert _estado_en_inbox(central)[0] == "manual_review" and _actividad(central) == []
 
 
 def test_el_servicio_no_toca_la_consulta_sin_tablas_de_libraedge(sesion):

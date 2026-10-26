@@ -100,6 +100,19 @@ describe('cascarón de LibraClub', () => {
     }
   })
 
+  it('el número del menú suma los que chocan y los que ya no chocan (ADR-022, cuarto addendum)', async () => {
+    vi.stubGlobal('fetch', async () => ({
+      ok: true, status: 200, json: async () => [{ ya_no_choca: false }, { ya_no_choca: true }, { ya_no_choca: true }],
+    }) as Response)
+    try {
+      montar()
+      const enlace = await screen.findByRole('link', { name: /Clientes por revisar/ })
+      expect(enlace.closest('li')).toHaveTextContent('3')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('sin cambios que choquen, el menú no ofrece «Clientes por revisar»', async () => {
     vi.stubGlobal('fetch', async () => ({ ok: true, status: 200, json: async () => [] }) as Response)
     try {
