@@ -344,7 +344,8 @@ export const conflictos = {
     api.post<Reserva>(`/api/reservas-en-conflicto/${id}/resolver`, { accion: 'cancelar', motivo }),
 }
 
-/** Un dato de un cliente que se cargó en la PC del club mientras alguien lo cambiaba en la web (ADR-022, tercer addendum). */
+/** Un dato de un cliente que se cargó en la PC del club mientras alguien lo cambiaba en la web (ADR-022, tercer y cuarto
+ *  addendum). */
 export interface CampoDeEdicionDeCliente {
   campo: string
   etiqueta: string
@@ -365,10 +366,13 @@ export interface EdicionDeClienteEnConflicto {
   recibida_at: string | null
   campos: CampoDeEdicionDeCliente[]
   en_conflicto: number
+  /** Sigue en revisión pero hoy ningún dato choca (la web volvió al valor anterior): se aplica o se descarta, sin elegir. */
+  ya_no_choca?: boolean
   se_puede_resolver: boolean
 }
 
 export const edicionesDeClientes = {
+  /** Las que chocan y las que ya no chocan (`ya_no_choca`). */
   listar: () => api.get<EdicionDeClienteEnConflicto[]>('/api/clientes-en-conflicto'),
   ver: (id: string) =>
     api.get<EdicionDeClienteEnConflicto>(`/api/clientes-en-conflicto/${encodeURIComponent(id)}`),
@@ -380,6 +384,12 @@ export const edicionesDeClientes = {
   ) =>
     api.post<{ aplicados: string[] }>(
       `/api/clientes-en-conflicto/${encodeURIComponent(id)}/resolver`,
+      cuerpo,
+    ),
+  /** Cierra la edición sin aplicarla; no tiene vuelta atrás. `vistos`: igual que en `resolver` (409 si cambió). */
+  descartar: (id: string, cuerpo: { vistos: Record<string, string | boolean | null> }) =>
+    api.post<{ descartada: boolean }>(
+      `/api/clientes-en-conflicto/${encodeURIComponent(id)}/descartar`,
       cuerpo,
     ),
 }

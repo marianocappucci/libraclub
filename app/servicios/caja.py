@@ -474,25 +474,34 @@ def _ids_equivalentes(reserva_ids: Sequence[int]) -> dict[int, list[int]]:
     definitivo. El mapa `provisorio -> definitivo` está en `libraedge_mapeo` (baja del central con el espejo)."""
     ids = [int(x) for x in reserva_ids]
     equivalentes = {i: [i] for i in ids}
+    for definitivo, provisorio in _mapeo_de_reservas("id_central", [i for i in ids if i > 0]):
+        equivalentes[definitivo].append(provisorio)
+    return equivalentes
+
+
+def _mapeo_de_reservas(columna: str, valores: Sequence[int]) -> list[tuple[int, int]]:
+    """Los pares `(id definitivo, id provisorio)` de `libraedge_mapeo` de este nodo para las reservas dadas.
+
+    `columna` es por cuál de los dos lados se busca: `id_central` (se tienen los definitivos y se quieren los
+    provisorios con que se nombraron los cobros) o `id_nodo` (se tienen los provisorios que leyó la referencia y se
+    quieren los definitivos). Fuera de un nodo, o sin la tabla del mapeo, no hay pares."""
+    assert columna in ("id_central", "id_nodo")
     node_id = offline.nodo()
-    definitivos = [i for i in ids if i > 0]
-    if node_id is None or not definitivos:
-        return equivalentes
-    marcas = ",".join("?" * len(definitivos))
+    if node_id is None or not valores:
+        return []
+    marcas = ",".join("?" * len(valores))
     conexion = libracore_core.get_connection()
     try:
         filas = conexion.execute(
             f"SELECT id_central, id_nodo FROM libraedge_mapeo WHERE node_id = ? AND tabla = 'reservas' "
-            f"AND id_central IN ({marcas})",
-            (node_id, *definitivos),
+            f"AND {columna} IN ({marcas})",
+            (node_id, *valores),
         ).fetchall()
     except Exception:  # noqa: BLE001 - un nodo sin la tabla del mapeo (todavía) no tiene provisorios que buscar
-        return equivalentes
+        return []
     finally:
         conexion.close()
-    for definitivo, provisorio in filas:
-        equivalentes[int(definitivo)].append(int(provisorio))
-    return equivalentes
+    return [(int(definitivo), int(provisorio)) for definitivo, provisorio in filas]
 
 
 def _patrones_de_reserva(reserva_id: int) -> tuple[str, str]:
@@ -625,9 +634,11 @@ def cobros_netos_por_reserva(desde_fecha: str | None = None) -> dict[int, Decima
     reserva, que no está en esta tabla: el llamador elige una cota que alcance a
     la seña más anticipada que le interese. `None` lee todo el historial.
 
-    ⚠️ En un nodo, un cobro hecho antes de que la reserva recibiera su id
-    definitivo lleva el provisorio (negativo) en la referencia y acá se atribuye a
-    ese id (ver `_ids_equivalentes`): el llamador no lo encuentra y no lo cuenta.
+    🔑 En un nodo, un cobro hecho antes de que la reserva recibiera su id
+    definitivo lleva el provisorio (negativo) en la referencia, que es un texto y
+    nadie reescribe. Se lo atribuye al id definitivo con el mapeo de LibraEdge
+    (`_a_los_ids_definitivos`, la misma equivalencia de `_ids_equivalentes`): sin
+    eso la plata caía en un id que ya no existe y el panel no la contaba.
     """
     patrones = (
         f"{PREFIJO_COBRO_DE_RESERVA}%",
@@ -659,7 +670,24 @@ def cobros_netos_por_reserva(desde_fecha: str | None = None) -> dict[int, Decima
         if reserva_id is None:
             continue
         netos[reserva_id] = netos.get(reserva_id, Decimal("0")) + signo * Decimal(str(monto))
-    return netos
+    return _a_los_ids_definitivos(netos)
+
+
+def _a_los_ids_definitivos(netos: dict[int, Decimal]) -> dict[int, Decimal]:
+    """Pasa lo que quedó anotado a un id provisorio (negativo) al definitivo de su reserva, y lo suma a lo que ya tenía.
+
+    Es la misma equivalencia que `_ids_equivalentes`, leída al revés: allá se parte de las reservas que se piden; acá se
+    lee toda la caja y se averigua de quién era cada id. Un provisorio sin mapeo (la reserva todavía no tiene su id
+    definitivo en este nodo) se queda como está: es el id con el que la reserva existe."""
+    traduccion = {provisorio: definitivo for definitivo, provisorio in _mapeo_de_reservas(
+        "id_nodo", [i for i in netos if i < 0])}
+    if not traduccion:
+        return netos
+    traducidos: dict[int, Decimal] = {}
+    for reserva_id, neto in netos.items():
+        destino = traduccion.get(reserva_id, reserva_id)
+        traducidos[destino] = traducidos.get(destino, Decimal("0")) + neto
+    return traducidos
 
 
 def total_cobrado(reserva_id: int) -> Decimal:

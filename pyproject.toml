@@ -136,7 +136,8 @@ dependencies = [
     # v0.22.1 -> v0.23.0 (2026-10-25): ids provisorios de texto, tabla libraedge_mapeo_texto (ADR-026). Sin migracion de los productos.
     # v0.23.0 -> v0.24.1 (2026-10-25): instalador publicado de GestioLibra y MedLibra (ADR-027). Sin migracion.
     # v0.24.1 -> v0.24.3 (2026-10-25): VentaLibra sin la variable del core en el instalador. Sin migracion.
-    "libraedge @ git+https://github.com/marianocappucci/libraedge.git@v0.24.3",
+    # v0.24.3 -> v0.25.0 (2026-10-25): el nodo cierra solo lo que se resolvio en el central (ADR-028). Sin migracion.
+    "libraedge @ git+https://github.com/marianocappucci/libraedge.git@v0.25.0",
 ]
 
 [project.optional-dependencies]

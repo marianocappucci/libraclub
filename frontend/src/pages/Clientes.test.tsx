@@ -106,4 +106,25 @@ describe('aviso de clientes por revisar (ADR-022, tercer addendum)', () => {
     render(<MemoryRouter><Clientes /></MemoryRouter>)
     expect(await screen.findByText(/Hay 2 clientes con cambios/)).toBeInTheDocument()
   })
+
+  it('los que ya no chocan también cuentan, y el aviso dice cuántos son de cada clase', async () => {
+    responderCon([
+      EDICION,
+      { ...EDICION, operacion_id: 'club-1:5', en_conflicto: 0, ya_no_choca: true },
+      { ...EDICION, operacion_id: 'club-1:7', en_conflicto: 0, ya_no_choca: true },
+    ])
+    render(<MemoryRouter><Clientes /></MemoryRouter>)
+    const aviso = await screen.findByRole('status', { name: 'Clientes por revisar' })
+    expect(aviso).toHaveTextContent(
+      'Hay 3 clientes con cambios de la PC del club para revisar: 1 choca con los de la web y 2 ya no chocan y se pueden aplicar.',
+    )
+  })
+
+  it('si sólo hay de los que ya no chocan, lo dice y sigue llevando a la lista', async () => {
+    responderCon([{ ...EDICION, en_conflicto: 0, ya_no_choca: true }])
+    render(<MemoryRouter><Clientes /></MemoryRouter>)
+    const aviso = await screen.findByRole('status', { name: 'Clientes por revisar' })
+    expect(aviso).toHaveTextContent('Hay 1 cliente con cambios de la PC del club que ya no choca con los de la web y se puede aplicar.')
+    expect(screen.getByRole('link', { name: 'Revisar' })).toHaveAttribute('href', '/clientes/conflictos')
+  })
 })

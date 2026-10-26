@@ -1,16 +1,25 @@
-"""Las ediciones de clientes en conflicto: ver los dos cambios y elegir cuál queda (ADR-022, tercer addendum).
+"""Las ediciones de clientes por revisar: ver los dos cambios y elegir cuál queda (ADR-022, tercer y cuarto addendum).
 
 Cuando la PC del club corrige un cliente que todavía no tenía su número definitivo, el cambio sube como
 `cliente_club.edicion` (`clientes_nodo`). Si en la web alguien ya había cambiado ese mismo dato, el central no pisa
 nada: toda la operación queda en la revisión manual de LibraEdge (`sync_inbox.status = 'manual_review'`). Este módulo es
 lo que le deja a quien atiende la web **ver los dos cambios y elegir cuál queda**, sin pasar por la línea de comandos.
 
-## Qué es «una edición en conflicto»
+## Qué es «una edición por revisar»
 
 Una operación `cliente_club.edicion` en revisión manual, cuyo cliente ya tiene su número definitivo (el alta se aplicó:
-hay mapeo) y en la que **hoy** hay al menos un campo que el central tiene distinto de lo que el nodo vio y de lo que el
-nodo quiso poner. Se mira el estado de ahora y no el texto del motivo: el motivo es un mensaje, no un contrato. Una
-edición que espera su alta (`SinMapeo`) no es un conflicto y no aparece acá: se reintenta en orden al resolver el alta.
+hay mapeo) y que se entiende (el payload es válido y el cliente existe). Se mira el estado de **ahora** y no el texto
+del motivo: el motivo es un mensaje, no un contrato. Son de dos clases:
+
+- **Choca**: hoy hay al menos un campo que el central tiene distinto de lo que el nodo vio y de lo que el nodo quiso
+  poner. Hay que elegir.
+- **Ya no choca** (cuarto addendum): sigue en revisión manual pero ningún campo choca hoy (alguien volvió el dato de la
+  web al valor anterior, o la edición esperaba su alta y el alta ya se aplicó). Aplicarla es seguro: no hay nada que
+  elegir. Se puede **aplicar** (los campos `se_aplica`; los `igual` ya están) o **descartar**.
+
+Quedan afuera, porque la pantalla no puede resolverlas con seguridad, las que **no se pueden mostrar**: el alta del
+cliente todavía no se aplicó (`SinMapeo`: se reintenta en orden al resolver el alta), el payload no se entiende o el
+cliente ya no existe en el central. Esas siguen por `libraedge-central revision`.
 
 Cada campo de la edición cae en uno de tres estados (`clientes_nodo.clasificar_campo`, la misma regla del aplicador):
 
@@ -19,7 +28,7 @@ Cada campo de la edición cae en uno de tres estados (`clientes_nodo.clasificar_
 - `se_aplica`: la web sigue como estaba cuando se corrigió en la PC. Se aplica sin preguntar.
 - `igual`: la web ya tiene el valor nuevo. No hay nada que hacer.
 
-## Cómo se resuelve (`resolver`)
+## Cómo se resuelve (`resolver`, `descartar`)
 
 Una sola transacción, sobre la **misma conexión de la sesión** (`reservas_nodo.conexion_de_la_sesion`):
 
@@ -34,8 +43,15 @@ Una sola transacción, sobre la **misma conexión de la sesión** (`reservas_nod
    `resuelto_por` y `resolucion = 'reintentada y aplicada'` en `sync_inbox`, igual que con `libraedge-central revision
    reintentar`; lo que se eligió, campo por campo, queda en `actividad_log`.
 
-No se usa `descartar`: dejaría la operación `discarded` y el nodo, al reenviarla, recibiría «descartada en el central»
-en vez de `duplicate` (ver `libraedge.sync.receiver`).
+`resolver` no usa `descartar` de la librería: dejaría la operación `discarded` y el nodo, al reenviarla, recibiría
+«descartada en el central» en vez de `duplicate` (ver `libraedge.sync.receiver`). Una edición que **ya no choca** se
+aplica con este mismo `resolver`, sin elecciones: no hay una segunda copia del camino.
+
+`descartar` (cuarto addendum) es la otra salida, sin vuelta atrás: deja la operación `discarded` con
+`libraedge.sync.revision.descartar` (con motivo y quién) y no toca al cliente. Tiene las mismas garantías: una
+transacción con el cliente en `FOR UPDATE`, el estado vuelto a mirar (`EdicionYaResuelta`), el control optimista con
+`vistos` (`CambioEnLaWeb`: si el dato volvió a chocar no se descarta algo que la persona no vio) y su fila en
+`actividad_log`.
 """
 
 from __future__ import annotations
@@ -72,6 +88,9 @@ ELECCIONES = (ELEGIR_WEB, ELEGIR_PC)
 _TEXTO_DE_ELECCION = {ELEGIR_WEB: "lo de la web", ELEGIR_PC: "lo de la PC"}
 
 MENSAJE_SOLO_EN_LA_WEB = "Estos cambios se resuelven desde la web, no desde la PC del club."
+
+#: El motivo que queda en `sync_inbox.resolucion` al descartar (la librería lo exige). La PC del club lo lee si reenvía.
+MOTIVO_DE_DESCARTE = "Descartada a mano desde la web: el cliente se dejó como estaba en la web."
 
 
 class EdicionEnRevisionError(Exception):
@@ -126,6 +145,11 @@ class EdicionEnRevision:
     @property
     def en_conflicto(self) -> list[CampoEnRevision]:
         return [c for c in self.campos if c.estado == CAMPO_EN_CONFLICTO]
+
+    @property
+    def ya_no_choca(self) -> bool:
+        """Sigue en revisión pero hoy no hay nada para elegir: se puede aplicar (o descartar) sin riesgo."""
+        return not self.en_conflicto
 
 
 # ── Leer ─────────────────────────────────────────────────────────────────────
@@ -199,7 +223,8 @@ def _vista(conn, operacion_id: str, operacion, recibida_at: str | None, *, bloqu
 
 
 def listar(sesion) -> list[EdicionEnRevision]:
-    """Las ediciones de clientes en conflicto, de la más vieja a la más nueva. Sólo lee."""
+    """Las ediciones de clientes por revisar, de la más vieja a la más nueva: las que chocan y las que ya no chocan
+    (`EdicionEnRevision.ya_no_choca`). Sólo lee."""
     from libraedge.sync import revision
 
     conn = reservas_nodo.conexion_de_la_sesion(sesion)
@@ -213,7 +238,7 @@ def listar(sesion) -> list[EdicionEnRevision]:
         if leida is None or leida[1] is None:
             continue
         vista = _vista(conn, en_revision.operation_id, leida[1], leida[2])
-        if vista is not None and vista.en_conflicto:
+        if vista is not None:
             lista.append(vista)
     return lista
 
@@ -252,18 +277,26 @@ def _auditar(conn, vista: EdicionEnRevision, elecciones: dict[str, str], cambios
     El formato de la fila es el de `libraauth.auditoria.fila_de_auditoria` (la única definición); el INSERT es el de
     `registrador_dbapi`. `cambios` es `{campo: [lo que había en la web, lo que quedó]}` sólo de lo que de verdad cambió;
     lo elegido en cada campo que chocaba va en el texto de la fila."""
-    from libraauth.auditoria import fila_de_auditoria, valor_legible
+    from libraauth.auditoria import valor_legible
 
     web = {c.campo: c.web for c in vista.campos}
     diff = {c: [valor_legible(web[c]), valor_legible(nuevo)] for c, nuevo in cambios.items()}
     elegido = "; ".join(
         f"{ETIQUETAS_DE_CAMPO[c.campo]}: {_TEXTO_DE_ELECCION[elecciones[c.campo]]}" for c in vista.en_conflicto
     )
-    etiqueta = f"{vista.cliente_nombre} · se resolvió a mano lo que se cargó en la PC del club"
-    if elegido:
-        etiqueta += f" ({elegido})"
+    if vista.ya_no_choca:
+        etiqueta = f"{vista.cliente_nombre} · se aplicó a mano lo que se cargó en la PC del club (ya no chocaba)"
+    else:
+        etiqueta = f"{vista.cliente_nombre} · se resolvió a mano lo que se cargó en la PC del club ({elegido})"
+    _anotar_actividad(conn, vista, etiqueta, diff or None, usuario)
+
+
+def _anotar_actividad(conn, vista: EdicionEnRevision, etiqueta: str, cambios: dict | None, usuario: str) -> None:
+    """La fila `editar` / `cliente` de `actividad_log` (resolver y descartar la anotan igual)."""
+    from libraauth.auditoria import fila_de_auditoria
+
     fila = fila_de_auditoria(
-        entidad="cliente", accion="editar", entidad_id=vista.cliente_id, etiqueta=etiqueta, cambios=diff or None,
+        entidad="cliente", accion="editar", entidad_id=vista.cliente_id, etiqueta=etiqueta, cambios=cambios,
         usuario=usuario,
     )
     columnas = ("ts", "usuario", "accion", "entidad", "entidad_id", "descripcion", "cambios")
@@ -303,6 +336,22 @@ def _validar_vistos(vista: EdicionEnRevision, vistos: dict[str, Any]) -> None:
         )
 
 
+def _vista_con_candado(conn, operacion_id: str, vistos: dict[str, Any]) -> EdicionEnRevision:
+    """Lo común de `resolver` y `descartar`: la edición tal como está ahora, con la fila del cliente bloqueada, el
+    estado vuelto a mirar ya con el candado y el control optimista de lo que mostró la pantalla."""
+    operacion, recibida = _en_revision(conn, operacion_id)
+    vista = _vista(conn, operacion_id, operacion, recibida, bloquear=True)
+    if vista is None:
+        raise EdicionNoEncontrada(
+            "Esta edición todavía no se puede revisar: el cliente no recibió su número definitivo."
+        )
+    # Con el candado puesto, se mira de nuevo el estado: quien llegó segundo esperó acá a que el primero confirme y
+    # ahora la ve `applied` o `discarded`.
+    _en_revision(conn, operacion_id)
+    _validar_vistos(vista, vistos)
+    return vista
+
+
 def resolver(
     sesion,
     operacion_id: str,
@@ -312,7 +361,8 @@ def resolver(
     usuario: str,
     usuario_id: int | None,
 ) -> list[str]:
-    """Aplica lo elegido y da la operación por resuelta. Devuelve los campos que se cambiaron en el cliente.
+    """Aplica lo elegido y da la operación por resuelta. Devuelve los campos que se cambiaron en el cliente. Una edición
+    que ya no choca se resuelve igual, con `elecciones` vacías.
 
     No commitea de más: el receptor de LibraEdge confirma la transacción de la sesión cuando deja la operación
     `applied`. Ante cualquier error deshace todo. Ver el docstring del módulo."""
@@ -320,17 +370,7 @@ def resolver(
 
     conn = reservas_nodo.conexion_de_la_sesion(sesion)
     try:
-        operacion, recibida = _en_revision(conn, operacion_id)
-        vista = _vista(conn, operacion_id, operacion, recibida, bloquear=True)
-        if vista is None:
-            raise EdicionNoEncontrada(
-                "Esta edición todavía no se puede revisar: el cliente no recibió su número definitivo."
-            )
-        # Con el candado puesto, se mira de nuevo el estado: quien llegó segundo esperó acá a que el primero confirme y
-        # ahora la ve `applied`.
-        _en_revision(conn, operacion_id)
-
-        _validar_vistos(vista, vistos)
+        vista = _vista_con_candado(conn, operacion_id, vistos)
         _validar_elecciones(vista, elecciones)
 
         cambios: dict[str, Any] = {}
@@ -356,3 +396,22 @@ def resolver(
     if resultado.result != "accepted":
         raise EdicionNoAplicable(resultado.error or "No se pudo aplicar.")
     return list(cambios)
+
+
+def descartar(sesion, operacion_id: str, vistos: dict[str, Any], *, usuario: str) -> None:
+    """Cierra la edición sin aplicarla (`discarded`): el cliente queda como está en la web. **No tiene vuelta atrás.**
+
+    Mismas garantías que `resolver` (`_vista_con_candado`). `revision.descartar` de la librería commitea: la fila de
+    `actividad_log` se escribe antes, en la misma transacción, y confirman juntas. Ante cualquier error deshace todo."""
+    from libraedge.sync import revision
+
+    conn = reservas_nodo.conexion_de_la_sesion(sesion)
+    try:
+        vista = _vista_con_candado(conn, operacion_id, vistos)
+        _anotar_actividad(
+            conn, vista, f"{vista.cliente_nombre} · se descartó lo que se cargó en la PC del club", None, usuario
+        )
+        revision.descartar(conn, operacion_id, MOTIVO_DE_DESCARTE, usuario)
+    except BaseException:
+        conn.rollback()
+        raise
