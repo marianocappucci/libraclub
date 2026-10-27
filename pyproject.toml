@@ -104,7 +104,17 @@ dependencies = [
     # v1.192.1 -> v1.194.0 (2026-10-25): unir-bases con libraauth en el core (ADR-082), GestioLibra y MedLibra de una sola base y tabla de modulos del producto (ADR-083). Sin migracion.
     # v1.194.0 -> v1.195.0 (2026-10-25): `GET /api/nodo/conexion` sin puerto de ventas (`build_conexion_del_nodo_router`) y una sola forma del 202 «en cola» (`respuesta_en_cola`) (ADR-084). Sin migracion.
     # v1.195.0 -> v1.195.1 (2026-10-25): sin los historicos del core de GestioLibra y MedLibra ni la excepcion de VentaLibra (addendum ADR-084). Sin migracion.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.195.1",
+    # v1.195.1 -> v1.196.0 (2026-10-26): indices de ajuste (ADR-085, migracion 0030), periodos de contrato y mora (ADR-086).
+    # v1.196.0 -> v1.196.1 (2026-10-26): periodo_anclado y sumar_meses publicos (addendum ADR-086). Sin migracion.
+    # v1.196.1 -> v1.196.2 (2026-10-26): el dolar A 3500 de un fin de semana o feriado es el del ultimo dia habil (addendum ADR-085). Sin migracion.
+    # v1.196.2 -> v1.197.0 (2026-10-26): recibo de un cobro del libro de terceros, por cuenta y orden de (ADR-087). Sin migracion.
+    # v1.197.0 -> v1.197.1 (2026-10-26): anular_recibo en la transaccion de quien llama (addendum ADR-087). Sin migracion.
+    # v1.197.1 -> v1.197.2 (2026-10-26): el lector de migraciones falla cerrado ante configure(**...). Sin migracion.
+    # v1.197.2 -> v1.197.3 (2026-10-27): HTTPS forzado y HTTP/2 tras el alta con certificado (NPM 2.16). Sin migracion.
+    # v1.197.3 -> v1.198.0 (2026-10-27): la moneda del libro de terceros y del recibo (ADR-088). Migracion 0031 aditiva.
+    # v1.198.0 -> v1.199.0 (2026-10-27): el producto puede impedir la baja de un cliente (impide_desactivar). Sin migracion.
+    # v1.199.0 -> v1.200.0 (2026-10-27): el respaldo nocturno distingue fallo de no corrio (addendum ADR-075). Sin migracion.
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.200.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
