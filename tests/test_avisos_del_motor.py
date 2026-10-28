@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from libraauth.email_sender import SmtpConfig
 from libraauth.models import Base as AuthBase
 from sqlalchemy import update
 
@@ -151,8 +152,9 @@ def test_registro_y_despues_evolution_sin_perder_ni_duplicar_nada(clientes, sesi
     evolution = EvolutionSimulado()
 
     def barrer():
-        _, whatsapp = servicio.construir_proveedores(lambda: None, transporte=evolution.transporte)
-        return servicio.barrer(sesion, whatsapp, AHORA)
+        # Como el cron: los dos canales juntos. Sin SMTP el mail no está disponible, así que sólo cuenta WhatsApp.
+        proveedores = servicio.construir_proveedores(lambda: SmtpConfig(), transporte=evolution.transporte)
+        return servicio.barrer(sesion, proveedores, AHORA)
 
     # 0. Apagado (el default): no se arma ni se anota nada.
     assert str(barrer()) == "enviados: 0 · fallidos: 0 · omitidos: 0"

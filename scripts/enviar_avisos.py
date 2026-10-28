@@ -28,6 +28,12 @@ Qué corresponde avisar lo deduce `servicios/avisos.py`; **cómo sale** —mail 
 apagado, en registro o por Evolution— es del motor (`libracore.avisos`, ADR-090), que además reserva cada aviso en
 `avisos_envios` antes de mandarlo: dos corridas superpuestas no mandan lo mismo dos veces.
 
+**Un aviso, un canal** (addendum de ADR-030, 2026-10-28): hay **un solo barrido** con los dos canales a la vez, no
+uno por canal. Cada aviso sale por WhatsApp si el cliente tiene un teléfono válido y WhatsApp está disponible
+(registro o Evolution); si no, por mail, y por mail también si WhatsApp lo da por perdido. Lo que ya salió por un
+canal no sale por el otro aunque la configuración haya cambiado entre dos corridas. El log dice qué canales estaban
+disponibles y el resumen de lo que pasó.
+
 🔴 **El almacén de secretos tiene que estar enchufado antes de despachar.** La `apikey` de Evolution vive cifrada ahí y
 el cron corre por `docker exec`, sin el arranque de la app: sin el almacén, WhatsApp "no tiene credencial" y no manda
 (`configuracion.motivo_de_whatsapp()` lo dice). Por eso se importa `app.asgi`, que es lo que levanta el contenedor y
@@ -63,19 +69,19 @@ def main() -> int:
     fabrica = db.fabrica_de_sesiones()
 
     with fabrica() as sesion:
-        # Uno por canal: el SMTP de la instancia y el WhatsApp que diga el motor (apagado, registro o Evolution). El
-        # barrido sólo lee las reservas; lo que se anota lo escribe el motor en `avisos_envios`, y cada paso se
-        # confirma solo.
+        # Los dos canales juntos: el SMTP de la instancia y el WhatsApp que diga el motor (apagado, registro o
+        # Evolution). `barrer` elige por cuál sale cada aviso (uno solo). El barrido sólo lee las reservas; lo que
+        # se anota lo escribe el motor en `avisos_envios`, y cada paso se confirma solo.
         proveedores = servicio.construir_proveedores(smtp_config)
-        resumenes = [servicio.barrer(sesion, p) for p in proveedores]
+        resumen = servicio.barrer(sesion, proveedores)
+        canales = [canal for canal, p in proveedores.items() if p.disponible()]
 
     # Una línea por corrida, con fecha. El cron escribe a un log y lo que se
     # mira ahí es "esto corrió y cuándo": un script silencioso es
     # indistinguible de uno que no está en el crontab. Cuando el SMTP no está
-    # configurado el resumen es todo ceros, que es la respuesta correcta y
-    # también hay que poder verla.
-    for proveedor, resumen in zip(proveedores, resumenes, strict=True):
-        print(f"[{ahora():%d-%m-%Y %H:%M:%S}] avisos · {proveedor.canal} · {resumen}")
+    # configurado y WhatsApp está apagado el resumen es todo ceros, que es la
+    # respuesta correcta y también hay que poder verla: por eso dice qué canales había.
+    print(f"[{ahora():%d-%m-%Y %H:%M:%S}] avisos · canales: {', '.join(canales) or 'ninguno'} · {resumen}")
     return 0
 
 
