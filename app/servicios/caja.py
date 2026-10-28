@@ -521,6 +521,29 @@ def _patrones_de(ids: Sequence[int]) -> list[str]:
     return [patron for i in ids for patron in _patrones_de_reserva(i)]
 
 
+def _movimientos_de_reserva(reserva_id: int, tipo: str, prefijo: str = "") -> list[dict]:
+    """Los movimientos de caja de un `tipo` cuya referencia nombra a esta reserva, en orden.
+
+    `prefijo` es lo que antecede a la referencia del cobro: vacío para los cobros
+    (`reserva-12-…`, `lc-12-…`) y `devolucion-` para lo que se devolvió de ellos
+    (`devolucion-lc-12-…`). Lo comparten `cobros_de_reserva` y
+    `devoluciones_de_reserva`: dos consultas armadas por separado son cómo una
+    reserva termina con los cobros de un lado y las devoluciones de otro."""
+    patrones = [f"{prefijo}{p}" for p in _patrones_de(_ids_equivalentes([reserva_id])[int(reserva_id)])]
+    donde = " OR ".join("referencia LIKE ?" for _ in patrones)
+    conexion = libracore_core.get_connection()
+    try:
+        filas = conexion.execute(
+            "SELECT * FROM caja_movimientos"
+            f" WHERE tipo=? AND anulado=0 AND ({donde})"
+            " ORDER BY id",
+            (tipo, *patrones),
+        ).fetchall()
+    finally:
+        conexion.close()
+    return [dict(f) for f in filas]
+
+
 def cobros_de_reserva(reserva_id: int) -> list[dict]:
     """Los movimientos de caja que son plata de esta reserva, en orden.
 
@@ -534,19 +557,15 @@ def cobros_de_reserva(reserva_id: int) -> list[dict]:
     # `cobrado_de_reservas`—. Filtrar en una sola deja al detalle de la reserva
     # y al listado del mostrador diciendo números distintos sobre el mismo turno,
     # que es peor que no filtrar en ninguna: ahí al menos coinciden.
-    patrones = _patrones_de(_ids_equivalentes([reserva_id])[int(reserva_id)])
-    donde = " OR ".join("referencia LIKE ?" for _ in patrones)
-    conexion = libracore_core.get_connection()
-    try:
-        filas = conexion.execute(
-            "SELECT * FROM caja_movimientos"
-            f" WHERE tipo='ingreso' AND anulado=0 AND ({donde})"
-            " ORDER BY id",
-            tuple(patrones),
-        ).fetchall()
-    finally:
-        conexion.close()
-    return [dict(f) for f in filas]
+    return _movimientos_de_reserva(reserva_id, "ingreso")
+
+
+def devoluciones_de_reserva(reserva_id: int) -> list[dict]:
+    """Lo que se le devolvió al jugador de esta reserva (egresos `devolucion-…`), en orden.
+
+    Es la otra mitad de `cobros_de_reserva`: el recibo tiene que decir lo que
+    **quedó** en el complejo, no lo que entró antes de devolver la seña."""
+    return _movimientos_de_reserva(reserva_id, "egreso", PREFIJO_DEVOLUCION)
 
 
 def cobrado_de_reservas(reserva_ids: Sequence[int]) -> dict[int, Decimal]:

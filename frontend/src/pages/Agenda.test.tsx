@@ -9,7 +9,7 @@
  * cambie cuál. Los turnos, los precios y el alta tienen sus tests en otro lado;
  * esto es la costura nueva.
  */
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -235,13 +235,120 @@ describe('el turno ya cobrado', () => {
     render(<Agenda />)
 
     const deAna = (await screen.findByText('Ana Gómez')).closest('button')!
-    expect(deAna.className).toContain('bg-emerald-500/25')
+    expect(deAna.className).toContain('bg-exito/10')
     expect(deAna.className).not.toContain('bg-slate-200')
 
-    // El control: el que NO está cobrado sí lleva el color de su estado, o sea
-    // que la clase existe y el assert de arriba mide una ausencia real.
+    // El control: el que NO está cobrado (y viene de un backend que todavía no
+    // manda `cobro`) sí lleva el color de su estado, o sea que la clase existe y
+    // el assert de arriba mide una ausencia real.
     const deBeto = screen.getByText('Beto Ruiz').closest('button')!
     expect(deBeto.className).toContain('bg-emerald-100')
-    expect(deBeto.className).not.toContain('bg-emerald-500/25')
+    expect(deBeto.className).not.toContain('bg-exito/10')
+  })
+})
+
+describe('pagado, señado y sin cobrar', () => {
+  /* Pedido del humano (lista «Caja», 2026-10): distinguir de un vistazo lo pagado, lo
+   * señado y lo pendiente. El backend manda `cobro` y `saldo` en cada casillero
+   * (`servicios/disponibilidad.py`); acá se prueba lo que la grilla hace con eso. */
+
+  const turnoOcupado = (reservaId: number, hora: string, cliente: string, extra: Record<string, unknown>) => ({
+    comienza_at: `2026-08-31T${hora}:00-03:00`,
+    termina_at: `2026-08-31T${hora}:00-03:00`,
+    libre: false, precio: null, reserva_id: reservaId, estado: 'confirmada',
+    cliente, motivo: null, cobrado: false, ...extra,
+  })
+
+  const SEMANA_CON_TRES = {
+    desde: '2026-08-31',
+    canchas: {
+      '1': {
+        '2026-08-31': [
+          turnoOcupado(1, '09:00', 'Pago Completo', { cobrado: true, cobro: 'cobrado', saldo: '0.00' }),
+          turnoOcupado(2, '10:30', 'Con Sena', { cobro: 'senado', saldo: '6000.00' }),
+          turnoOcupado(3, '12:00', 'Sin Nada', { cobro: 'pendiente', saldo: '10000.00' }),
+          turnoOcupado(4, '13:30', 'Jugo Y Debe', { estado: 'jugada', cobro: 'pendiente', saldo: '8000.00' }),
+          {
+            comienza_at: '2026-08-31T15:00:00-03:00', termina_at: '2026-08-31T16:30:00-03:00',
+            libre: false, precio: null, reserva_id: 5, estado: 'bloqueo',
+            cliente: null, motivo: 'Mantenimiento', cobrado: false, cobro: null, saldo: null,
+          },
+        ],
+      },
+      '2': { '2026-08-31': [] },
+    },
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      const u = String(url)
+      if (u.includes('/api/canchas')) return Promise.resolve(json(CANCHAS))
+      if (u.includes('/api/disponibilidad/semana')) return Promise.resolve(json(SEMANA_CON_TRES))
+      return Promise.resolve(json(null))
+    }))
+  })
+
+  const casillero = async (cliente: string) =>
+    (await screen.findByText(cliente)).closest('button')!
+
+  it('cada punto de pago tiene su color, y los tres son distintos', async () => {
+    render(<Agenda />)
+
+    const cobrado = await casillero('Pago Completo')
+    const senado = await casillero('Con Sena')
+    const pendiente = await casillero('Sin Nada')
+
+    expect(cobrado.className).toContain('bg-exito/10')
+    expect(senado.className).toContain('bg-blue-700/10')
+    expect(pendiente.className).toContain('bg-amber-800/10')
+    // Ninguno lleva también el color del estado `confirmada`: pisa, no se suma.
+    for (const c of [cobrado, senado, pendiente]) expect(c.className).not.toContain('bg-emerald-100')
+  })
+
+  it('🔑 lo dice con la palabra y con lo que falta, no sólo con el color', async () => {
+    render(<Agenda />)
+
+    expect(await casillero('Pago Completo')).toHaveTextContent('cobrado')
+    const senado = await casillero('Con Sena')
+    expect(senado).toHaveTextContent('señado')
+    expect(senado).toHaveTextContent(/falta \$\s?6\.000/)
+    const pendiente = await casillero('Sin Nada')
+    expect(pendiente).toHaveTextContent('sin cobrar')
+    // Sin nada cobrado no «falta»: se debe todo, y se dice el total.
+    expect(pendiente).toHaveTextContent(/\$\s?10\.000/)
+    expect(pendiente).not.toHaveTextContent('falta')
+    // Y en el nombre accesible, que es lo que lee un lector de pantalla.
+    expect(screen.getByRole('button', { name: /Ver la reserva de 10:30, señado · falta/ })).toBeInTheDocument()
+  })
+
+  it('una jugada que no se cobró lleva las dos cosas: que se jugó y que falta la plata', async () => {
+    render(<Agenda />)
+
+    const jugada = await casillero('Jugo Y Debe')
+    expect(jugada.className).toContain('bg-amber-800/10')
+    expect(jugada).toHaveTextContent('sin cobrar')
+    expect(jugada).toHaveTextContent('jugada')
+    // Una confirmada normal no repite el estado.
+    expect(await casillero('Sin Nada')).not.toHaveTextContent('confirmada')
+  })
+
+  it('un bloqueo no tiene punto de pago: conserva el color de su estado', async () => {
+    render(<Agenda />)
+
+    const bloqueo = await casillero('Mantenimiento')
+    expect(bloqueo.className).toContain('bg-slate-300')
+    expect(bloqueo.className).not.toMatch(/bg-(exito|blue-700|amber-800)\/10/)
+    expect(bloqueo).not.toHaveTextContent(/cobrado|señado|sin cobrar/)
+  })
+
+  it('trae una leyenda con los tres puntos de pago', async () => {
+    render(<Agenda />)
+    await casillero('Pago Completo')
+
+    const leyenda = screen.getByRole('list', { name: 'Leyenda de la agenda' })
+    expect(within(leyenda).getByText('Cobrado')).toBeInTheDocument()
+    expect(within(leyenda).getByText('Señado, falta el resto')).toBeInTheDocument()
+    expect(within(leyenda).getByText('Sin cobrar')).toBeInTheDocument()
+    expect(within(leyenda).getByText('Libre')).toBeInTheDocument()
   })
 })

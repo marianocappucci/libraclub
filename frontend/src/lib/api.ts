@@ -137,6 +137,14 @@ export interface Turno {
   /** Si el turno ya no debe nada —alquiler más buffet—. Lo calcula el backend
    *  contra la caja; la grilla sólo lo dibuja. */
   cobrado: boolean
+  /** En qué punto de pago está el turno: `cobrado` (no debe nada), `senado`
+   *  (entró algo y falta) o `pendiente` (no entró nada). `null` en un casillero
+   *  libre, en un bloqueo o en una franja sin tarifa: sin total no hay qué cobrar.
+   *  Lo calcula el backend contra la caja. Opcional por los fixtures y por un
+   *  backend anterior. */
+  cobro?: 'cobrado' | 'senado' | 'pendiente' | null
+  /** Lo que falta cobrar del turno (en pesos, como string del backend o número). */
+  saldo?: string | number | null
 }
 
 export interface Semana {
@@ -513,6 +521,11 @@ export type EstadoDeCobro = {
 export const cobroDelTurno = {
   ver: (reservaId: number) =>
     api.get<EstadoDeCobro>(`/api/reservas/${reservaId}/cobros`),
+  /** El recibo no fiscal («no válido como factura») de lo cobrado del turno, en
+   *  PDF. Es una URL y no un `fetch`: la abre `abrirTicket()` en una pestaña
+   *  nueva y la cookie de sesión viaja sola por ser el mismo origen. 409 si el
+   *  turno todavía no tiene plata cobrada. */
+  urlDelRecibo: (reservaId: number) => `/api/reservas/${reservaId}/recibo`,
   registrar: (reservaId: number, datos: {
     monto: string
     medio_pago: string

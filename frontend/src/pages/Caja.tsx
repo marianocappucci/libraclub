@@ -44,6 +44,8 @@ import { AvisoDeError } from '@/components/listado'
 // hay una cuenta abierta que no se puede reemplazar. Ver `DialogoDeConsumo.tsx`.
 import { DialogoDeConsumo, PanelDeConsumo } from '@/components/DialogoDeConsumo'
 import { SeccionDeCobroConQr } from '@/components/CobroConQr'
+import { DesgloseDeCaja } from '@/components/DesgloseDeCaja'
+import { partirPorCajon } from '@/lib/caja-por-cajon'
 import { MapaDeCanchas } from '@/components/MapaDeCanchas'
 import { Button } from '@/components/ui/button'
 import {
@@ -59,6 +61,12 @@ import { ICONOS } from 'libra-ui/iconos-identidad'
 
 type Cierre = TurnoDeCaja & { diferencia_de_caja: number }
 
+/** El cobro que se acaba de registrar y del que se puede dar el recibo. */
+interface ReciboPendiente {
+  reservaId: number
+  cliente: string
+}
+
 export function Caja() {
   // 🔑 Sólo para decidir qué accesos se ofrecen. Lo que gatea de verdad es
   // el backend; esto evita ofrecer un enlace que sólo puede dar 403.
@@ -69,6 +77,14 @@ export function Caja() {
   const [cargando, setCargando] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [cerrado, setCerrado] = useState<Cierre | null>(null)
+  // El último cobro de una cuenta, para ofrecer su recibo.
+  //
+  // 🔴 **Vive acá, en la raíz de la pantalla, y no en quien cobra.** Cada cobro
+  // llama a `recargar`, que pone `cargando` y reemplaza TODA la pantalla por
+  // «Cargando…»: lo que viviera en la cuenta o en el punto de venta se
+  // desmonta y se pierde antes de que nadie lo vea. Sólo el estado de esta
+  // función sobrevive a la recarga.
+  const [recibo, setRecibo] = useState<ReciboPendiente | null>(null)
 
   const recargar = useCallback(() => {
     setCargando(true)
@@ -129,8 +145,11 @@ export function Caja() {
           resumen={resumen}
           onCambio={recargar}
           onError={setError}
+          recibo={recibo}
+          onRecibo={setRecibo}
           onCerrado={(c) => {
             setCerrado(c)
+            setRecibo(null)
             recargar()
           }}
         />
@@ -275,12 +294,14 @@ function Arqueo({ cierre }: { cierre: Cierre }) {
   )
 }
 
-function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
+function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado, recibo, onRecibo }: {
   turno: TurnoDeCaja
   resumen: ResumenDeCaja | null
   onCambio: () => void
   onError: (m: string) => void
   onCerrado: (c: Cierre) => void
+  recibo: ReciboPendiente | null
+  onRecibo: (r: ReciboPendiente | null) => void
 }) {
   // El monto, el concepto y el medio del cobro viven ahora en cada modo del
   // punto de venta: los tres cobran cosas distintas y compartir un solo estado
@@ -291,6 +312,7 @@ function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
   const [cerrando, setCerrando] = useState(false)
 
   const esperado = turno.monto_inicial + (resumen?.efectivo_ventas ?? 0)
+  const fuera = partirPorCajon(resumen?.pagos_por_medio)
 
   // 🔴 **Un turno de caja es de una jornada, y esto es lo único que lo sostiene.**
   // No hay nada que cierre los turnos viejos: el 2026-08-28 había dos abiertos
@@ -335,7 +357,10 @@ function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
           </div>
         ) : (
           <>
-            <PuntoDeVenta medios={medios} onCambio={onCambio} onError={onError} />
+            <PuntoDeVenta
+              medios={medios} onCambio={onCambio} onError={onError}
+              recibo={recibo} onRecibo={onRecibo}
+            />
 
             <Egreso onHecho={onCambio} onError={onError} />
           </>
@@ -360,27 +385,18 @@ function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
             {diasAbierto === 1 ? 'un día' : `${diasAbierto} días`}.
           </p>
         )}
-        <div className="space-y-1 text-sm">
-          <div className="flex justify-between">
-            <span className="text-muted-foreground">Efectivo inicial</span>
-            <span>{pesos(String(turno.monto_inicial))}</span>
-          </div>
-          {Object.entries(resumen?.pagos_por_medio ?? {}).map(([m, total]) => (
-            <div key={m} className="flex justify-between">
-              <span className="text-muted-foreground">
-                {etiquetaDeMedio(m)}
-              </span>
-              <span>{pesos(String(total))}</span>
-            </div>
-          ))}
-          {/* 🔑 Se dice «en el cajón» y no «total»: lo que no es efectivo entró
-              igual, pero no está acá adentro — mezclarlos es lo que hace que
-              toda caja con transferencias parezca cerrar con faltante. */}
-          <div className="flex justify-between border-t pt-1 font-medium">
-            <span>Esperado en el cajón</span>
-            <span>{pesos(String(esperado))}</span>
-          </div>
-        </div>
+        {/* 🔑 **Dos bloques y no una lista.** El arqueo cuenta sólo el efectivo; lo
+            que entró por transferencia, tarjeta o Mercado Pago está en la caja
+            pero no en el cajón, y se concilia contra el banco, la terminal y el
+            resumen de Mercado Pago. En una sola lista, el efectivo quedaba
+            mezclado entre las transferencias y toda caja con transferencias
+            parecía cerrar con faltante. */}
+        <DesgloseDeCaja
+          porMedio={resumen?.pagos_por_medio ?? {}}
+          etiquetaDeMedio={etiquetaDeMedio}
+          inicial={turno.monto_inicial}
+          esperado={esperado}
+        />
 
         {/* 🔴 **El detalle acumulado del turno NO va acá.** Pedido del humano
             el 2026-08-28: *"lo que la caja mueva entre todas las canchas no
@@ -427,6 +443,14 @@ function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
               <span className="text-muted-foreground">Esperado en el cajón</span>
               <span className="font-medium tabular-nums">{pesos(String(esperado))}</span>
             </div>
+            {/* Lo cobrado por otros medios entró a la caja pero no está en el cajón: se dice
+                acá, donde se cuenta, para que nadie lo sume al efectivo contado. */}
+            {fuera.totalFuera !== 0 && (
+              <p className="text-sm text-muted-foreground">
+                Aparte, fuera del cajón: <span className="tabular-nums">{pesos(String(fuera.totalFuera))}</span>{' '}
+                por transferencia, tarjeta o Mercado Pago. No se cuenta.
+              </p>
+            )}
             <div className="grid gap-1.5">
               <Label htmlFor="declarado">Efectivo contado</Label>
               <Input
@@ -493,10 +517,12 @@ function TurnoAbierto({ turno, resumen, onCambio, onError, onCerrado }: {
  * «Venta suelta» es la otra mitad: la gaseosa que compra alguien que no está
  * jugando. Ésa sí se cobra en el acto, porque no hay turno donde colgarla.
  */
-function PuntoDeVenta({ medios, onCambio, onError }: {
+function PuntoDeVenta({ medios, onCambio, onError, recibo, onRecibo }: {
   medios: { valor: string; etiqueta: string }[]
   onCambio: () => void
   onError: (m: string) => void
+  recibo: ReciboPendiente | null
+  onRecibo: (r: ReciboPendiente | null) => void
 }) {
   const { actual: sucursalId } = useSucursal()
   const [modo, setModo] = useState<'turno' | 'buffet' | 'libre'>('turno')
@@ -544,6 +570,8 @@ function PuntoDeVenta({ medios, onCambio, onError }: {
           medios={medios}
           sucursalId={sucursalId}
           onCobrado={alCobrar}
+          recibo={recibo}
+          onRecibo={onRecibo}
           onError={onError}
         />
       )}
@@ -631,11 +659,14 @@ function jugadoresSugeridos(deporte: string): number {
  * el mostrador. Reportado por el humano el 2026-08-29: *"queda muy vacía, no sé,
  * es rara"*. Ver la nota de `MapaDeCanchas`.
  */
-function CuentasDeCancha({ turnos, medios, sucursalId, onCobrado, onError }: {
+function CuentasDeCancha({ turnos, medios, sucursalId, onCobrado, recibo, onRecibo, onError }: {
   turnos: TurnoPorCobrar[]
   medios: { valor: string; etiqueta: string }[]
   sucursalId: number | null
   onCobrado: () => void
+  /** El cobro del que se puede dar el recibo. Lo guarda `Caja` (ver allá por qué). */
+  recibo: ReciboPendiente | null
+  onRecibo: (r: ReciboPendiente | null) => void
   onError: (m: string) => void
 }) {
   const [elegido, setElegido] = useState<number | null>(null)
@@ -694,6 +725,27 @@ function CuentasDeCancha({ turnos, medios, sucursalId, onCobrado, onError }: {
 
   return (
     <div className="space-y-3">
+      {recibo && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm"
+        >
+          <span>Cobro registrado{recibo.cliente ? ` — ${recibo.cliente}` : ''}.</span>
+          <Button
+            size="sm" variant="outline"
+            onClick={() => abrirTicket(cobroDelTurno.urlDelRecibo(recibo.reservaId))}
+          >
+            <Printer className="size-4" /> Imprimir recibo
+          </Button>
+          <button
+            type="button"
+            className="ml-auto text-muted-foreground underline-offset-4 hover:underline"
+            onClick={() => onRecibo(null)}
+          >
+            Cerrar
+          </button>
+        </div>
+      )}
       <MapaDeCanchas
         canchas={canchasDeLaSede}
         turnosPorCancha={turnosPorCancha}
@@ -745,6 +797,7 @@ function CuentasDeCancha({ turnos, medios, sucursalId, onCobrado, onError }: {
           medios={medios}
           sucursalId={sucursalId}
           onCobrado={onCobrado}
+          onCobroHecho={() => onRecibo({ reservaId: turno.reserva_id, cliente: turno.cliente })}
           onError={onError}
         />
       )}
@@ -752,11 +805,14 @@ function CuentasDeCancha({ turnos, medios, sucursalId, onCobrado, onError }: {
   )
 }
 
-function CierreDeCuenta({ turno, medios, sucursalId, onCobrado, onError }: {
+function CierreDeCuenta({ turno, medios, sucursalId, onCobrado, onCobroHecho, onError }: {
   turno: TurnoPorCobrar
   medios: { valor: string; etiqueta: string }[]
   sucursalId: number | null
   onCobrado: () => void
+  /** Se avisa **sólo** cuando entró plata, y no con `onCobrado`: ese también se
+   *  llama al cargar buffet, que no cobra, y ahí no hay nada que dar por recibo. */
+  onCobroHecho: () => void
   onError: (m: string) => void
 }) {
   const [consumos, setConsumos] = useState<LineaDeConsumo[]>([])
@@ -1062,6 +1118,7 @@ function CierreDeCuenta({ turno, medios, sucursalId, onCobrado, onError }: {
                         ...division,
                         pagadas: division.pagadas.map((p, n) => (n === i ? true : p)),
                       })
+                      onCobroHecho()
                       onCobrado()
                     } catch (e) {
                       onError((e as Error).message)
@@ -1093,6 +1150,7 @@ function CierreDeCuenta({ turno, medios, sucursalId, onCobrado, onError }: {
               await cobroDelTurno.registrar(turno.reserva_id, {
                 monto, medio_pago: medio, detalle,
               })
+              onCobroHecho()
               onCobrado()
             } catch (e) {
               onError((e as Error).message)

@@ -117,6 +117,63 @@ describe('la vista previa', () => {
   })
 })
 
+describe('lo cobrado, partido en el cajón y fuera del cajón', () => {
+  /* Pedido del humano (lista «Caja»): lo cobrado por transferencia, tarjeta o
+   * Mercado Pago tiene que verse separado del efectivo en el cierre, para que el
+   * arqueo cuadre. Dos turnos, así el fondo inicial es una SUMA y no un campo. */
+  function conOtrosMedios() {
+    const turno = (id: number, inicial: number, esperado: number) => ({
+      id, usuario_id: 1, usuario_nombre: 'Ana', caja_id: 5, caja_nombre: 'Mostrador',
+      apertura: '2026-09-13T09:00:00-03:00', cierre: '2026-09-13T18:00:00-03:00',
+      monto_inicial: inicial, monto_esperado_cierre: esperado, monto_declarado_cierre: esperado - 200,
+      estado: 'cerrado', notas: '', diferencia: -200, medios: [],
+    })
+    return previewDe({
+      turnos: [turno(10, 1000, 6000), turno(11, 500, 3500)],
+      medios: [
+        { medio_pago: 'efectivo', ingresos: 8000, egresos: 0, neto: 8000 },
+        { medio_pago: 'transferencia', ingresos: 4000, egresos: 0, neto: 4000 },
+        { medio_pago: 'mercadopago', ingresos: 2500, egresos: 0, neto: 2500 },
+      ],
+      monto_esperado_total: 9500,
+      monto_declarado_total: 9100,
+      diferencia_total: -400,
+    })
+  }
+
+  it('🔑 el efectivo con su esperado en un bloque y lo demás en otro', async () => {
+    preview.mockResolvedValue(conOtrosMedios())
+    montar()
+    const cajon = within(await screen.findByRole('region', { name: 'En el cajón' }))
+    const fuera = within(screen.getByRole('region', { name: 'Fuera del cajón' }))
+
+    // El fondo es la suma de los dos turnos (1.500) y el esperado el del backend.
+    expect(cajon.getByText(/1\.500,00/)).toBeInTheDocument()
+    expect(cajon.getByText(/8\.000,00/)).toBeInTheDocument()
+    expect(cajon.getByText(/9\.500,00/)).toBeInTheDocument()
+    expect(cajon.queryByText('Transferencia')).toBeNull()
+
+    expect(fuera.getAllByText('Transferencia').length).toBeGreaterThan(0)
+    expect(fuera.getByText(/6\.500,00/)).toBeInTheDocument()
+    expect(fuera.queryByText('Efectivo')).toBeNull()
+  })
+
+  it('el declarado y la diferencia se rotulan como del efectivo', async () => {
+    preview.mockResolvedValue(conOtrosMedios())
+    montar()
+    await screen.findByRole('region', { name: 'En el cajón' })
+
+    expect(screen.getByText('Efectivo declarado')).toBeInTheDocument()
+    expect(screen.getByText('Diferencia del efectivo')).toBeInTheDocument()
+  })
+
+  it('un día sólo en efectivo dice que no hubo otros medios', async () => {
+    montar()
+    const fuera = within(await screen.findByRole('region', { name: 'Fuera del cajón' }))
+    expect(fuera.getByText(/No se cobró nada por otros medios/)).toBeInTheDocument()
+  })
+})
+
 describe('cerrar el día', () => {
   it('🔴 pide confirmación antes de mandar el POST', async () => {
     const user = userEvent.setup()

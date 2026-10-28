@@ -28,6 +28,7 @@ import { useMediosDePago } from '@/lib/medios-pago'
 import { fechaHora, hora, pesos } from '@/lib/fechas'
 import { abrirTicket } from '@/lib/tickets'
 import { AvisoDeError } from '@/components/listado'
+import { DesgloseDeCaja } from '@/components/DesgloseDeCaja'
 import { Button } from '@/components/ui/button'
 import { DiferenciaDeArqueo } from '@/pages/TurnosDeCaja'
 import { ICONOS } from 'libra-ui/iconos-identidad'
@@ -106,15 +107,14 @@ export function TurnoDeCajaDetalle() {
             {Object.keys(resumen?.pagos_por_medio ?? {}).length === 0 ? (
               <p className="text-sm text-muted-foreground">No entró plata en este turno.</p>
             ) : (
-              <dl className="grid gap-1.5 text-sm">
-                {Object.entries(resumen!.pagos_por_medio).map(([medio, total]) => (
-                  <Dato key={medio} titulo={etiquetaDeMedio(medio)} valor={pesos(total)} />
-                ))}
-                <div className="mt-1 flex justify-between border-t pt-1.5 font-medium">
-                  <span>Total</span>
-                  <span>{pesos(resumen?.total_ventas ?? 0)}</span>
-                </div>
-              </dl>
+              /* En el cajón y fuera del cajón, separados: el efectivo es lo que se contó y
+                 lo demás se concilia con el banco, la terminal y Mercado Pago. */
+              <DesgloseDeCaja
+                porMedio={resumen!.pagos_por_medio}
+                etiquetaDeMedio={etiquetaDeMedio}
+                inicial={turno.monto_inicial}
+                esperado={turno.monto_esperado_cierre ?? undefined}
+              />
             )}
           </section>
 

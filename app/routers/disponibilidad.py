@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -53,7 +52,7 @@ def de_la_semana(
     # `grilla_de_la_semana` porque esa función llama a `grilla_del_dia` 7 veces
     # por cancha: marcar ahí serían decenas de conexiones a la base del motor
     # por cada refresco de la pantalla.
-    saldadas = disponibilidad.reservas_saldadas(
+    cobros = disponibilidad.cobros_de_reservas(
         sesion,
         (
             turno.reserva_id
@@ -73,9 +72,7 @@ def de_la_semana(
             str(cancha_id): {
                 dia: [
                     TurnoSalida.model_validate(
-                        replace(turno, cobrado=True)
-                        if turno.reserva_id in saldadas
-                        else turno,
+                        disponibilidad.con_cobro(turno, cobros),
                         from_attributes=True,
                     )
                     for turno in turnos
