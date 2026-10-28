@@ -55,6 +55,8 @@ const TURNO = {
   comienza_at: enHoras(30),
   termina_at: enHoras(31.5),
   precio: 8000,
+  precio_lista: null,
+  promocion: null,
 }
 
 function montar(componente: React.ReactNode) {
@@ -81,6 +83,26 @@ describe('portal: elegir turno', () => {
     montar(<PortalReservar />)
     expect(await screen.findByText('Cancha 1')).toBeInTheDocument()
     expect(await screen.findByText('$ 8.000,00')).toBeInTheDocument()
+  })
+
+  it('🔑 con promoción tacha el precio de lista y rotula con su nombre (ADR-029)', async () => {
+    disponibilidad.mockResolvedValue([
+      { ...TURNO, precio: 8000, precio_lista: 10000, promocion: 'Hora valle' },
+      { ...TURNO, comienza_at: enHoras(33), termina_at: enHoras(34.5), precio: 10000 },
+    ])
+    montar(<PortalReservar />)
+
+    const rebajado = (await screen.findByText('$ 8.000,00')).closest('button')!
+    // El de lista va tachado y dice «antes» para quien no ve el tachado.
+    const tachado = within(rebajado).getByText('$ 10.000,00')
+    expect(tachado).toHaveClass('line-through')
+    expect(tachado).toHaveTextContent('antes')
+    expect(within(rebajado).getByText('Hora valle')).toBeInTheDocument()
+
+    // El turno sin promoción queda como siempre: un solo precio, sin tachar ni rótulo.
+    const normal = screen.getByText('$ 10.000,00', { selector: 'div.text-muted-foreground' })
+    expect(normal.closest('button')).not.toBe(rebajado)
+    expect(within(normal.closest('button')!).queryByText('Hora valle')).not.toBeInTheDocument()
   })
 
   it('al elegir un turno sin cuenta se pide la cuenta, no se reserva', async () => {

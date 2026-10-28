@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from app.auth import require_admin, require_staff
 from app.db import obtener_sesion
 from app.models.maestros import Cancha, Cliente, Feriado, FranjaDeAtencion, Sucursal
-from app.models.tarifas import Tarifa
+from app.models.tarifas import Promocion, Tarifa
 from app.schemas.maestros import (
     CanchaEntrada,
     CanchaSalida,
@@ -37,6 +37,8 @@ from app.schemas.maestros import (
     FeriadoSalida,
     FranjaEntrada,
     FranjaSalida,
+    PromocionEntrada,
+    PromocionSalida,
     SucursalEntrada,
     SucursalSalida,
     TarifaEntrada,
@@ -235,6 +237,14 @@ tarifas = construir_abm(
     orden=(Tarifa.sucursal_id, Tarifa.hora_desde),
 )
 
+# 🔑 **De admin, como las tarifas**: una promoción cambia lo que se cobra (ADR-029). Se lee con
+# `staff` porque el mostrador tiene que poder explicar por qué un turno salió más barato.
+promociones = construir_abm(
+    prefijo="promociones", etiqueta="promociones",
+    modelo=Promocion, entrada=PromocionEntrada, salida=PromocionSalida,
+    orden=(Promocion.sucursal_id, Promocion.hora_desde, Promocion.nombre),
+)
+
 # 🔑 **De admin, como las tarifas.** El horario de atención decide qué turnos se
 # pueden vender: no es operación de mostrador, es configuración del negocio.
 franjas = construir_abm(
@@ -247,7 +257,7 @@ franjas = construir_abm(
     ),
 )
 
-TODOS = (sucursales, canchas, clientes, feriados, tarifas, franjas)
+TODOS = (sucursales, canchas, clientes, feriados, tarifas, promociones, franjas)
 
 #: Los maestros que además se dan de alta en un nodo de LibraEdge: su alta no es 409 `solo_en_el_central` (ADR-022).
 CON_ALTA_EN_NODO = (clientes,)

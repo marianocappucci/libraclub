@@ -5,7 +5,7 @@ lea. Un modelo que no llegue a este archivo **no existe para el autogenerate**, 
 el síntoma es una migración que borra la tabla que nadie declaró.
 """
 
-from app.models.avisos import Aviso
+from app.models.avisos import Aviso, ConfigAvisos
 from app.models.base import Anotable, Auditable, Base
 from app.models.enums import (
     ESTADOS_QUE_OCUPAN,
@@ -17,12 +17,13 @@ from app.models.enums import (
     EstadoTorneo,
     EtapaTorneo,
     FormatoTorneo,
+    ModoWhatsapp,
     OrigenReserva,
     TipoAviso,
 )
 from app.models.maestros import Cancha, Cliente, Feriado, Sucursal
 from app.models.reservas import WHERE_OCUPA, WHERE_OCUPA_CENTRAL, WHERE_OCUPA_NODO, Reserva, Serie
-from app.models.tarifas import Tarifa
+from app.models.tarifas import Promocion, Tarifa
 from app.models.torneos import (
     Competidor,
     Evento,
@@ -45,6 +46,7 @@ __all__ = [
     "Cancha",
     "Cliente",
     "Competidor",
+    "ConfigAvisos",
     "Deporte",
     "EstadoAviso",
     "EstadoReserva",
@@ -54,9 +56,11 @@ __all__ = [
     "Feriado",
     "FormatoTorneo",
     "IntegranteDeCompetidor",
+    "ModoWhatsapp",
     "OrigenReserva",
     "ParcialDePartido",
     "PartidoDeTorneo",
+    "Promocion",
     "Reserva",
     "Serie",
     "Sucursal",

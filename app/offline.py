@@ -82,7 +82,8 @@ SCHEMA_VERSION = 1
 #: - `arca_credenciales_servicio` y el almacén de claves (`secretos_instancia`): **el ticket de ARCA lo presta el
 #:   central**, la clave privada no sale del VPS. `arca_config` sí (CUIT, punto de venta, ambiente: no es secreto);
 #: - lo que sólo existe en la web: el portal (`cuentas_de_jugador`, `pagos_de_reserva`, `busquedas_de_jugadores`,
-#:   `anotados_en_partido`), los torneos y los eventos (ADR-024), los avisos y la copia de Mercado Pago.
+#:   `anotados_en_partido`), los torneos y los eventos (ADR-024), los avisos (`avisos` y `config_avisos`, ADR-029)
+#:   y la copia de Mercado Pago.
 TABLAS_DE_REFERENCIA = frozenset({
     # LibraCore y libraauth: la sesión, el gate de módulos y de Términos, las cajas y facturar.
     "usuarios", "aceptaciones_terminos", "modulos", "cajas", "arca_config",
@@ -90,7 +91,8 @@ TABLAS_DE_REFERENCIA = frozenset({
     "branches", "locations", "units", "categories", "catalog_items", "item_variants", "item_codes",
     "price_lists", "item_prices", "commerce_settings",
     # Propias de LibraClub: los maestros y la agenda. `reservas` baja y además el nodo da las suyas (`altas_en_nodo`).
-    "sucursales", "canchas", "clientes", "tarifas", "feriados", "franjas_de_atencion", "series", "reservas",
+    "sucursales", "canchas", "clientes", "tarifas", "promociones", "feriados", "franjas_de_atencion", "series",
+    "reservas",
 })
 
 #: Los maestros que el nodo **no escribe**: LibraEdge les instala una guarda en la base del nodo y un intento de
@@ -98,7 +100,7 @@ TABLAS_DE_REFERENCIA = frozenset({
 #: (`espejar_usuario` hace un upsert idempotente), `cajas` (el arranque asegura una por sucursal), `reservas` ni
 #: `clientes` (se dan de alta en el nodo, con id provisorio: ADR-022 y su addendum).
 TABLAS_SOLO_LECTURA = frozenset({
-    "sucursales", "canchas", "tarifas", "feriados", "franjas_de_atencion", "series",
+    "sucursales", "canchas", "tarifas", "promociones", "feriados", "franjas_de_atencion", "series",
     "branches", "locations", "units", "categories", "catalog_items", "item_variants", "item_codes", "price_lists",
     "item_prices", "commerce_settings", "arca_config", "modulos",
 })

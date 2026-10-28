@@ -18,6 +18,7 @@ import { useJugador } from '@/portal/JugadorContext'
 import { DialogoDeCuenta } from '@/portal/DialogoDeCuenta'
 import { DialogoDePago } from '@/portal/DialogoDePago'
 import { AvisoDeError } from '@/components/listado'
+import { BadgeEstado } from 'libra-ui/badge-estado'
 import { enDiasISO, hoyISO } from 'libra-ui/fechas'
 
 /** La sucursal que atiende este portal.
@@ -34,6 +35,32 @@ const SUCURSAL = 1
 const DIAS = Array.from({ length: 14 }, (_, i) => enDiasISO(i))
 
 const NOMBRE_DIA = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb']
+
+/** El precio del turno. Con promoción, el de lista tachado, el que se paga y cómo se llama.
+ *
+ * 🔑 **Los dos números vienen del servidor** (`tarifario.cotizar`) y acá no se hace ninguna
+ * cuenta: lo que se ve tachado es lo que `Reserva.precio` congela después, y recalcular el
+ * porcentaje en la pantalla sería el segundo cálculo de precio que ADR-029 evita. El tachado
+ * lleva texto para lectores de pantalla («antes») porque `line-through` solo no lo dice. */
+function PrecioDelTurno({ turno }: { turno: TurnoLibre }) {
+  if (turno.precio_lista === null) {
+    return <div className="text-sm text-muted-foreground">{pesos(String(turno.precio))}</div>
+  }
+  return (
+    <div className="text-sm">
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <span className="font-medium">{pesos(String(turno.precio))}</span>
+        <span className="text-xs text-muted-foreground line-through">
+          <span className="sr-only">antes </span>
+          {pesos(String(turno.precio_lista))}
+        </span>
+      </div>
+      {turno.promocion && (
+        <BadgeEstado tono="ok" className="mt-1">{turno.promocion}</BadgeEstado>
+      )}
+    </div>
+  )
+}
 
 export function PortalReservar() {
   const { jugador } = useJugador()
@@ -170,9 +197,7 @@ export function PortalReservar() {
                     <Clock className="size-4" />
                     {hora(t.comienza_at)}
                   </div>
-                  <div className="text-sm text-muted-foreground">
-                    {pesos(String(t.precio))}
-                  </div>
+                  <PrecioDelTurno turno={t} />
                 </button>
               ))}
             </div>

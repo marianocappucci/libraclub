@@ -186,7 +186,11 @@ def test_la_disponibilidad_NO_dice_quien_ocupa(
     ).json()
     assert libres, "tiene que haber otros turnos libres"
     for t in libres:
-        assert set(t) == {"comienza_at", "termina_at", "precio"}, t
+        # Lista cerrada a propósito: sumar un campo acá es publicarlo en internet. Los dos de
+        # promoción (ADR-029) son precio y nombre de una promoción, nada de quién ocupa qué.
+        assert set(t) == {
+            "comienza_at", "termina_at", "precio", "precio_lista", "promocion"
+        }, t
     # 🔴 Y ningún turno libre se **solapa** con la reserva.
     #
     # Comparar el instante exacto no servía y el assert pasaba con los ocupados

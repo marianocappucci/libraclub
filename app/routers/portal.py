@@ -276,6 +276,10 @@ def disponibilidad(
         {
             "comienza_at": t["comienza_at"], "termina_at": t["termina_at"],
             "precio": float(t["precio"]),
+            # `null` cuando el turno cuesta lo de la tarifa. Con promoción, el precio sin ella y su
+            # nombre: la pantalla tacha el primero y rotula con el segundo (ADR-029).
+            "precio_lista": float(t["precio_lista"]) if t["precio_lista"] is not None else None,
+            "promocion": t["promocion"],
         }
         for t in libres
     ]

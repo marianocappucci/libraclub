@@ -164,6 +164,9 @@ def turnos_libres(sesion: Session, cancha: Cancha, dia) -> list[dict]:
             "comienza_at": t.comienza_at,
             "termina_at": t.termina_at,
             "precio": t.precio,
+            # Sólo con promoción: el precio sin ella (para tacharlo) y cómo se llama (ADR-029).
+            "precio_lista": t.precio_lista,
+            "promocion": t.promocion,
         }
         for t in disponibilidad.grilla_del_dia(sesion, cancha, dia)
         if t.libre and t.precio is not None and t.comienza_at > ahora()

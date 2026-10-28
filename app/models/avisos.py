@@ -15,6 +15,8 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -28,7 +30,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Auditable, Base
-from app.models.enums import CanalAviso, EstadoAviso, TipoAviso
+from app.models.enums import CanalAviso, EstadoAviso, ModoWhatsapp, TipoAviso
 from app.models.reservas import Reserva
 
 
@@ -108,3 +110,32 @@ class Aviso(Base, Auditable):
         Index("ix_avisos_reserva", "reserva_id"),
         Index("ix_avisos_estado", "estado"),
     )
+
+
+class ConfigAvisos(Base, Auditable):
+    """Qué avisos salen y por dónde. **Una sola fila por instancia** (`id = 1`).
+
+    🔑 **No es el interruptor general.** Ese sigue siendo el cron (ADR-015): sin
+    `scripts/enviar_avisos.py` en el crontab no sale nada, con esta fila o sin ella. Acá se
+    decide *qué* sale una vez que el cron corre —qué tipos de aviso y si el canal de WhatsApp
+    está prendido—, que es otra pregunta y no un segundo interruptor para lo mismo.
+
+    **Sin fila equivale a los defaults** (`servicios/avisos.configuracion`): todos los tipos
+    prendidos y WhatsApp apagado. Una instancia que nunca abrió la pantalla se comporta
+    exactamente como antes de que existiera.
+    """
+
+    __tablename__ = "config_avisos"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    whatsapp: Mapped[ModoWhatsapp] = mapped_column(
+        Enum(ModoWhatsapp, name="modo_whatsapp", values_callable=lambda e: [m.value for m in e]),
+        nullable=False,
+        default=ModoWhatsapp.APAGADO,
+    )
+    avisar_confirmacion: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    avisar_recordatorio: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    avisar_cancelacion: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    avisar_sena_por_vencer: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    __table_args__ = (CheckConstraint("id = 1", name="ck_config_avisos_una_sola"),)
