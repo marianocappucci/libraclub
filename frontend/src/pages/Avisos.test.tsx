@@ -2,102 +2,127 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const config = vi.fn()
-const guardarConfig = vi.fn()
-const registro = vi.fn()
+/**
+ * La pantalla «Avisos» (ADR-030): los tipos son de LibraClub (`/api/avisos/tipos`, por `@/lib/api`); la
+ * configuración de WhatsApp y el registro son del motor y los pinta el kit (`ConfiguracionDeAvisos` y
+ * `RegistroDeAvisos`, ADR-097), que habla con `/api/avisos/{config,envios,…}` por el cliente del kit. Se dobla ese
+ * cliente (no el componente): lo que se mide es que los componentes reales reciban lo que esta pantalla les pasa
+ * —`demo`, `esAdmin`, el rótulo de cada tipo— y que se rendericen sólo para el administrador.
+ */
+
+const tipos = vi.fn()
+const guardarTipos = vi.fn()
 let rol = 'admin'
 
 vi.mock('@/lib/api', async (original) => {
   const real = await original<Record<string, unknown>>()
-  return { ...real, avisos: { config, guardarConfig, registro } }
+  return { ...real, avisos: { tipos, guardarTipos } }
 })
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => ({ user: { username: 'u', name: 'U', role: rol }, loading: false }),
 }))
 
+const get = vi.fn()
+const put = vi.fn()
+const post = vi.fn()
+
+vi.mock('libra-ui/api-client', async (original) => {
+  const real = await original<Record<string, unknown>>()
+  return { ...real, api: { get, put, post, del: vi.fn() } }
+})
+
 const { Avisos } = await import('./Avisos')
 
-const CONFIG = {
-  whatsapp: 'apagado', confirmacion: true, recordatorio: true, cancelacion: true, sena_por_vencer: true,
+const TIPOS = {
+  confirmacion: true, recordatorio: true, cancelacion: true, sena_por_vencer: true, demo: false,
 }
 
-const base = {
-  creado_at: '2026-09-01T22:00:00Z', cancha: 'Cancha 1', comienza_at: '2026-09-02T23:00:00Z',
-  intentos: 1, reserva_id: 5, asunto: null,
+const CONFIG_DEL_MOTOR = {
+  whatsapp: {
+    modo: 'registro', modos: ['apagado', 'registro', 'evolution'], url: '', instancia: '', apikey_cargada: false,
+    disponible: true, motivo: '',
+  },
+  email: { disponible: true },
 }
-const REGISTRO = [
+
+const envio = {
+  plantilla: '', variables: {}, intentos: 1, id_externo: '', enviado_at: '', updated_at: '2026-09-01 19:00:00',
+  asunto: '', cuerpo: '',
+}
+const ENVIOS = [
   {
-    ...base, id: 3, tipo: 'sena_por_vencer', canal: 'whatsapp', estado: 'registrado',
-    destino: '5492255123456', detalle: 'Registrado en modo prueba: no se mandó nada.',
-    cuerpo: '*Tu turno se libera a las 19:06*\n\nHola Juan,',
+    ...envio, id: 3, canal: 'whatsapp', clave: 'reserva:5:sena_por_vencer:-', tipo: 'sena_por_vencer',
+    destino: '5492255123456', proveedor: 'registro', estado: 'registrado',
+    detalle: 'Registrado en modo prueba: no se mandó nada.', created_at: '2026-09-01 19:00:00',
   },
   {
-    ...base, id: 2, tipo: 'confirmacion', canal: 'email', estado: 'enviado',
-    destino: 'jugador@ejemplo.com', detalle: null, asunto: 'Turno confirmado', cuerpo: 'Hola Juan,',
-  },
-  {
-    ...base, id: 1, tipo: 'recordatorio', canal: 'whatsapp', estado: 'omitido',
-    destino: '', detalle: 'El cliente no tiene un teléfono que WhatsApp reconozca.', cuerpo: null,
+    ...envio, id: 2, canal: 'email', clave: 'reserva:5:confirmacion:-', tipo: 'confirmacion',
+    destino: 'jugador@ejemplo.com', proveedor: 'smtp', estado: 'enviado', detalle: '',
+    created_at: '2026-09-01 18:00:00',
   },
 ]
 
 beforeEach(() => {
   rol = 'admin'
-  config.mockReset()
-  guardarConfig.mockReset()
-  registro.mockReset()
-  config.mockResolvedValue(CONFIG)
-  registro.mockResolvedValue(REGISTRO)
+  for (const f of [tipos, guardarTipos, get, put, post]) f.mockReset()
+  tipos.mockResolvedValue(TIPOS)
+  get.mockImplementation(async (url: string) => {
+    if (url.startsWith('/api/avisos/config')) return CONFIG_DEL_MOTOR
+    if (url.startsWith('/api/avisos/envios')) return ENVIOS
+    throw new Error(`pedido inesperado: ${url}`)
+  })
 })
 
-describe('pantalla de avisos: configuración', () => {
-  it('muestra los cuatro avisos prendidos y WhatsApp apagado', async () => {
+describe('pantalla de avisos: qué tipos salen', () => {
+  it('muestra los cuatro avisos prendidos', async () => {
     render(<Avisos />)
 
     for (const nombre of ['Confirmación', 'Recordatorio', 'Cancelación', 'Seña por vencer']) {
       expect(await screen.findByRole('switch', { name: nombre })).toBeChecked()
     }
-    expect(screen.getByRole('combobox', { name: 'Modo' })).toHaveValue('apagado')
   })
 
-  it('🔑 el texto de WhatsApp dice que en modo de prueba no se manda a nadie', async () => {
+  it('🔴 ya no hay un «Modo» de WhatsApp acá: es del motor y una sola fuente de verdad', async () => {
     render(<Avisos />)
-    expect(await screen.findByText(/no se mandan a nadie/)).toBeInTheDocument()
+    await screen.findByRole('switch', { name: 'Confirmación' })
+
+    expect(screen.queryByRole('combobox', { name: 'Modo' })).not.toBeInTheDocument()
   })
 
-  it('guardar manda la configuración entera y avisa; sin cambios el botón está apagado', async () => {
+  it('guardar manda sólo los cuatro tipos (sin el dato de la demo) y avisa; sin cambios el botón está apagado', async () => {
     const user = userEvent.setup()
-    guardarConfig.mockImplementation(async (c) => c)
+    guardarTipos.mockImplementation(async (c) => ({ ...c, demo: false }))
     render(<Avisos />)
     const guardar = await screen.findByRole('button', { name: 'Guardar' })
     expect(guardar).toBeDisabled()
 
     await user.click(screen.getByRole('switch', { name: 'Recordatorio' }))
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Modo' }), 'registro')
     expect(guardar).toBeEnabled()
     await user.click(guardar)
 
-    await waitFor(() => expect(guardarConfig).toHaveBeenCalledWith({
-      whatsapp: 'registro', confirmacion: true, recordatorio: false, cancelacion: true,
-      sena_por_vencer: true,
+    await waitFor(() => expect(guardarTipos).toHaveBeenCalledWith({
+      confirmacion: true, recordatorio: false, cancelacion: true, sena_por_vencer: true,
     }))
     expect(await screen.findByRole('status')).toHaveTextContent('Configuración guardada.')
     expect(screen.getByRole('button', { name: 'Guardar' })).toBeDisabled()
   })
 
-  it('🔑 el mostrador ve la configuración pero no puede cambiarla', async () => {
+  it('🔑 el mostrador ve los tipos de sólo lectura y nada más: ni WhatsApp ni el registro', async () => {
     rol = 'staff'
     render(<Avisos />)
 
     expect(await screen.findByRole('switch', { name: 'Confirmación' })).toBeDisabled()
-    expect(screen.getByRole('combobox', { name: 'Modo' })).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'Guardar' })).not.toBeInTheDocument()
+    expect(screen.getByText(/Sólo un administrador cambia esto/)).toBeInTheDocument()
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument()
+    // Y no pide al motor lo que el motor le negaría (403): el router es de administrador.
+    expect(get).not.toHaveBeenCalled()
   })
 
   it('un error al guardar se muestra y no se pierde lo editado', async () => {
     const user = userEvent.setup()
-    guardarConfig.mockRejectedValue(new Error('No tenés permiso.'))
+    guardarTipos.mockRejectedValue(new Error('No tenés permiso.'))
     render(<Avisos />)
     await user.click(await screen.findByRole('switch', { name: 'Cancelación' }))
     await user.click(screen.getByRole('button', { name: 'Guardar' }))
@@ -107,7 +132,37 @@ describe('pantalla de avisos: configuración', () => {
   })
 })
 
-describe('pantalla de avisos: registro', () => {
+describe('pantalla de avisos: WhatsApp y correo (el kit)', () => {
+  async function abrirWhatsApp() {
+    const user = userEvent.setup()
+    render(<Avisos />)
+    await user.click(await screen.findByRole('tab', { name: 'WhatsApp y correo' }))
+    return user
+  }
+
+  it('es el componente del kit sobre el router del motor, y dice cómo está WhatsApp', async () => {
+    await abrirWhatsApp()
+
+    expect(await screen.findByText('En registro')).toBeInTheDocument()
+    expect(get).toHaveBeenCalledWith('/api/avisos/config')
+  })
+
+  it('en una demo lo avisa de entrada (`demo` sale de `/api/avisos/tipos`)', async () => {
+    tipos.mockResolvedValue({ ...TIPOS, demo: true })
+    await abrirWhatsApp()
+
+    expect(await screen.findByText(/Esto es una demo/)).toBeInTheDocument()
+  })
+
+  it('fuera de una demo no muestra el aviso de demo', async () => {
+    await abrirWhatsApp()
+    await screen.findByText('En registro')
+
+    expect(screen.queryByText(/Esto es una demo/)).not.toBeInTheDocument()
+  })
+})
+
+describe('pantalla de avisos: registro (el kit)', () => {
   async function abrirElRegistro() {
     const user = userEvent.setup()
     render(<Avisos />)
@@ -115,13 +170,12 @@ describe('pantalla de avisos: registro', () => {
     return user
   }
 
-  it('🔴 un aviso registrado dice que no salió; no se confunde con uno enviado', async () => {
+  it('🔴 un aviso registrado dice que no salió y se distingue de uno enviado', async () => {
     await abrirElRegistro()
 
     const registrado = (await screen.findByText('5492255123456')).closest('tr')!
-    expect(within(registrado).getByText('Registrado (no salió)')).toBeInTheDocument()
+    expect(within(registrado).getByText('Registrado')).toBeInTheDocument()
     expect(within(registrado).getByText('WhatsApp')).toBeInTheDocument()
-    expect(within(registrado).getByText('Seña por vencer')).toBeInTheDocument()
     expect(within(registrado).queryByText('Enviado')).not.toBeInTheDocument()
 
     const enviado = screen.getByText('jugador@ejemplo.com').closest('tr')!
@@ -129,27 +183,32 @@ describe('pantalla de avisos: registro', () => {
     expect(within(enviado).getByText('Correo')).toBeInTheDocument()
   })
 
-  it('un aviso omitido muestra el motivo y no tiene mensaje para ver', async () => {
+  it('el administrador ve el destino completo (el kit lo enmascararía sin `esAdmin`)', async () => {
     await abrirElRegistro()
 
-    const omitido = (await screen.findByText(/teléfono que WhatsApp reconozca/)).closest('tr')!
-    expect(within(omitido).getByText('Omitido')).toBeInTheDocument()
-    expect(within(omitido).queryByRole('button')).not.toBeInTheDocument()
+    expect(await screen.findByText('5492255123456')).toBeInTheDocument()
+    expect(screen.queryByText(/•••/)).not.toBeInTheDocument()
   })
 
-  it('el mensaje se abre en un diálogo, tal como se armó', async () => {
-    const user = await abrirElRegistro()
-
-    await user.click(await screen.findByRole('button', { name: 'Ver el mensaje a 5492255123456' }))
-
-    const dialogo = await screen.findByRole('dialog')
-    expect(within(dialogo).getByText(/Tu turno se libera a las 19:06/)).toBeInTheDocument()
-    expect(within(dialogo).getByText(/Seña por vencer · 5492255123456/)).toBeInTheDocument()
-  })
-
-  it('sin avisos dice que todavía no se mandó ninguno', async () => {
-    registro.mockResolvedValue([])
+  it('el tipo se rotula con el vocabulario de LibraClub y no con el del código', async () => {
     await abrirElRegistro()
-    expect(await screen.findByText('Todavía no se mandó ningún aviso.')).toBeInTheDocument()
+
+    const fila = (await screen.findByText('5492255123456')).closest('tr')!
+    expect(within(fila).getByText('Seña por vencer')).toBeInTheDocument()
+    expect(within(fila).queryByText('Sena por vencer')).not.toBeInTheDocument()
+  })
+
+  it('pide el registro al router del motor', async () => {
+    await abrirElRegistro()
+    await screen.findByText('5492255123456')
+
+    expect(get).toHaveBeenCalledWith('/api/avisos/envios?limite=200')
+  })
+
+  it('sin avisos dice que todavía no se registró ninguno', async () => {
+    get.mockImplementation(async (url: string) => (url.startsWith('/api/avisos/envios') ? [] : CONFIG_DEL_MOTOR))
+    await abrirElRegistro()
+
+    expect(await screen.findByText('Todavía no se registró ningún aviso.')).toBeInTheDocument()
   })
 })

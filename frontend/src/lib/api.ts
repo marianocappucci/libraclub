@@ -292,41 +292,30 @@ export const promociones = {
   borrar: (id: number) => api.del(`/api/promociones/${id}`),
 }
 
-// ── Avisos al cliente (ADR-015, ADR-029) ─────────────────────────────────
+// ── Avisos al cliente (ADR-015, ADR-029, ADR-030) ────────────────────────
+//
+// Acá sólo está lo que es de LibraClub: **qué tipos** de aviso salen (`/api/avisos/tipos`). Cómo salen —el modo de
+// WhatsApp, la conexión a Evolution, «probar envío»— y el registro de lo que salió los sirve el motor
+// (`/api/avisos/config`, `/probar`, `/envios`) y los pinta el kit: `ConfiguracionDeAvisos` y `RegistroDeAvisos`
+// (libra-ui, ADR-097). No hay un cliente propio para ésos a propósito: son del kit.
 
-export type ModoWhatsapp = 'apagado' | 'registro'
 export type TipoAviso = 'confirmacion' | 'recordatorio' | 'cancelacion' | 'sena_por_vencer'
-export type CanalAviso = 'email' | 'whatsapp'
-export type EstadoAviso = 'enviado' | 'fallido' | 'omitido' | 'registrado'
 
-export interface ConfigAvisos {
-  whatsapp: ModoWhatsapp
+export interface TiposDeAviso {
   confirmacion: boolean
   recordatorio: boolean
   cancelacion: boolean
   sena_por_vencer: boolean
 }
 
-export interface AvisoRegistrado {
-  id: number
-  creado_at: string
-  tipo: TipoAviso
-  canal: CanalAviso
-  estado: EstadoAviso
-  destino: string
-  detalle: string | null
-  asunto: string | null
-  cuerpo: string | null
-  intentos: number
-  reserva_id: number
-  cancha: string | null
-  comienza_at: string
+/** Lo que devuelve `GET`/`PUT /api/avisos/tipos`: los tipos y si la instancia es una demo (ahí WhatsApp nunca manda). */
+export interface TiposDeAvisoConDemo extends TiposDeAviso {
+  demo: boolean
 }
 
 export const avisos = {
-  config: () => api.get<ConfigAvisos>('/api/avisos/config'),
-  guardarConfig: (cuerpo: ConfigAvisos) => api.put<ConfigAvisos>('/api/avisos/config', cuerpo),
-  registro: (limite = 100) => api.get<AvisoRegistrado[]>(`/api/avisos/registro?limite=${limite}`),
+  tipos: () => api.get<TiposDeAvisoConDemo>('/api/avisos/tipos'),
+  guardarTipos: (cuerpo: TiposDeAviso) => api.put<TiposDeAvisoConDemo>('/api/avisos/tipos', cuerpo),
 }
 
 /** El mínimo para dar de alta un cliente desde el campo «Cliente» (`SelectCliente`, ver `lib/clientes.ts`).

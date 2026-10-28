@@ -1,6 +1,13 @@
 """Lo que se le avisó al cliente sobre su turno.
 
-🔑 **Esta tabla es un registro, no una cola.** No hay filas `pendiente`: lo que
+🔴 **`avisos` es LEGADO desde el ADR-030 (2026-10-28): el registro de lo que se avisó vive en `avisos_envios`, la tabla
+del motor (`libracore.avisos`, ADR-090).** La migración `0018_avisos_al_motor` llevó acá las filas a la del motor y
+esta quedó **sin uso y sin borrar**: es el respaldo con el que se vuelve a la imagen anterior si hace falta, y se
+borra en una migración aparte cuando el motor lleve unas semanas en producción. El modelo sigue declarado sólo para
+que `Base.metadata` y el autogenerate no la den por huérfana; nada del código escribe ni lee `avisos` salvo esa
+migración y sus tests.
+
+🔑 **Esta tabla era un registro, no una cola.** No hay filas `pendiente`: lo que
 falta mandar se **deduce de las reservas** en cada barrida, y acá se anota
 únicamente lo que ya se intentó. El porqué está en `servicios/avisos.py` y en
 DECISIONS.md ADR-015; en dos líneas: una cola hay que llenarla desde cada camino
@@ -30,12 +37,12 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Auditable, Base
-from app.models.enums import CanalAviso, EstadoAviso, ModoWhatsapp, TipoAviso
+from app.models.enums import CanalAviso, EstadoAviso, TipoAviso
 from app.models.reservas import Reserva
 
 
 class Aviso(Base, Auditable):
-    """Un intento de avisarle algo al cliente de una reserva."""
+    """[LEGADO, ADR-030] Un intento de avisarle algo al cliente de una reserva. Hoy lo guarda `avisos_envios`."""
 
     __tablename__ = "avisos"
 
@@ -113,26 +120,24 @@ class Aviso(Base, Auditable):
 
 
 class ConfigAvisos(Base, Auditable):
-    """Qué avisos salen y por dónde. **Una sola fila por instancia** (`id = 1`).
+    """Qué tipos de aviso salen. **Una sola fila por instancia** (`id = 1`).
 
     🔑 **No es el interruptor general.** Ese sigue siendo el cron (ADR-015): sin
     `scripts/enviar_avisos.py` en el crontab no sale nada, con esta fila o sin ella. Acá se
-    decide *qué* sale una vez que el cron corre —qué tipos de aviso y si el canal de WhatsApp
-    está prendido—, que es otra pregunta y no un segundo interruptor para lo mismo.
+    decide *qué* sale una vez que el cron corre —qué tipos de aviso—. **Por dónde sale** (mail, y
+    WhatsApp apagado, en registro o por Evolution) es del motor (ADR-030).
 
     **Sin fila equivale a los defaults** (`servicios/avisos.configuracion`): todos los tipos
-    prendidos y WhatsApp apagado. Una instancia que nunca abrió la pantalla se comporta
-    exactamente como antes de que existiera.
+    prendidos. Una instancia que nunca abrió la pantalla se comporta exactamente como antes de
+    que existiera.
     """
 
     __tablename__ = "config_avisos"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
-    whatsapp: Mapped[ModoWhatsapp] = mapped_column(
-        Enum(ModoWhatsapp, name="modo_whatsapp", values_callable=lambda e: [m.value for m in e]),
-        nullable=False,
-        default=ModoWhatsapp.APAGADO,
-    )
+    # 🔴 No hay `whatsapp` (el modo del canal): desde el ADR-030 lo guarda el motor en `config.json`
+    # (`avisos_whatsapp_modo`) y acá habría dos fuentes de verdad. La columna `config_avisos.whatsapp` sigue en la base,
+    # ahora **nullable** y sin leer (migración `0018`): conserva el valor viejo por si hay que volver atrás.
     avisar_confirmacion: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     avisar_recordatorio: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     avisar_cancelacion: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
