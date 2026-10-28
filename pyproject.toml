@@ -28,7 +28,8 @@ dependencies = [
     # v0.52.0 -> v0.53.0 (2026-10-20): la marca Secure de la cookie de sesion es configurable (LIBRAAUTH_COOKIE_SECURE, ADR-026); sin la variable no cambia nada. Sin migracion.
     # v0.53.0 -> v0.54.0 (2026-10-21): en un nodo de LibraEdge los usuarios son los del central (ADR-027); fuera de un nodo no cambia nada. Sin migracion.
     # v0.54.0 -> v0.55.0 (2026-10-21): en un nodo de LibraEdge no se pide captcha y la IP del bloqueo es el par directo (ADR-028); fuera de un nodo no cambia nada. Sin migracion.
-    "libraauth[migrations] @ git+https://github.com/marianocappucci/libraauth.git@v0.55.0",
+    # v0.55.0 -> v0.56.0 (2026-10-28): `verificar_captcha` publica para rutas propias del producto (ADR-029). Sin migracion.
+    "libraauth[migrations] @ git+https://github.com/marianocappucci/libraauth.git@v0.56.0",
     # Entra en F1 sólo por `respaldo`: una instancia sin backup no se puede
     # poner en produccion. Su alcance crece en F2 (`mp_api`, `pdf_generator`)
     # y F3 (ARCA) — ver ARCHITECTURE.md.
