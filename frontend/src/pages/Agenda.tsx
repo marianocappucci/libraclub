@@ -15,6 +15,7 @@ import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 import { ICONOS } from 'libra-ui/iconos-identidad'
 import { EtiquetasDeReservaDelNodo } from 'libra-ui/EtiquetasDeReserva'
 import { TONOS_ESTADO, type TonoEstado } from 'libra-ui/badge-estado'
+import { textoCortoDeSena } from '@/lib/sena'
 import { ETIQUETA_EN_CONFLICTO, ETIQUETA_SIN_SUBIR, esReservaProvisoria, estaEnConflicto } from 'libra-ui/reservas-del-nodo'
 
 /** Los colores por estado. Un solo lugar, para que la leyenda y la grilla no
@@ -381,6 +382,7 @@ function Casillero({ turno, onElegir }: { turno: Turno; onElegir: () => void }) 
         palabraDelEstado,
         sinSubir && ETIQUETA_SIN_SUBIR.toLowerCase(),
         enConflicto && ETIQUETA_EN_CONFLICTO.toLowerCase(),
+        textoCortoDeSena(turno.estado, turno.vence_at),
       ].filter(Boolean).join(', ')}
       className={`w-full rounded-md border px-2 py-1 text-left text-xs hover:brightness-95 ${color}`}
     >
@@ -392,6 +394,12 @@ function Casillero({ turno, onElegir }: { turno: Turno; onElegir: () => void }) 
         estado={turno.estado}
         className="mt-0.5 flex flex-wrap items-center gap-1"
       />
+      {/* Hasta cuándo se retiene un turno que espera la seña (24 h, ADR-029): el mostrador lo ve sin abrir la reserva. */}
+      {textoCortoDeSena(turno.estado, turno.vence_at) && (
+        <div className="mt-0.5 truncate text-[10px] font-medium">
+          {textoCortoDeSena(turno.estado, turno.vence_at)}
+        </div>
+      )}
       {/* 🔴 **El punto Y la palabra, las dos cosas.** Es la misma decisión que
           los movimientos anulados del 2026-08-28: sólo el color se pierde en
           una impresión en blanco y negro y no lo lee un lector de pantalla;

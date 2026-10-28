@@ -12,6 +12,7 @@ import type {
 import { useAuth } from '@/context/AuthContext'
 import { fecha, hora, pesos } from '@/lib/fechas'
 import { abrirTicket } from '@/lib/tickets'
+import { textoDelPlazoDeSena } from '@/lib/sena'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SelectBuscable } from '@/components/select-buscable'
@@ -181,6 +182,19 @@ export function DetalleDeReserva({
               <EtiquetasDeReservaDelNodo id={turno.reserva_id} estado={estado} />
             </div>
           </div>
+
+          {/* 🔑 **Hasta cuándo tiene para pagar la seña.** Una reserva tomada por teléfono o en el mostrador queda
+              `pendiente_pago` y vence a las 24 horas (libraclub ADR-029): el mostrador lo tiene que ver acá, sin
+              hacer la cuenta. Es el dato del backend (`vence_at`) tal cual; las anteriores al plazo no lo tienen. */}
+          {textoDelPlazoDeSena(estado, turno.vence_at) && (
+            <p
+              role="status"
+              data-testid="plazo-de-sena"
+              className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 sm:col-span-2 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100"
+            >
+              {textoDelPlazoDeSena(estado, turno.vence_at)}
+            </p>
+          )}
 
           {/* 🔴 **`columns-2` y no dos envoltorios fijos, y esa es la
               diferencia que importa.** Con columnas fijas, la sección que no

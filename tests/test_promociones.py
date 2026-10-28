@@ -20,7 +20,7 @@ from app.config import Config
 from app.main import crear_app
 from app.models.enums import AlcanceDia, EstadoReserva
 from app.models.maestros import Feriado, FranjaDeAtencion
-from app.models.reservas import EstadoPago, PagoDeReserva, Reserva
+from app.models.reservas import EstadoPago, PagoDeReserva, Reserva, Serie
 from app.models.tarifas import Promocion, Tarifa
 from app.servicios import disponibilidad, portal, tarifario
 from app.servicios import reservas as servicio_reservas
@@ -227,6 +227,98 @@ def test_la_reserva_congela_el_precio_con_promocion(
 
     assert reserva.precio == Decimal("8000.00")
     assert reserva.sena == Decimal("4000.00")
+
+
+# ── Los turnos fijos no llevan promoción (decisión del humano, 2026-10-28) ─
+
+
+def test_cotizar_sin_promocion_da_el_precio_de_lista_con_el_mismo_calculo(
+    sesion, cancha, tarifa_base, con_promo
+):
+    """El parámetro apaga sólo el paso de la promoción: la tarifa, el feriado y la seña salen igual."""
+    con_promo()
+    cuando = _a_las(MARTES, 15)
+
+    con = tarifario.cotizar(sesion, cancha, cuando)
+    sin = tarifario.cotizar(sesion, cancha, cuando, con_promocion=False)
+
+    assert con.precio == Decimal("8000.00") and con.promocion is not None
+    assert sin.promocion is None
+    assert sin.precio == sin.precio_lista == con.precio_lista == Decimal("10000.00")
+    assert sin.tarifa.id == con.tarifa.id
+    assert sin.sena == Decimal("5000.00"), "la seña sale del precio de lista"
+    assert tarifario.precio_y_sena(sesion, cancha, cuando, con_promocion=False) == (
+        Decimal("10000.00"), Decimal("5000.00"),
+    )
+
+
+def test_una_serie_cobra_el_precio_de_lista_aunque_haya_hora_valle(
+    sesion, cancha, cliente, tarifa_base, con_promo
+):
+    """🔴 Las ocurrencias de un turno fijo se materializan sin promoción; el mostrador, a la misma hora, sí la lleva."""
+    con_promo()  # 20% de 14 a 17
+    serie = Serie(
+        cancha_id=cancha.id, cliente_id=cliente.id, dia_semana=1, hora=time(15, 0), duracion_min=60,
+        desde=MARTES, hasta=MARTES + timedelta(days=14),
+    )
+    sesion.add(serie)
+    sesion.commit()
+
+    creadas, salteadas = servicio_reservas.materializar_serie(sesion, serie)
+    sesion.commit()
+    suelta = servicio_reservas.crear(
+        sesion, cancha_id=cancha.id, cliente_id=cliente.id,
+        comienza_at=_a_las(MARTES + timedelta(days=1), 15),
+    )
+
+    assert not salteadas and len(creadas) == 3
+    assert [(r.precio, r.sena) for r in creadas] == [(Decimal("10000.00"), Decimal("5000.00"))] * 3
+    assert all(r.origen.value == "serie" for r in creadas)
+    assert (suelta.precio, suelta.sena) == (Decimal("8000.00"), Decimal("4000.00"))
+
+
+def test_extender_una_serie_tampoco_lleva_promocion(sesion, cancha, cliente, tarifa_base, con_promo):
+    """Extender vuelve a pasar por `materializar_serie`: la regla vale para las ocurrencias de cualquier tanda."""
+    con_promo()
+    serie = Serie(
+        cancha_id=cancha.id, cliente_id=cliente.id, dia_semana=1, hora=time(15, 0), duracion_min=60,
+        desde=MARTES, hasta=None,
+    )
+    sesion.add(serie)
+    sesion.commit()
+
+    servicio_reservas.materializar_serie(sesion, serie, hasta=MARTES + timedelta(days=7))
+    nuevas, _ = servicio_reservas.materializar_serie(sesion, serie, hasta=MARTES + timedelta(days=21))
+
+    assert nuevas and all(r.precio == Decimal("10000.00") for r in nuevas)
+
+
+def test_la_api_de_series_materializa_a_precio_de_lista(
+    admin, sesion, cancha, cliente, tarifa_base, con_promo, abierto
+):
+    con_promo()
+    r = admin.post("/api/reservas/series", json={
+        "cancha_id": cancha.id, "cliente_id": cliente.id, "dia_semana": 1, "hora": "15:00:00",
+        "duracion_min": 60, "desde": MARTES.isoformat(), "hasta": (MARTES + timedelta(days=7)).isoformat(),
+    })
+
+    assert r.status_code == 201, r.text
+    precios = {x.precio for x in sesion.query(Reserva).filter(Reserva.serie_id.is_not(None))}
+    assert precios == {Decimal("10000.00")}
+
+
+def test_el_portal_sigue_reservando_con_la_promocion(sesion, cancha, tarifa_base, con_promo, abierto):
+    """El control de lo anterior: sólo las series pierden la promoción; el jugador del portal paga lo que ve."""
+    con_promo(hora_desde=time(0, 0), hora_hasta=time(12, 0))
+    cuenta = portal.registrar(
+        sesion, email="jugador@ejemplo.com", password="una-clave-larga", nombre="Juan Jugador"
+    )
+    cuando = datetime.combine(_dentro_de(5), time(9, 0), tzinfo=TZ)
+
+    reserva, monto = portal.reservar(sesion, cuenta=cuenta, cancha_id=cancha.id, comienza_at=cuando)
+
+    assert monto == Decimal("8000.00") and reserva.precio == Decimal("8000.00")
+    assert portal.turnos_libres(sesion, cancha, _dentro_de(6))[0]["promocion"] is not None
 
 
 def test_un_precio_manual_no_lleva_promocion(sesion, cancha, cliente, tarifa_base, con_promo):

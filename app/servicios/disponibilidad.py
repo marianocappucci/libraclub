@@ -36,6 +36,10 @@ class Turno:
     estado: EstadoReserva | None = None
     cliente: str | None = None
     motivo: str | None = None
+    #: Hasta cuándo se retiene el turno esperando el pago: la provisoria del portal o la seña de la
+    #: `pendiente_pago` del mostrador (24 h). `None` si no vence (o la `pendiente_pago` es anterior
+    #: al plazo). Es lo que la agenda y el detalle le muestran al mostrador.
+    vence_at: datetime | None = None
     #: Si este turno ya no debe nada. Lo estampa `marcar_cobrados`, no la
     #: grilla: el dato vive en la base de LibraCore y averiguarlo por casillero
     #: sería una conexión por celda.
@@ -158,6 +162,7 @@ def _ocupado(reserva: Reserva, comienza_at: datetime, termina_at: datetime) -> T
         estado=reserva.estado,
         cliente=reserva.cliente.nombre if reserva.cliente else None,
         motivo=reserva.motivo,
+        vence_at=reserva.vence_at,
     )
 
 

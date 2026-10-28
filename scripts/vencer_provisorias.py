@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 """Libera los turnos que nadie pagó. Lo corre el cron cada pocos minutos.
 
+Son dos: las provisorias del portal (15 minutos) y las `pendiente_pago` del mostrador cuya seña
+no llegó en 24 horas (ADR-029). Las dos por `servicio_reservas.vencer_provisorias`.
+
 🔴 **Sin esto el portal público no funciona.** Una reserva del portal se retiene
 provisoria durante `VENCIMIENTO_PROVISORIA` y se libera **sólo si alguien la
 vence**: sin este barrido, el turno que un visitante empezó a reservar y
@@ -39,7 +42,7 @@ def main() -> int:
     # mira ahí es "esto corrió y cuándo". Un script silencioso es
     # indistinguible de uno que no está en el crontab.
     print(
-        f"[{ahora():%d-%m-%Y %H:%M:%S}] provisorias vencidas: {reservas} · "
+        f"[{ahora():%d-%m-%Y %H:%M:%S}] reservas vencidas: {reservas} · "
         f"pagos marcados: {pagos}"
     )
     return 0

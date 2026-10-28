@@ -144,6 +144,9 @@ class TurnoSalida(BaseModel):
     estado: EstadoReserva | None = None
     cliente: str | None = None
     motivo: str | None = None
+    #: Hasta cuándo se retiene el turno esperando el pago (la seña de una reserva `pendiente_pago`
+    #: vence a las 24 h, ADR-029). `null` si no vence.
+    vence_at: datetime | None = None
     #: Si el turno ya no debe nada —alquiler más buffet—. Lo usa la agenda para
     #: dibujarlo distinto: el operador quiere ver de un vistazo qué le queda por
     #: cobrar sin abrir turno por turno.

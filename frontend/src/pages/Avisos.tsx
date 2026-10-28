@@ -46,8 +46,8 @@ const TIPOS: { clave: keyof Omit<ConfigAvisos, 'whatsapp'>; titulo: string; deta
     clave: 'sena_por_vencer',
     titulo: 'Seña por vencer',
     detalle:
-      'Unos minutos antes de que se libere un turno retenido mientras se paga: '
-      + 'le avisa al jugador que todavía llega.',
+      'Antes de que se libere un turno que espera la seña: unos minutos antes si se paga desde '
+      + 'el portal, y tres horas antes si se reservó por teléfono o en el local (tiene 24 horas).',
   },
 ]
 

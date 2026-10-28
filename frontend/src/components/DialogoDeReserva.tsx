@@ -246,6 +246,13 @@ export function DialogoDeReserva({
               </select>
             </label>
           </div>
+          {/* La seña tiene plazo (libraclub ADR-029): el mostrador lo sabe antes de cargar la reserva, no cuando se libera sola. */}
+          {estado === 'pendiente_pago' && (
+            <p className="text-sm text-muted-foreground" data-testid="aviso-plazo-de-sena">
+              La seña vence a las 24 horas de tomada la reserva (como mucho, 2 horas antes del
+              turno). Si no se paga a tiempo, el turno se libera solo.
+            </p>
+          )}
 
           <label className="block space-y-1">
             <span className="text-sm font-medium">Observaciones</span>

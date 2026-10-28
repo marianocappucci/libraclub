@@ -36,6 +36,7 @@ from app.models.maestros import Cancha
 from app.models.reservas import Reserva
 from app.servicios import cancelacion, devoluciones, reservas_nodo
 from app.servicios import reservas as servicio
+from app.tiempo import ahora
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +108,13 @@ def mover(
     reserva.comienza_at = nuevo_comienzo
     reserva.termina_at = nuevo_fin
     reserva.estado = reserva.estado_previo or EstadoReserva.CONFIRMADA
+    # Si vuelve a `pendiente_pago`, el plazo de la seña empieza ahora y sobre el horario nuevo: el conflicto lo
+    # causó el club (se vendió dos veces la cancha), y no es justo que le cuente al jugador.
+    reserva.vence_at = (
+        servicio.vencimiento_de_sena(ahora(), nuevo_comienzo)
+        if reserva.estado is EstadoReserva.PENDIENTE_PAGO
+        else None
+    )
     reserva.conflicto_con_id = None
     reserva.estado_previo = None
     reserva.motivo = None

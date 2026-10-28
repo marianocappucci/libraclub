@@ -134,6 +134,11 @@ export interface Turno {
   estado: string | null
   cliente: string | null
   motivo: string | null
+  /** Hasta cuándo se retiene el turno esperando el pago: la seña de una reserva `pendiente_pago`
+   *  vence a las 24 horas de tomada (nunca después de 2 horas antes del turno). `null` si no vence
+   *  —también las `pendiente_pago` anteriores a ese plazo, que quedan sin vencimiento—. El
+   *  backend siempre lo manda; es opcional para no obligar a cada literal de un test a traerlo. */
+  vence_at?: string | null
   /** Si el turno ya no debe nada —alquiler más buffet—. Lo calcula el backend
    *  contra la caja; la grilla sólo lo dibuja. */
   cobrado: boolean

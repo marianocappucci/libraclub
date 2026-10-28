@@ -352,3 +352,49 @@ describe('pagado, señado y sin cobrar', () => {
     expect(within(leyenda).getByText('Libre')).toBeInTheDocument()
   })
 })
+
+
+describe('la seña pendiente de una reserva del mostrador', () => {
+  /* Pedido del humano el 2026-10-28 (libraclub ADR-029): la reserva tomada por teléfono o en el mostrador tiene 24 horas para
+   * pagar la seña, y el mostrador tiene que ver en la agenda hasta cuándo. El plazo lo calcula el backend (`vence_at`). */
+  const turno = (id: number, estado: string, cliente: string, venceAt: string | null, hora: string) => ({
+    comienza_at: `2026-08-31T${hora}:00-03:00`, termina_at: `2026-08-31T${hora}:00-03:00`,
+    libre: false, precio: '14000.00', reserva_id: id, estado, cliente, motivo: null, cobrado: false, vence_at: venceAt,
+  })
+  const CON_SENA = {
+    desde: '2026-08-31',
+    canchas: {
+      '1': {
+        '2026-08-31': [
+          turno(1, 'pendiente_pago', 'Con Plazo', '2026-09-01T10:00:00-03:00', '18'),
+          turno(2, 'pendiente_pago', 'De Antes', null, '19'),
+          turno(3, 'confirmada', 'Ya Confirmada', null, '20'),
+        ],
+      },
+    },
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      const u = String(url)
+      if (u.includes('/api/canchas')) return Promise.resolve(json(CANCHAS))
+      if (u.includes('/api/disponibilidad/semana')) return Promise.resolve(json(CON_SENA))
+      return Promise.resolve(json(null))
+    }))
+  })
+
+  it('🔑 el casillero de una pendiente de pago dice hasta cuándo se retiene', async () => {
+    render(<Agenda />)
+
+    const casillero = (await screen.findByText('Con Plazo')).closest('button')!
+    expect(casillero).toHaveTextContent('seña hasta 01-09 10:00')
+    expect(casillero.getAttribute('aria-label')).toMatch(/seña hasta 01-09 10:00/)
+  })
+
+  it('una pendiente de pago anterior al plazo dice que no vence, y una confirmada no dice nada de la seña', async () => {
+    render(<Agenda />)
+
+    expect((await screen.findByText('De Antes')).closest('button')!).toHaveTextContent('sin vencimiento')
+    expect(screen.getByText('Ya Confirmada').closest('button')!).not.toHaveTextContent(/seña|vencimiento/)
+  })
+})
