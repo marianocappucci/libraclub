@@ -15,7 +15,9 @@ import { createLayout } from 'libra-ui/Layout'
 import { ICONOS } from 'libra-ui/iconos-identidad'
 import { TITULO_COLA } from 'libra-ui/cola-del-nodo'
 import { TEXTO_CARTEL_SIN_CONEXION_CON_COLA, useConexionDelNodo } from 'libra-ui/nodo-offline'
-import { CalendarClock, CupSoda, GitCompareArrows, LayoutGrid, Repeat, Trophy, Undo2 } from 'lucide-react'
+import {
+  BadgePercent, BellRing, CalendarClock, CupSoda, GitCompareArrows, LayoutGrid, Repeat, Trophy, Undo2,
+} from 'lucide-react'
 
 import { useAuth } from '@/context/AuthContext'
 import { useSucursal } from '@/context/SucursalContext'
@@ -127,6 +129,10 @@ const Cascaron = createLayout<Usuario>({
         },
         { to: '/canchas', label: 'Canchas', icon: LayoutGrid },
         { to: '/tarifas', label: 'Tarifas', icon: ICONOS.listasDePrecio },
+        // Junto a Tarifas: la promoción es un descuento sobre la tarifa (ADR-029) y se carga en la misma sesión. Las ve el mostrador
+        // (para explicar un precio rebajado); el alta es de admin y la pantalla esconde los botones por su cuenta.
+        // `BadgePercent` y no el ícono de las listas de precio del catálogo: dos conceptos no comparten un dibujo (ADR-035).
+        { to: '/promociones', label: 'Promociones', icon: BadgePercent },
         // 🔑 Los mostradores son configuración, como las canchas y las tarifas:
         // se dan de alta al abrir el complejo y no se tocan más. Lo que se toca
         // todos los días es el turno, que está en Caja.
@@ -202,6 +208,9 @@ const Cascaron = createLayout<Usuario>({
         // admin. Es la excepcion al criterio de la linea de arriba, y por
         // eso va sin adminOnly.
         { to: '/devoluciones', label: 'Devoluciones', icon: Undo2 },
+        // Qué se le avisa al cliente y qué se le avisó (ADR-015, ADR-029). Sin `adminOnly`: el encargado mira el registro para
+        // contestar «¿le llegó?», y la configuración la deja de sólo lectura (el `PUT` es de admin).
+        { to: '/avisos', label: 'Avisos', icon: BellRing },
         { to: '/usuarios', label: 'Usuarios', icon: ICONOS.usuarios, adminOnly: true },
         // Junto a Usuarios y no en Configuración: se mira para responder
         // "quién hizo esto", que es una pregunta sobre la gente y no sobre

@@ -14,10 +14,16 @@ import { sumarDiasISO } from 'libra-ui/fechas'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
 import { ICONOS } from 'libra-ui/iconos-identidad'
 import { EtiquetasDeReservaDelNodo } from 'libra-ui/EtiquetasDeReserva'
+import { TONOS_ESTADO, type TonoEstado } from 'libra-ui/badge-estado'
+import { textoCortoDeSena } from '@/lib/sena'
 import { ETIQUETA_EN_CONFLICTO, ETIQUETA_SIN_SUBIR, esReservaProvisoria, estaEnConflicto } from 'libra-ui/reservas-del-nodo'
 
 /** Los colores por estado. Un solo lugar, para que la leyenda y la grilla no
  *  puedan decir cosas distintas.
+ *
+ *  ⚠️ **Desde el addendum de ADR-028 sólo pintan lo que no tiene punto de pago**: un
+ *  bloqueo, una franja sin tarifa o una instancia sin caja. Un turno con total se
+ *  pinta por lo cobrado (`TONO_DEL_COBRO`, más abajo).
  *
  *  🔑 **Estos NO se migran a tokens del tema, y es a propósito.** Es una paleta
  *  de dominio —ámbar lo que falta cerrar, esmeralda lo confirmado, gris lo que
@@ -39,19 +45,66 @@ const COLOR: Record<string, string> = {
   bloqueo: 'bg-slate-300 text-slate-800 border-slate-400',
 }
 
-/** El turno que ya no debe nada. **Pisa al color del estado, no se suma a él.**
+/** En qué punto de pago está un turno. El backend lo calcula contra la caja
+ *  (`cobro` en cada casillero); acá sólo se dibuja. */
+type Cobro = 'cobrado' | 'senado' | 'pendiente'
+
+/** Cada punto de pago, con el tono del kit (`TONOS_ESTADO` de `libra-ui/badge-estado`).
  *
- *  🔴 Se elige la cadena entera y no se le agrega una clase al color del estado:
- *  el `className` de acá abajo es un template string sin `cn()`, así que dos
+ *  🔑 **Los tonos son los de la familia y no una paleta de este producto.** Ya
+ *  traen el color del texto, del borde y del fondo suave en claro y en oscuro, y
+ *  su contraste está medido (el `atencion` usa amber-800 por eso mismo: ver la
+ *  nota del kit). La grilla no inventa una cuarta forma de decir «ok», «en
+ *  curso» y «atención».
+ *
+ *  - `cobrado` → `ok` (verde): no debe nada.
+ *  - `senado` → `curso` (azul): entró algo y falta el resto.
+ *  - `pendiente` → `atencion` (ámbar): no entró nada.
+ *
+ *  🔴 Se elige **la cadena entera** y no se le agrega una clase al color del
+ *  estado: el `className` de abajo es un template string sin `cn()`, así que dos
  *  `bg-*` en la misma lista no se resuelven por orden de escritura sino por el
  *  orden en que Tailwind los emitió en la hoja. Con una cadena por caso no hay
- *  nada que competir.
- *
- *  El fondo es traslúcido a propósito —`/25` sobre el emerald fuerte— para que
- *  el turno cobrado se lea como cerrado y no compita con `confirmada`, que es
- *  emerald sólido y claro. Lo pidió así el humano: *"otro color, 'cobrado' y un
- *  fondo traslúcido"*. */
-const COBRADO = 'bg-emerald-500/25 text-emerald-950 border-emerald-600'
+ *  nada que competir. */
+const TONO_DEL_COBRO: Record<Cobro, TonoEstado> = {
+  cobrado: 'ok',
+  senado: 'curso',
+  pendiente: 'atencion',
+}
+
+/** La palabra de cada punto de pago. */
+const PALABRA_DEL_COBRO: Record<Cobro, string> = {
+  cobrado: 'cobrado',
+  senado: 'señado',
+  pendiente: 'sin cobrar',
+}
+
+/** Lo que falta cobrar, escrito para el casillero: vacío si ya no falta nada o no se sabe. */
+function faltaDelCobro(cobro: Cobro, saldo: string | number | null | undefined): string {
+  if (cobro === 'cobrado' || saldo === null || saldo === undefined) return ''
+  const monto = pesos(String(saldo))
+  // Con seña, lo que falta; sin nada, lo que se debe.
+  return cobro === 'senado' ? `falta ${monto}` : monto
+}
+
+/** El rótulo entero, para el nombre accesible: «señado · falta $ 6.000,00». */
+function rotuloDelCobro(cobro: Cobro, saldo: string | number | null | undefined): string {
+  return [PALABRA_DEL_COBRO[cobro], faltaDelCobro(cobro, saldo)].filter(Boolean).join(' · ')
+}
+
+/** El punto de pago de un casillero. Un backend anterior sólo mandaba `cobrado`. */
+function cobroDe(turno: Turno): Cobro | null {
+  if (turno.cobro) return turno.cobro
+  return turno.cobrado ? 'cobrado' : null
+}
+
+/** El estado de la reserva, cuando dice algo que el color de cobro no dice. Una
+ *  confirmada es lo normal y no lleva palabra. */
+const PALABRA_DEL_ESTADO: Record<string, string> = {
+  jugada: 'jugada',
+  provisoria: 'provisoria',
+  pendiente_pago: 'espera la seña',
+}
 
 interface Seleccion {
   cancha: Cancha
@@ -204,6 +257,8 @@ export function Agenda() {
       )}
       </div>
 
+      <LeyendaDeCobro />
+
       <AvisoDeError mensaje={error} />
 
       {/* Las reservas que se dieron en el club sin conexión y chocaron (ADR-022). No ocupan la cancha, así que la
@@ -302,9 +357,15 @@ function Casillero({ turno, onElegir }: { turno: Turno; onElegir: () => void }) 
       </button>
     )
   }
-  const color = turno.cobrado
-    ? COBRADO
+  // Con punto de pago, el color es el del cobro: lo que el operador quiere ver de
+  // un vistazo es qué le queda por cobrar. Sin él (un bloqueo, una franja sin
+  // tarifa, una instancia sin caja) queda el color del estado de la reserva.
+  const cobro = cobroDe(turno)
+  const color = cobro
+    ? TONOS_ESTADO[TONO_DEL_COBRO[cobro]]
     : COLOR[turno.estado ?? ''] ?? 'bg-muted border-border'
+  const palabraDelEstado = cobro && turno.estado ? PALABRA_DEL_ESTADO[turno.estado] : undefined
+  const falta = cobro ? faltaDelCobro(cobro, turno.saldo) : ''
   // Lo que dice el nodo de esta reserva (libra-ui ADR-094): dada en el club sin conexión y todavía sin subir (id negativo), o en conflicto.
   const sinSubir = esReservaProvisoria(turno.reserva_id)
   const enConflicto = estaEnConflicto(turno.estado)
@@ -317,9 +378,11 @@ function Casillero({ turno, onElegir }: { turno: Turno; onElegir: () => void }) 
       // qué turno ya está cerrado tanto como el que mira la grilla.
       aria-label={[
         etiqueta,
-        turno.cobrado && 'cobrado',
+        cobro && rotuloDelCobro(cobro, turno.saldo),
+        palabraDelEstado,
         sinSubir && ETIQUETA_SIN_SUBIR.toLowerCase(),
         enConflicto && ETIQUETA_EN_CONFLICTO.toLowerCase(),
+        textoCortoDeSena(turno.estado, turno.vence_at),
       ].filter(Boolean).join(', ')}
       className={`w-full rounded-md border px-2 py-1 text-left text-xs hover:brightness-95 ${color}`}
     >
@@ -331,17 +394,73 @@ function Casillero({ turno, onElegir }: { turno: Turno; onElegir: () => void }) 
         estado={turno.estado}
         className="mt-0.5 flex flex-wrap items-center gap-1"
       />
+      {/* Hasta cuándo se retiene un turno que espera la seña (24 h, ADR-029): el mostrador lo ve sin abrir la reserva. */}
+      {textoCortoDeSena(turno.estado, turno.vence_at) && (
+        <div className="mt-0.5 truncate text-[10px] font-medium">
+          {textoCortoDeSena(turno.estado, turno.vence_at)}
+        </div>
+      )}
       {/* 🔴 **El punto Y la palabra, las dos cosas.** Es la misma decisión que
           los movimientos anulados del 2026-08-28: sólo el color se pierde en
           una impresión en blanco y negro y no lo lee un lector de pantalla;
-          sólo la palabra se pierde entre los casilleros de una semana. */}
-      {turno.cobrado && (
-        <div className="mt-0.5 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide">
-          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-emerald-700" />
-          cobrado
-        </div>
+          sólo la palabra se pierde entre los casilleros de una semana.
+
+          Dos renglones y no uno: el casillero mide 160 px y «señado · falta
+          $ 5.000,00» no entra sin cortarse, que es justo el dato que se mira. */}
+      {cobro && (
+        <>
+          <div className="mt-0.5 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide">
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-current" />
+            <span className="truncate">{PALABRA_DEL_COBRO[cobro]}</span>
+            {/* El estado va donde haya lugar: con un monto debajo, al lado del
+                monto; sin él (cobrado), al lado de la palabra. */}
+            {palabraDelEstado && !falta && (
+              <span className="ml-auto truncate font-normal opacity-80">{palabraDelEstado}</span>
+            )}
+          </div>
+          {falta && (
+            <div className="flex items-baseline gap-1 text-[11px]">
+              <span className="tabular-nums">{falta}</span>
+              {palabraDelEstado && (
+                <span className="ml-auto truncate text-[10px] font-normal uppercase tracking-wide opacity-80">
+                  {palabraDelEstado}
+                </span>
+              )}
+            </div>
+          )}
+        </>
       )}
     </button>
   )
 }
 
+/** Qué quiere decir cada color de la grilla. Los mismos tonos que los casilleros:
+ *  si la leyenda y la grilla salieran de dos lugares, un día dirían cosas distintas. */
+function LeyendaDeCobro() {
+  const items: { cobro: Cobro; texto: string }[] = [
+    { cobro: 'cobrado', texto: 'Cobrado' },
+    { cobro: 'senado', texto: 'Señado, falta el resto' },
+    { cobro: 'pendiente', texto: 'Sin cobrar' },
+  ]
+  return (
+    <ul aria-label="Leyenda de la agenda" className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
+      {items.map((i) => (
+        <li key={i.cobro} className="flex items-center gap-1.5">
+          <span
+            aria-hidden
+            className={`inline-block size-3.5 rounded-sm border ${TONOS_ESTADO[TONO_DEL_COBRO[i.cobro]]}`}
+          />
+          {i.texto}
+        </li>
+      ))}
+      <li className="flex items-center gap-1.5 text-muted-foreground">
+        <span aria-hidden className={`inline-block size-3.5 rounded-sm border ${COLOR.bloqueo}`} />
+        Bloqueo o sin precio
+      </li>
+      <li className="flex items-center gap-1.5 text-muted-foreground">
+        <span aria-hidden className="inline-block size-3.5 rounded-sm border border-dashed" />
+        Libre
+      </li>
+    </ul>
+  )
+}

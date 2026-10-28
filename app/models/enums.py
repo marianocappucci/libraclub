@@ -92,6 +92,9 @@ class TipoAviso(enum.Enum):
     CONFIRMACION = "confirmacion"
     RECORDATORIO = "recordatorio"
     CANCELACION = "cancelacion"
+    #: El turno retenido mientras se paga la seña está por liberarse (ADR-029). Es el único
+    #: aviso que no habla de un turno ya tomado sino de uno que **todavía se puede perder**.
+    SENA_POR_VENCER = "sena_por_vencer"
 
 
 class CanalAviso(enum.Enum):
@@ -116,10 +119,28 @@ class EstadoAviso(enum.Enum):
 
     ENVIADO = "enviado"
     FALLIDO = "fallido"
+    #: El mensaje se armó y quedó anotado, pero **no salió**: lo manejó un transporte simulado
+    #: (hoy, el de WhatsApp en modo «registro», ADR-029). No es `ENVIADO` a propósito: un aviso
+    #: que dice «enviado» sobre algo que nadie recibió es la mentira más cara de este registro.
+    REGISTRADO = "registrado"
     #: El cliente no tiene por dónde recibirlo, o pidió no recibir. Se anota
     #: igual: sin la fila, la barrida siguiente vuelve a evaluarlo y el operador
     #: que pregunta *"¿por qué no le llegó?"* no tiene dónde mirar.
     OMITIDO = "omitido"
+
+
+class ModoWhatsapp(enum.Enum):
+    """Qué hace el canal de WhatsApp en esta instancia (ADR-029).
+
+    Hoy no hay proveedor conectado —ni Evolution ni la API de Meta—, así que el único modo
+    «encendido» es el de prueba. Cuando haya proveedor se suma un valor (`ALTER TYPE ... ADD
+    VALUE`) y el modo `REGISTRO` queda para probar mensajes sin mandarlos.
+    """
+
+    #: No se arma ni se anota nada por WhatsApp. Es el default: encender un canal es una decisión.
+    APAGADO = "apagado"
+    #: Se arma el mensaje y se anota en `avisos` como `registrado`. No sale nada.
+    REGISTRO = "registro"
 
 
 class AlcanceDia(enum.Enum):

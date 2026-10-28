@@ -168,7 +168,10 @@ class Reserva(Base, Auditable, Anotable):
     precio: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     sena: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
 
-    #: Cuándo caduca una `provisoria`. El barrido que las vence lee esto.
+    #: Cuándo caduca una `provisoria` del portal o la seña de una `pendiente_pago` del mostrador
+    #: (24 h desde que se tomó, y nunca después de 2 h antes del turno: `vencimiento_de_sena`).
+    #: El barrido que las vence lee esto. **Una `pendiente_pago` sin `vence_at` no vence**: son
+    #: las anteriores al plazo de seña, que la migración `0017` deja como estaban.
     vence_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     #: Motivo del bloqueo, o de la cancelación. Texto libre del operador.
     motivo: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -279,13 +282,14 @@ class Reserva(Base, Auditable, Anotable):
         Index("ix_reservas_cancha_comienza", "cancha_id", "comienza_at"),
         Index("ix_reservas_cliente", "cliente_id"),
         Index("ix_reservas_serie", "serie_id"),
-        # Para el barrido de vencimiento de provisorias: parcial, porque la
-        # inmensa mayoría de las filas no son provisorias y no tiene sentido
-        # indexarlas.
+        # Para el barrido de vencimiento: parcial, porque la inmensa mayoría de
+        # las filas no están esperando un pago y no tiene sentido indexarlas.
+        # Son las dos que vencen: la provisoria del portal y, desde la `0017`
+        # (ADR-029), la `pendiente_pago` del mostrador, que tiene plazo de seña.
         Index(
             "ix_reservas_vence_at",
             "vence_at",
-            postgresql_where="estado = 'provisoria'",
+            postgresql_where="estado IN ('provisoria', 'pendiente_pago')",
         ),
     )
 

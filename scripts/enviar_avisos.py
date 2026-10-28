@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Manda las confirmaciones, los recordatorios y las cancelaciones. Lo corre el cron.
+"""Manda las confirmaciones, los recordatorios, las cancelaciones y los avisos de seña por vencer. Lo corre el cron.
 
 🔴 **Este script ES el interruptor de los avisos.** No hay un `avisos_activos`
 en la config, a propósito: dos interruptores para lo mismo terminan en
@@ -37,10 +37,14 @@ from app.tiempo import ahora
 def main() -> int:
     db.inicializar()
     fabrica = db.fabrica_de_sesiones()
-    transporte = servicio.TransporteEmail(lambda: resolver_smtp_config(fabrica))
 
     with fabrica() as sesion:
-        resumen = servicio.despachar(sesion, transporte)
+        # Uno por canal. El de WhatsApp está en modo registro (ADR-029): arma el mensaje y lo
+        # anota sin mandarlo, y sólo si «Avisos» lo prendió; apagado, no hace nada.
+        transportes = servicio.construir_transportes(
+            sesion, lambda: resolver_smtp_config(fabrica)
+        )
+        resumenes = [servicio.despachar(sesion, t) for t in transportes]
         sesion.commit()
 
     # Una línea por corrida, con fecha. El cron escribe a un log y lo que se
@@ -48,7 +52,8 @@ def main() -> int:
     # indistinguible de uno que no está en el crontab. Cuando el SMTP no está
     # configurado el resumen es todo ceros, que es la respuesta correcta y
     # también hay que poder verla.
-    print(f"[{ahora():%d-%m-%Y %H:%M:%S}] avisos · {resumen}")
+    for transporte, resumen in zip(transportes, resumenes, strict=True):
+        print(f"[{ahora():%d-%m-%Y %H:%M:%S}] avisos · {transporte.canal.value} · {resumen}")
     return 0
 
 

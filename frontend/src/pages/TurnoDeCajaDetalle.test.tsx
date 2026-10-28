@@ -107,11 +107,39 @@ describe('lo que muestra', () => {
     montar()
     await screen.findByText('Recaudación por medio')
     const recaudacion = tarjeta('Recaudación por medio')
-    expect(recaudacion.getByText('Efectivo')).toBeInTheDocument()
-    expect(recaudacion.getByText('Total')).toBeInTheDocument()
+    expect(recaudacion.getByText(/Efectivo \(menos egresos\)/)).toBeInTheDocument()
+    expect(recaudacion.getByText('Total cobrado')).toBeInTheDocument()
     // El control de que el helper acota de verdad: «Cancha 1» es el concepto de
     // un movimiento y NO tiene por qué estar en esta tarjeta.
     expect(recaudacion.queryByText('Cancha 1')).toBeNull()
+  })
+
+  it('🔑 separa lo que está en el cajón de lo que no: el efectivo en uno, el resto en el otro', async () => {
+    detalle.mockResolvedValue({
+      turno: turno({ monto_inicial: 1000, monto_esperado_cierre: 5000, monto_declarado_cierre: 5000 }),
+      resumen: resumen({
+        pagos_por_medio: { efectivo: 4000, transferencia: 7000, mercadopago: 2500 },
+        total_ventas: 13500,
+      }),
+    })
+    montar()
+    await screen.findByText('Recaudación por medio')
+    const recaudacion = tarjeta('Recaudación por medio')
+
+    const cajon = within(recaudacion.getByRole('region', { name: 'En el cajón' }))
+    const fuera = within(recaudacion.getByRole('region', { name: 'Fuera del cajón' }))
+    // En el cajón: el efectivo y el esperado del arqueo (1.000 de fondo + 4.000).
+    expect(cajon.getByText(/Efectivo \(menos egresos\)/)).toBeInTheDocument()
+    expect(cajon.getByText('Esperado en el cajón')).toBeInTheDocument()
+    expect(cajon.getByText(/5\.000,00/)).toBeInTheDocument()
+    expect(cajon.queryByText('transferencia')).toBeNull()
+    // Fuera: las transferencias y Mercado Pago, con su subtotal; el efectivo NO.
+    expect(fuera.getByText('transferencia')).toBeInTheDocument()
+    expect(fuera.getByText('mercadopago')).toBeInTheDocument()
+    expect(fuera.getByText(/9\.500,00/)).toBeInTheDocument()
+    expect(fuera.queryByText(/Efectivo \(menos egresos\)/)).toBeNull()
+    // Y el total junta las dos mitades.
+    expect(recaudacion.getByText(/13\.500,00/)).toBeInTheDocument()
   })
 
   it('🔑 el resultado del cierre, con la diferencia', async () => {

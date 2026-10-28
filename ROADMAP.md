@@ -46,14 +46,20 @@ manda `scripts/enviar_avisos.py` desde el cron, y **ese cron es el interruptor**
 sucursal, devolución automática de la seña por MercadoPago cuando se cancela a
 tiempo, y la deuda anotada y reintentable cuando la devolución falla.
 
+**Aviso de seña por vencer: hecho** (2026-10-28, ADR-029) para el turno que
+retiene el portal mientras se paga. La reserva `pendiente_pago` del mostrador no
+vence hoy, así que no hay qué avisar: falta decidir el plazo de la seña.
+
 Lo que sigue abierto de esta fase, en orden:
 
 1. **El ausentismo**: `AUSENTE` existe como estado y se puede marcar, pero no se
    cuenta por cliente ni bloquea al reincidente. Es lo que ATC vende como tarjeta
    en garantía y Dónde Juego como lista negra.
-2. **WhatsApp** como segundo canal. El vocabulario ya lo contempla
-   (`CanalAviso.WHATSAPP`) y el barrido elige por transporte: falta el
-   transporte, las plantillas aprobadas y el proveedor.
+2. **WhatsApp** como segundo canal. **La costura está hecha** (2026-10-28,
+   ADR-029): `TransporteWhatsAppRegistro` arma y anota los mensajes sin mandarlos
+   y la pantalla «Avisos» lo prende. **Falta el proveedor** (Evolution o la API de
+   Meta, que pide plantillas aprobadas), y va en el motor: ver la propuesta de
+   ADR-029.
 3. **El aviso de cancelación no dice qué pasó con la seña.** El portal sí se lo
    dice al jugador en el momento de cancelar —que es cuando más le importa— pero
    el mail que sale después no lo repite. Para hacerlo, `redactar` tendría que
@@ -98,6 +104,10 @@ partir de `horas_abiertas` y `horas_reservadas`, no de los porcentajes).
 
 Socios y abonos, clases y escuelas, ~~torneos~~, eventos, analítica de
 rentabilidad por cancha y por franja.
+
+**Hora valle y promociones: hecho** (2026-10-28, ADR-029). Un porcentaje sobre la
+tarifa por día, franja y vigencia, que el portal muestra con el precio de lista
+tachado. Falta medir cuánto se rebaja por promoción (hoy no se guarda cuál aplicó).
 
 **Torneos: hecho** (2026-08-22). Eliminación directa, todos contra todos y zonas
 con playoff; sorteo reproducible por semilla, fixture con byes, cancha y horario

@@ -77,12 +77,12 @@ beforeEach(() => {
 })
 
 describe('cascarón de LibraClub', () => {
-  it('arma el menú con las nueve pantallas del producto', async () => {
+  it('arma el menú con las once pantallas del producto', async () => {
     montar()
     // El contenido llega por `Outlet`: si el envoltorio de `Cascaron` se
     // rompiera, el sidebar se dibujaría igual y la pantalla quedaría vacía.
     expect(await screen.findByText('contenido de la agenda')).toBeInTheDocument()
-    for (const seccion of ['Agenda', 'Caja', 'Clientes', 'Canchas', 'Tarifas',
+    for (const seccion of ['Agenda', 'Caja', 'Clientes', 'Canchas', 'Tarifas', 'Promociones', 'Avisos',
                            'Sucursales', 'Usuarios', 'Log de actividad', 'Configuración']) {
       expect(await screen.findByRole('link', { name: seccion })).toBeInTheDocument()
     }

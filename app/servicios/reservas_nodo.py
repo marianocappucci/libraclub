@@ -492,18 +492,35 @@ def _cliente_del_central(conn, node_id: str, cliente_id: int) -> int:
     return id_central
 
 
+def _vencimiento_en_el_central(datos: dict, estado: EstadoReserva) -> datetime | None:
+    """El `vence_at` de la reserva que sube de un nodo: **lo decide el central**, el nodo no lo manda.
+
+    Una `pendiente_pago` tiene el mismo plazo de seña que la que se tomó en la web
+    (`reservas.vencimiento_de_sena`), contado desde que **el nodo la tomó** (`creada_at`) y no desde
+    que llegó: el jugador oyó «tenés 24 horas» en el mostrador, y que el club haya estado sin
+    internet no se las acorta ni se las alarga. Una `en_conflicto` no vence (no ocupa la cancha, y
+    cuando se resuelva `servicios/conflictos` le da un plazo nuevo). Una confirmada tampoco."""
+    if estado is not EstadoReserva.PENDIENTE_PAGO:
+        return None
+    from app.servicios.reservas import vencimiento_de_sena
+    from app.tiempo import ahora
+
+    return vencimiento_de_sena(datos["creada_at"] or ahora(), datos["comienza_at"])
+
+
 def _insertar(conn, datos: dict, *, cliente_id: int, estado: EstadoReserva, ganadora: int | None = None,
               estado_previo: EstadoReserva | None = None, motivo: str | None = None) -> int:
     cursor = conn.execute(
         """INSERT INTO reservas
                (cancha_id, cliente_id, estado, origen, comienza_at, termina_at, precio, sena, motivo,
-                observaciones, conflicto_con_id, estado_previo, created_at)
-           VALUES (?, ?, ?::estado_reserva, ?::origen_reserva, ?, ?, ?, ?, ?, ?, ?, ?::estado_reserva,
+                observaciones, conflicto_con_id, estado_previo, vence_at, created_at)
+           VALUES (?, ?, ?::estado_reserva, ?::origen_reserva, ?, ?, ?, ?, ?, ?, ?, ?::estado_reserva, ?,
                    COALESCE(?, now()))""",
         (
             datos["cancha_id"], cliente_id, estado.value, datos["origen"].value, datos["comienza_at"],
             datos["termina_at"], datos["precio"], datos["sena"], motivo, datos["observaciones"], ganadora,
-            estado_previo.value if estado_previo else None, datos["creada_at"],
+            estado_previo.value if estado_previo else None, _vencimiento_en_el_central(datos, estado),
+            datos["creada_at"],
         ),
     )
     # `ConnectionWrapper` agrega `RETURNING id` a todo INSERT de una tabla con `id`, y lo deja en `lastrowid`.

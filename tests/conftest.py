@@ -77,7 +77,7 @@ if _PG:
 #: test sobrevive al siguiente, y el que ahí se rompe es el guard de "esta venta
 #: ya está cobrada" — con un rojo que habla de la venta de otro test.
 TABLAS = (
-    "pagos_de_reserva, avisos, reservas, series, tarifas, feriados, "
+    "pagos_de_reserva, avisos, config_avisos, reservas, series, tarifas, promociones, feriados, "
     "canchas, clientes, sucursales"
 )
 

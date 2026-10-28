@@ -86,3 +86,13 @@ describe('cancha fija: la pantalla de resultado no se borra si el padre recarga'
     expect(screen.queryByText('Cancha fija creada')).toBeNull()
   })
 })
+
+describe('los turnos fijos no llevan promoción (libraclub ADR-029, 2026-10-28)', () => {
+  it('el formulario lo dice antes de cargar la serie', async () => {
+    render(<FormularioDeSerie abierto canchas={[CANCHA]} clientes={[JUAN]} onCerrar={vi.fn()} onCreada={vi.fn()} />)
+
+    expect(await screen.findByTestId('aviso-sin-promocion')).toHaveTextContent(
+      'Los turnos fijos pagan la tarifa de lista: no llevan promoción ni hora valle.',
+    )
+  })
+})

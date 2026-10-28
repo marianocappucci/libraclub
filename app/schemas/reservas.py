@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -143,7 +144,17 @@ class TurnoSalida(BaseModel):
     estado: EstadoReserva | None = None
     cliente: str | None = None
     motivo: str | None = None
+    #: Hasta cuándo se retiene el turno esperando el pago (la seña de una reserva `pendiente_pago`
+    #: vence a las 24 h, ADR-029). `null` si no vence.
+    vence_at: datetime | None = None
     #: Si el turno ya no debe nada —alquiler más buffet—. Lo usa la agenda para
     #: dibujarlo distinto: el operador quiere ver de un vistazo qué le queda por
     #: cobrar sin abrir turno por turno.
     cobrado: bool = False
+    #: En qué punto de pago está el turno: `cobrado`, `senado` (entró algo y
+    #: falta) o `pendiente` (no entró nada). `null` si no tiene total (un bloqueo,
+    #: una franja sin tarifa) o si es un casillero libre. `cobrado` queda por
+    #: compatibilidad: es `cobro == "cobrado"`.
+    cobro: Literal["cobrado", "senado", "pendiente"] | None = None
+    #: Lo que falta cobrar. `null` cuando `cobro` es `null`.
+    saldo: Decimal | None = None

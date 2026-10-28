@@ -6,6 +6,8 @@ La regla que ordena este módulo: **la aplicación valida para dar un mensaje
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -18,19 +20,67 @@ from sqlalchemy.orm import Session
 
 from app.models.enums import ESTADOS_QUE_OCUPAN, EstadoReserva, OrigenReserva
 from app.models.maestros import Cancha
-from app.models.reservas import Reserva, Serie
+from app.models.reservas import EstadoPago, PagoDeReserva, Reserva, Serie
+from app.servicios import caja as servicio_caja
+from app.servicios import facturacion as servicio_facturacion
 from app.servicios import horarios, reservas_nodo, tarifario
 from app.tiempo import TZ, a_local, ahora
+
+logger = logging.getLogger(__name__)
 
 #: Cuánto vive una reserva provisoria sin confirmarse. Entra en juego de verdad
 #: en F2, con el portal: es lo que impide que un carrito abandonado deje muerto
 #: el turno de las 20:00 de un viernes.
 VENCIMIENTO_PROVISORIA = timedelta(minutes=15)
 
+#: Cuánto tiene quien reservó **por teléfono o en el mostrador** (`pendiente_pago`) para pagar la
+#: seña, contado desde que se tomó el turno (decisión del humano, 2026-10-28, ADR-029).
+#:
+#: Es otra regla que la de arriba y no una versión larga de ella: la provisoria del portal es un
+#: carrito con la tarjeta en la mano (15 minutos); ésta es una promesa que se cumple con una
+#: transferencia o pasando por el local, y a eso se le da un día.
+PLAZO_DE_SENA = timedelta(hours=24)
+
+#: Con cuánta anticipación al turno tiene que estar paga la seña, como mínimo. Un turno de mañana
+#: a las 09:00 no puede seguir retenido hasta las 09:00 de hoy+24 h: el complejo lo liberaría con el
+#: partido por empezar y nadie lo podría revender. Dos horas es lo que el complejo necesita para
+#: ofrecerlo de nuevo y es la misma anticipación del segundo recordatorio (`avisos.ANTICIPACIONES`).
+MARGEN_DE_SENA_ANTES_DEL_TURNO = timedelta(hours=2)
+
+#: Lo mínimo que se le da a quien reserva sobre la hora. Si el turno es dentro de 1 hora, «dos horas
+#: antes» ya pasó: sin un piso la reserva nacería vencida y el cron la liberaría a los 5 minutos,
+#: antes de que el mostrador termine de cortar el teléfono.
+PLAZO_MINIMO_DE_SENA = timedelta(minutes=30)
+
+MOTIVO_SENA_VENCIDA = "Vencida sin seña"
+
 #: Hasta dónde se materializan las ocurrencias de una serie sin fin. Se
 #: materializa una ventana y se extiende, en vez de generar infinitas filas: una
 #: cancha fija "hasta que avise" no puede ocupar la agenda del año 2100.
 HORIZONTE_SERIE = timedelta(days=90)
+
+
+def vencimiento_de_sena(tomada_at: datetime, comienza_at: datetime) -> datetime | None:
+    """Hasta cuándo tiene el jugador para pagar la seña de un turno tomado por teléfono o en el mostrador.
+
+    🔑 **La regla, en una línea: 24 horas desde que se tomó, pero nunca más tarde que 2 horas antes
+    del turno.** Con las dos salvedades que hacen que no se rompa en los bordes:
+
+    - **Piso de 30 minutos.** Si el turno es sobre la hora, «2 horas antes» ya pasó; la reserva no
+      nace vencida: se le da media hora (y como mucho hasta el inicio del turno, que es el techo
+      absoluto: el vencimiento nunca queda después del turno).
+    - **Un turno que ya empezó no tiene plazo (`None`).** Es el mostrador cargando algo que ya pasó
+      —o que está pasando—; vencerlo sería cancelar un partido que se está jugando.
+
+    Es una función pura de las dos horas. La usan `crear` (el mostrador y el nodo) y el central
+    cuando aplica un `reserva.creada` de LibraEdge, que la calcula con la hora en que el nodo tomó
+    la reserva: el vencimiento lo decide el central y es **el mismo** lo haya tomado la web o un nodo.
+    """
+    if comienza_at <= tomada_at:
+        return None
+    vence = min(tomada_at + PLAZO_DE_SENA, comienza_at - MARGEN_DE_SENA_ANTES_DEL_TURNO)
+    vence = max(vence, tomada_at + PLAZO_MINIMO_DE_SENA)
+    return min(vence, comienza_at)
 
 
 class ReservaInvalida(ValueError):
@@ -217,8 +267,14 @@ def crear(
     precio: Decimal | None = None,
     serie_id: int | None = None,
     observaciones: str | None = None,
+    con_promocion: bool = True,
 ) -> Reserva:
     """Una reserva nueva. El precio se congela ahora, no se resuelve al leer.
+
+    `con_promocion=False` cotiza al precio de lista: es lo que piden las series (los turnos fijos no
+    llevan promoción ni hora valle). El mostrador y el portal siguen con ella.
+
+    Una `pendiente_pago` nace con su vencimiento (`vencimiento_de_sena`): la seña tiene plazo.
 
     🔑 **En un nodo de LibraEdge** (ADR-022) la reserva nace con un **id provisorio negativo** y la operación
     `reserva.creada` se encola en la misma transacción; el central le asigna el definitivo y, si chocó con otra
@@ -243,7 +299,9 @@ def crear(
     _verificar_libre(sesion, cancha_id, comienza_at, termina_at)
 
     if precio is None:
-        precio, sena = tarifario.precio_y_sena(sesion, cancha, comienza_at)
+        precio, sena = tarifario.precio_y_sena(
+            sesion, cancha, comienza_at, con_promocion=con_promocion
+        )
     else:
         # Precio a mano: no se inventa una seña sobre un número que el operador
         # eligió. Si hace falta seña sobre un precio manual, se pide explícita.
@@ -259,11 +317,7 @@ def crear(
         termina_at=termina_at,
         precio=precio,
         sena=sena,
-        vence_at=(
-            ahora() + VENCIMIENTO_PROVISORIA
-            if estado is EstadoReserva.PROVISORIA
-            else None
-        ),
+        vence_at=_vencimiento_al_crear(estado, comienza_at),
         observaciones=observaciones,
     )
     if not en_el_nodo:
@@ -274,6 +328,16 @@ def crear(
     _guardar(sesion, reserva)
     reservas_nodo.avisar_creada(conn, reserva)
     return reserva
+
+
+def _vencimiento_al_crear(estado: EstadoReserva, comienza_at: datetime) -> datetime | None:
+    """El `vence_at` con el que nace una reserva: el de la provisoria del portal, el de la seña del
+    mostrador, o ninguno (una confirmada no vence)."""
+    if estado is EstadoReserva.PROVISORIA:
+        return ahora() + VENCIMIENTO_PROVISORIA
+    if estado is EstadoReserva.PENDIENTE_PAGO:
+        return vencimiento_de_sena(ahora(), comienza_at)
+    return None
 
 
 def crear_bloqueo(
@@ -349,7 +413,10 @@ def cambiar_estado(
     reserva.estado = nuevo
     if motivo:
         reserva.motivo = motivo
-    if nuevo is not EstadoReserva.PROVISORIA:
+    if nuevo is EstadoReserva.PENDIENTE_PAGO:
+        # Una provisoria que el mostrador pasa a «pendiente de pago»: la seña tiene su plazo desde ahora.
+        reserva.vence_at = vencimiento_de_sena(ahora(), reserva.comienza_at)
+    elif nuevo is not EstadoReserva.PROVISORIA:
         reserva.vence_at = None
     # Sale de un conflicto: ya no hay contra qué chocó ni a qué volver.
     reserva.conflicto_con_id = None
@@ -363,7 +430,13 @@ def cambiar_estado(
 
 
 def vencer_provisorias(sesion: Session, momento: datetime | None = None) -> int:
-    """Cancela las provisorias que pasaron su `vence_at`. Devuelve cuántas.
+    """Libera los turnos retenidos que pasaron su `vence_at`. Devuelve cuántos.
+
+    Son **dos** cosas con el mismo final (`cancelada`, el turno vuelve a la grilla):
+
+    - las **provisorias** del portal, que nadie pagó en `VENCIMIENTO_PROVISORIA`;
+    - las **`pendiente_pago` del mostrador** (teléfono, local) cuya seña no llegó en
+      `PLAZO_DE_SENA` — `vencer_senas_del_mostrador`, que antes de soltar una mira si entró plata.
 
     Es un `UPDATE` masivo y no un bucle: son filas que ya nadie mira, y traerlas
     a Python para cancelarlas de a una sólo agrega tiempo entre el vencimiento y
@@ -378,6 +451,99 @@ def vencer_provisorias(sesion: Session, momento: datetime | None = None) -> int:
             Reserva.vence_at <= corte,
         )
         .values(estado=EstadoReserva.CANCELADA, motivo="Vencida sin confirmar", vence_at=None)
+    )
+    return int(resultado.rowcount or 0) + vencer_senas_del_mostrador(sesion, corte)
+
+
+def cobrado_en_caja(reserva_ids: Iterable[int]) -> dict[int, Decimal]:
+    """Cuánto entró en la caja por cada reserva (las que no tienen cobros no figuran).
+
+    Una instancia que no lleva caja contra LibraCore (`hay_base()` falso) no tiene dónde haber
+    cobrado nada: devuelve vacío. Si la caja existe y falla, **levanta** (ver `con_plata_adentro`).
+    """
+    ids = sorted({int(i) for i in reserva_ids})
+    if not ids or not servicio_facturacion.hay_base():
+        return {}
+    return servicio_caja.cobrado_de_reservas(ids)
+
+
+def con_plata_adentro(sesion: Session, reserva_ids: Iterable[int]) -> set[int]:
+    """De esas reservas, las que **ya tienen plata**: un pago aprobado o un cobro en la caja.
+
+    Es lo que decide que una seña vencida no se libere sola. Se mira lo **cobrado** y no que la
+    seña esté completa, a propósito: una seña a medias (entró la mitad) sigue siendo plata de
+    alguien, y cancelar la reserva obligaría a devolverla (`servicios/cancelacion`). Eso lo decide
+    una persona, no el cron.
+
+    Si la caja no se puede consultar **no se sabe**, y lo que no se sabe cuenta como que tiene plata
+    (por eso levanta): equivocarse para ese lado deja un turno retenido de más hasta la próxima
+    corrida; para el otro, libera la cancha de alguien que ya pagó.
+    """
+    ids = sorted({int(i) for i in reserva_ids})
+    if not ids:
+        return set()
+    cobrado = cobrado_en_caja(ids)
+    con_pago = set(
+        sesion.scalars(
+            select(PagoDeReserva.reserva_id).where(
+                PagoDeReserva.reserva_id.in_(ids), PagoDeReserva.estado == EstadoPago.APROBADO
+            )
+        )
+    )
+    return con_pago | {i for i, monto in cobrado.items() if monto > 0}
+
+
+def vencer_senas_del_mostrador(sesion: Session, momento: datetime | None = None) -> int:
+    """Libera las `pendiente_pago` cuya seña no llegó a tiempo. Devuelve cuántas.
+
+    🔑 **Mismo final que una provisoria vencida**: `cancelada`, `vence_at` limpio y el turno de
+    vuelta en la grilla. Lo que cambia es el motivo («Vencida sin seña») y una guarda más:
+
+    - **Una reserva con plata adentro no se libera** (`con_plata_adentro`). Pasó su plazo, pero la
+      seña entró: se le saca el vencimiento y queda `pendiente_pago` para que el mostrador la
+      confirme. Cancelarla solo sería quedarse con la plata de alguien que ya pagó.
+    - Una `pendiente_pago` **sin** `vence_at` (las anteriores al plazo de 24 h, o las que dio un
+      camino que no lo pone) no se toca nunca: no tiene plazo.
+
+    Corre sólo en el central (el cron de `scripts/vencer_provisorias.py`). Un nodo de LibraEdge no
+    libera nada: la reserva que se dio ahí sube al central, que le pone el vencimiento y la vence.
+    """
+    corte = momento or ahora()
+    vencidas = list(
+        sesion.scalars(
+            select(Reserva.id).where(
+                Reserva.estado == EstadoReserva.PENDIENTE_PAGO,
+                Reserva.vence_at.is_not(None),
+                Reserva.vence_at <= corte,
+            )
+        )
+    )
+    if not vencidas:
+        return 0
+    try:
+        pagadas = con_plata_adentro(sesion, vencidas)
+    except Exception:  # noqa: BLE001 - sin saber si entró plata no se libera nada
+        logger.exception("No se pudo consultar la caja: no se vencen las señas del mostrador")
+        return 0
+
+    if pagadas:
+        sesion.execute(
+            update(Reserva)
+            .where(Reserva.id.in_(pagadas), Reserva.estado == EstadoReserva.PENDIENTE_PAGO)
+            .values(vence_at=None)
+        )
+    liberar = [i for i in vencidas if i not in pagadas]
+    if not liberar:
+        return 0
+    resultado = sesion.execute(
+        update(Reserva)
+        .where(
+            Reserva.id.in_(liberar),
+            Reserva.estado == EstadoReserva.PENDIENTE_PAGO,
+            Reserva.vence_at.is_not(None),
+            Reserva.vence_at <= corte,
+        )
+        .values(estado=EstadoReserva.CANCELADA, motivo=MOTIVO_SENA_VENCIDA, vence_at=None)
     )
     return int(resultado.rowcount or 0)
 
@@ -456,6 +622,8 @@ def materializar_serie(
                     duracion_min=serie.duracion_min,
                     origen=OrigenReserva.SERIE,
                     serie_id=serie.id,
+                    # Los turnos fijos pagan la tarifa, sin hora valle ni promoción (2026-10-28).
+                    con_promocion=False,
                 )
             )
         except (Superpuesta, tarifario.SinTarifa, FueraDelHorario) as exc:

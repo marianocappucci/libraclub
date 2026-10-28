@@ -29,6 +29,7 @@ import { abrirTicket } from '@/lib/tickets'
 import { useSucursal } from '@/context/SucursalContext'
 import { useMediosDePago } from '@/lib/medios-pago'
 import { AvisoDeError } from '@/components/listado'
+import { DesgloseDeCaja } from '@/components/DesgloseDeCaja'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -90,6 +91,11 @@ export function CierreDiario() {
   }
 
   const bloqueado = (preview?.turnos_abiertos.length ?? 0) > 0 || (preview?.ya_cerrado ?? false)
+
+  // Lo del día, para el desglose: el neto de cada medio y el efectivo con el que arrancaron los turnos.
+  const porMedioDelDia: Record<string, number> = {}
+  for (const m of preview?.medios ?? []) porMedioDelDia[m.medio_pago] = m.neto
+  const inicialDelDia = (preview?.turnos ?? []).reduce((suma, t) => suma + t.monto_inicial, 0)
 
   return (
     <div className="space-y-4">
@@ -170,29 +176,27 @@ export function CierreDiario() {
                 </table>
               </div>
 
-              {preview.medios.length > 0 && (
-                <div className="mt-4 grid gap-1.5 text-sm">
-                  <h3 className="font-medium">Por medio de pago</h3>
-                  {preview.medios.map((m) => (
-                    <div key={m.medio_pago} className="flex justify-between">
-                      <span className="text-muted-foreground">{etiquetaDeMedio(m.medio_pago)}</span>
-                      <span>{pesos(m.neto)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {/* 🔑 **El efectivo y lo demás, separados.** El esperado, el declarado y la
+                  diferencia son del efectivo —lo único que se cuenta a mano—; lo cobrado
+                  por transferencia, tarjeta o Mercado Pago entró a la caja pero no está en
+                  el cajón. Antes los medios iban en una lista con el efectivo adentro, y el
+                  esperado no se podía reconstruir sumándolos. */}
+              <div className="mt-4 border-t pt-3">
+                <DesgloseDeCaja
+                  porMedio={porMedioDelDia}
+                  etiquetaDeMedio={etiquetaDeMedio}
+                  inicial={inicialDelDia}
+                  esperado={preview.monto_esperado_total}
+                />
+              </div>
 
               <dl className="mt-4 grid gap-1.5 border-t pt-3 text-sm">
                 <div className="flex justify-between">
-                  <dt className="text-muted-foreground">Esperado</dt>
-                  <dd>{pesos(preview.monto_esperado_total)}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-muted-foreground">Declarado</dt>
-                  <dd>{pesos(preview.monto_declarado_total)}</dd>
+                  <dt className="text-muted-foreground">Efectivo declarado</dt>
+                  <dd className="tabular-nums">{pesos(preview.monto_declarado_total)}</dd>
                 </div>
                 <div className="flex justify-between font-medium">
-                  <dt>Diferencia</dt>
+                  <dt>Diferencia del efectivo</dt>
                   <dd>
                     <DiferenciaDeArqueo
                       esperado={preview.monto_esperado_total}

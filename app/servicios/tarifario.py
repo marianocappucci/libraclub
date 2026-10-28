@@ -5,6 +5,7 @@ No importa FastAPI: se prueba llamándolo, sin levantar la aplicación.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -13,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.models.enums import AlcanceDia
 from app.models.maestros import Cancha, Feriado
-from app.models.tarifas import Tarifa
+from app.models.tarifas import Promocion, Tarifa
 from app.tiempo import a_local, dia_de_semana, hora_local
 
 
@@ -65,13 +66,25 @@ def _especificidad(tarifa: Tarifa) -> tuple[int, int, int, int]:
     )
 
 
-def candidatas(sesion: Session, cancha: Cancha, comienza_at: datetime) -> list[Tarifa]:
-    """Todas las tarifas que cubren ese turno, sin ordenar."""
+#: «Todavía no miré si es feriado». `None` ya significa «no es feriado», así que no sirve de marca.
+_SIN_MIRAR = object()
+
+
+def candidatas(
+    sesion: Session, cancha: Cancha, comienza_at: datetime, *, feriado=_SIN_MIRAR
+) -> list[Tarifa]:
+    """Todas las tarifas que cubren ese turno, sin ordenar.
+
+    `feriado` lo pasa quien ya lo averiguó (`cotizar` lo necesita también para las
+    promociones): preguntarlo dos veces por casillero es una consulta de más en cada celda de
+    la grilla de la semana.
+    """
     local = a_local(comienza_at)
     dia = local.date()
     hora = hora_local(comienza_at)
     weekday = dia_de_semana(comienza_at)
-    feriado = es_feriado(sesion, cancha.sucursal_id, comienza_at)
+    if feriado is _SIN_MIRAR:
+        feriado = es_feriado(sesion, cancha.sucursal_id, comienza_at)
 
     filas = sesion.scalars(
         select(Tarifa).where(
@@ -99,9 +112,9 @@ def candidatas(sesion: Session, cancha: Cancha, comienza_at: datetime) -> list[T
     return [tarifa for tarifa in filas if aplica(tarifa)]
 
 
-def resolver(sesion: Session, cancha: Cancha, comienza_at: datetime) -> Tarifa:
+def resolver(sesion: Session, cancha: Cancha, comienza_at: datetime, *, feriado=_SIN_MIRAR) -> Tarifa:
     """La tarifa que corresponde. Levanta `SinTarifa` si no hay ninguna."""
-    opciones = candidatas(sesion, cancha, comienza_at)
+    opciones = candidatas(sesion, cancha, comienza_at, feriado=feriado)
     if not opciones:
         raise SinTarifa(
             f"No hay tarifa cargada para {cancha.nombre} el "
@@ -110,19 +123,114 @@ def resolver(sesion: Session, cancha: Cancha, comienza_at: datetime) -> Tarifa:
     return max(opciones, key=_especificidad)
 
 
-def precio_y_sena(
-    sesion: Session, cancha: Cancha, comienza_at: datetime
-) -> tuple[Decimal, Decimal]:
-    """El precio del turno y la seña que le corresponde.
+def promociones_aplicables(
+    sesion: Session, cancha: Cancha, comienza_at: datetime, *, feriado=_SIN_MIRAR
+) -> list[Promocion]:
+    """Las promociones que cubren ese turno, sin ordenar. Misma lectura de día y hora que las tarifas."""
+    dia = a_local(comienza_at).date()
+    hora = hora_local(comienza_at)
+    weekday = dia_de_semana(comienza_at)
+    if feriado is _SIN_MIRAR:
+        feriado = es_feriado(sesion, cancha.sucursal_id, comienza_at)
 
-    La seña se redondea a dos decimales **hacia arriba en el .5**
-    (`ROUND_HALF_UP`), que es lo que espera cualquiera que haga la cuenta a mano.
-    El default de `Decimal` es `ROUND_HALF_EVEN`, que redondea 2.5 a 2 y no
-    coincide con la calculadora del encargado.
+    filas = sesion.scalars(
+        select(Promocion).where(
+            Promocion.sucursal_id == cancha.sucursal_id,
+            Promocion.activa.is_(True),
+            (Promocion.cancha_id.is_(None)) | (Promocion.cancha_id == cancha.id),
+            (Promocion.vigente_desde.is_(None)) | (Promocion.vigente_desde <= dia),
+            (Promocion.vigente_hasta.is_(None)) | (Promocion.vigente_hasta >= dia),
+            Promocion.hora_desde <= hora,
+            Promocion.hora_hasta > hora,
+        )
+    ).all()
+
+    def aplica(promo: Promocion) -> bool:
+        # 🔴 En un feriado sólo aplica la que lo pide: la hora valle existe porque hay poca
+        # demanda, y un feriado no tiene poca demanda. Sin esta guarda, «martes de 14 a 17» se
+        # regalaba el martes que cae 25 de mayo.
+        if feriado is not None and not promo.aplica_en_feriados:
+            return False
+        return promo.dias_semana is None or weekday in promo.dias_semana
+
+    return [promo for promo in filas if aplica(promo)]
+
+
+def _mejor_promocion(promociones: list[Promocion]) -> Promocion | None:
+    """La que más descuenta. **No se suman**: apilar porcentajes regala la cancha sin darse cuenta.
+
+    Empate: la de una cancha en particular antes que la de toda la sucursal, y después la más
+    nueva (el `id`, por lo mismo que en `_especificidad`: sin desempate final el precio
+    dependería del orden en que PostgreSQL devuelva las filas).
     """
-    tarifa = resolver(sesion, cancha, comienza_at)
-    precio = Decimal(tarifa.precio)
-    sena = (precio * Decimal(tarifa.sena_porcentaje) / Decimal(100)).quantize(
-        Decimal("0.01"), rounding=ROUND_HALF_UP
+    if not promociones:
+        return None
+    return max(
+        promociones,
+        key=lambda p: (p.descuento_porcentaje, 1 if p.cancha_id is not None else 0, p.id),
     )
-    return precio, sena
+
+
+@dataclass(frozen=True, slots=True)
+class Cotizacion:
+    """El precio de un turno, con de dónde sale.
+
+    `precio` es **lo que se cobra**; `precio_lista` es el de la tarifa sin promoción. Son
+    iguales cuando `promocion` es `None`.
+    """
+
+    tarifa: Tarifa
+    promocion: Promocion | None
+    precio_lista: Decimal
+    precio: Decimal
+    sena: Decimal
+
+
+def _a_centavos(valor: Decimal) -> Decimal:
+    return valor.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def cotizar(
+    sesion: Session, cancha: Cancha, comienza_at: datetime, *, con_promocion: bool = True
+) -> Cotizacion:
+    """El precio del turno: la tarifa ganadora, menos la mejor promoción si hay.
+
+    🔑 **Es el único lugar donde se calcula un precio** (ADR-029). El mostrador, las series, el
+    portal y la grilla pasan por acá —`precio_y_sena` es esto mismo con otra forma—, así que
+    una promoción cargada aplica en todos los canales sin tocar a ninguno, y el precio que el
+    portal muestra tachado es el mismo que `Reserva.precio` congela después.
+
+    La seña se saca del **precio con promoción**: quien paga menos pone menos de seña.
+
+    🔑 **`con_promocion=False` cotiza al precio de lista**, con el mismo cálculo y sin mirar las
+    promociones. Es lo que usan los **turnos fijos** (las series): quien tiene la cancha todas las
+    semanas paga la tarifa, no la hora valle ni la promoción de la semana (decisión del humano,
+    2026-10-28). No es un segundo cálculo: es éste sin el paso de la promoción, así que la tarifa,
+    el feriado y la seña salen exactamente igual.
+    """
+    feriado = es_feriado(sesion, cancha.sucursal_id, comienza_at)
+    tarifa = resolver(sesion, cancha, comienza_at, feriado=feriado)
+    lista = Decimal(tarifa.precio)
+
+    promocion = (
+        _mejor_promocion(promociones_aplicables(sesion, cancha, comienza_at, feriado=feriado))
+        if con_promocion
+        else None
+    )
+    precio = lista
+    if promocion is not None:
+        precio = _a_centavos(lista * Decimal(100 - promocion.descuento_porcentaje) / Decimal(100))
+
+    # La seña se redondea a dos decimales **hacia arriba en el .5** (`ROUND_HALF_UP`), que es
+    # lo que espera cualquiera que haga la cuenta a mano. El default de `Decimal` es
+    # `ROUND_HALF_EVEN`, que redondea 2.5 a 2 y no coincide con la calculadora del encargado.
+    sena = _a_centavos(precio * Decimal(tarifa.sena_porcentaje) / Decimal(100))
+    return Cotizacion(tarifa, promocion, lista, precio, sena)
+
+
+def precio_y_sena(
+    sesion: Session, cancha: Cancha, comienza_at: datetime, *, con_promocion: bool = True
+) -> tuple[Decimal, Decimal]:
+    """El precio del turno (con promoción, salvo `con_promocion=False`) y la seña que le corresponde."""
+    cotizacion = cotizar(sesion, cancha, comienza_at, con_promocion=con_promocion)
+    return cotizacion.precio, cotizacion.sena
