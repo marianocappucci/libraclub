@@ -17,7 +17,6 @@ from app.models.enums import (
     EstadoTorneo,
     EtapaTorneo,
     FormatoTorneo,
-    ModoWhatsapp,
     OrigenReserva,
     TipoAviso,
 )
@@ -56,7 +55,6 @@ __all__ = [
     "Feriado",
     "FormatoTorneo",
     "IntegranteDeCompetidor",
-    "ModoWhatsapp",
     "OrigenReserva",
     "ParcialDePartido",
     "PartidoDeTorneo",

@@ -33,10 +33,8 @@ from sqlalchemy.orm import Session
 
 from app.config import Config
 from app.main import crear_app
-from app.models.avisos import Aviso
 from app.models.enums import (
     AlcanceDia,
-    CanalAviso,
     EstadoAviso,
     EstadoReserva,
     OrigenReserva,
@@ -55,6 +53,7 @@ from app.servicios.reservas import (
     vencimiento_de_sena,
 )
 from app.tiempo import TZ
+from tests.avisos_apoyo import Guardado, ProveedorFalso, borrar_guardados, guardados
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 USUARIO, CLAVE = "admin", "clave-de-prueba"
@@ -66,24 +65,8 @@ TURNO = datetime(2026, 9, 1, 20, 0, tzinfo=TZ)
 VENCE = datetime(2026, 9, 1, 10, 0, tzinfo=TZ)
 
 
-class Transporte:
-    """Un canal que anota en vez de mandar."""
-
-    canal = CanalAviso.EMAIL
-    simulado = False
-
-    def __init__(self):
-        self.enviados: list[tuple[str, str, str]] = []
-
-    def disponible(self) -> bool:
-        return True
-
-    def enviar(self, *, destino: str, asunto: str, cuerpo: str) -> None:
-        self.enviados.append((destino, asunto, cuerpo))
-
-
 @pytest.fixture
-def jugador(sesion, cliente):
+def jugador(sesion, cliente, motor):
     cliente.email = "jugador@ejemplo.com"
     sesion.commit()
     return cliente
@@ -103,8 +86,8 @@ def _tomar(sesion, monkeypatch, cancha, jugador, *, tomada=TOMADA, turno=TURNO, 
     return reserva
 
 
-def _avisos(sesion) -> list[Aviso]:
-    return list(sesion.scalars(select(Aviso).order_by(Aviso.id)).all())
+def _avisos(sesion) -> list[Guardado]:
+    return guardados()
 
 
 # ── Cuándo vence ─────────────────────────────────────────────────────────
@@ -407,11 +390,11 @@ def test_a_quien_ya_senio_no_se_le_avisa_que_se_libera(
     api, sesion, sucursal, cancha, jugador, tarifa_base, abrir_caja
 ):
     _tomada_por_la_api_y_senada(api, sesion, sucursal, cancha, jugador, abrir_caja)
-    transporte = Transporte()
+    proveedor = ProveedorFalso()
 
-    resumen = servicio.despachar(sesion, transporte, VENCE - timedelta(hours=2))
+    resumen = servicio.barrer(sesion, proveedor, VENCE - timedelta(hours=2))
 
-    assert resumen.enviados == 0 and transporte.enviados == []
+    assert resumen.enviados == 0 and proveedor.enviados == []
 
 
 # ── El aviso ─────────────────────────────────────────────────────────────
@@ -421,13 +404,13 @@ def test_avisa_tres_horas_antes_con_fecha_y_con_lo_que_falta_pagar(
     sesion, monkeypatch, cancha, jugador, tarifa_base
 ):
     reserva = _tomar(sesion, monkeypatch, cancha, jugador)
-    transporte = Transporte()
+    proveedor = ProveedorFalso()
 
-    resumen = servicio.despachar(sesion, transporte, VENCE - timedelta(hours=2, minutes=50))
+    resumen = servicio.barrer(sesion, proveedor, VENCE - timedelta(hours=2, minutes=50))
     sesion.commit()
 
     assert resumen.enviados == 1
-    (destino, asunto, cuerpo) = transporte.enviados[0]
+    (destino, asunto, cuerpo) = proveedor.enviados[0]
     assert destino == "jugador@ejemplo.com"
     assert asunto == "Tu turno se libera el 01-09-2026 10:00: Cancha 1, 01-09-2026 20:00"
     assert "reservado hasta el 01-09-2026 10:00 esperando la seña" in cuerpo
@@ -442,26 +425,26 @@ def test_avisa_tres_horas_antes_con_fecha_y_con_lo_que_falta_pagar(
 def test_no_avisa_si_falta_mas_que_la_ventana(sesion, monkeypatch, cancha, jugador, tarifa_base):
     _tomar(sesion, monkeypatch, cancha, jugador)
 
-    assert servicio.despachar(sesion, Transporte(), VENCE - timedelta(hours=3, minutes=1)).enviados == 0
+    assert servicio.barrer(sesion, ProveedorFalso(), VENCE - timedelta(hours=3, minutes=1)).enviados == 0
 
 
 def test_no_avisa_un_turno_que_ya_se_libero(sesion, monkeypatch, cancha, jugador, tarifa_base):
     """«Se libera en unas horas» cuando ya se liberó es peor que no mandar nada."""
     _tomar(sesion, monkeypatch, cancha, jugador)
 
-    assert servicio.despachar(sesion, Transporte(), VENCE + timedelta(minutes=1)).enviados == 0
+    assert servicio.barrer(sesion, ProveedorFalso(), VENCE + timedelta(minutes=1)).enviados == 0
 
 
 def test_no_avisa_dos_veces(sesion, monkeypatch, cancha, jugador, tarifa_base):
     _tomar(sesion, monkeypatch, cancha, jugador)
-    transporte = Transporte()
+    proveedor = ProveedorFalso()
 
-    servicio.despachar(sesion, transporte, VENCE - timedelta(hours=2))
+    servicio.barrer(sesion, proveedor, VENCE - timedelta(hours=2))
     sesion.commit()
-    servicio.despachar(sesion, transporte, VENCE - timedelta(hours=1))
+    servicio.barrer(sesion, proveedor, VENCE - timedelta(hours=1))
     sesion.commit()
 
-    assert len(transporte.enviados) == 1
+    assert len(proveedor.enviados) == 1
 
 
 def test_una_sena_confirmada_no_se_avisa(sesion, monkeypatch, cancha, jugador, tarifa_base):
@@ -470,7 +453,7 @@ def test_una_sena_confirmada_no_se_avisa(sesion, monkeypatch, cancha, jugador, t
     sesion.commit()
 
     # Otros avisos sí pueden salir (el recordatorio de 24 h de una confirmada): lo que no sale es el de la seña.
-    servicio.despachar(sesion, Transporte(), VENCE - timedelta(hours=2))
+    servicio.barrer(sesion, ProveedorFalso(), VENCE - timedelta(hours=2))
     sesion.commit()
 
     assert TipoAviso.SENA_POR_VENCER not in {a.tipo for a in _avisos(sesion)}
@@ -484,7 +467,7 @@ def test_con_un_pago_aprobado_no_se_avisa(sesion, monkeypatch, cancha, jugador, 
     ))
     sesion.commit()
 
-    assert servicio.despachar(sesion, Transporte(), VENCE - timedelta(hours=2)).enviados == 0
+    assert servicio.barrer(sesion, ProveedorFalso(), VENCE - timedelta(hours=2)).enviados == 0
 
 
 def test_el_plazo_corto_de_un_turno_sobre_la_hora_no_avisa_a_los_segundos(
@@ -496,7 +479,7 @@ def test_el_plazo_corto_de_un_turno_sobre_la_hora_no_avisa_a_los_segundos(
     reserva = _tomar(sesion, monkeypatch, cancha, jugador, tomada=tomada)
     assert reserva.vence_at == tomada + timedelta(minutes=30)
 
-    assert servicio.despachar(sesion, Transporte(), tomada + timedelta(minutes=2)).enviados == 0
+    assert servicio.barrer(sesion, ProveedorFalso(), tomada + timedelta(minutes=2)).enviados == 0
 
 
 def test_el_cron_cada_5_minutos_avisa_una_vez_y_entre_2h55_y_3h_antes(
@@ -505,13 +488,12 @@ def test_el_cron_cada_5_minutos_avisa_una_vez_y_entre_2h55_y_3h_antes(
     """El mismo método que el del aviso del portal: se simula el cron en sus cinco fases posibles."""
     reserva = _tomar(sesion, monkeypatch, cancha, jugador)
     for fase in range(5):
-        sesion.query(Aviso).delete()
-        sesion.commit()
-        transporte = Transporte()
+        borrar_guardados(sesion)
+        proveedor = ProveedorFalso()
         salio_a = []
         momento = VENCE - timedelta(hours=4) + timedelta(minutes=fase)
         while momento < VENCE:
-            if servicio.despachar(sesion, transporte, momento).enviados:
+            if servicio.barrer(sesion, proveedor, momento).enviados:
                 salio_a.append(VENCE - momento)
             sesion.commit()
             momento += timedelta(minutes=5)
@@ -529,7 +511,7 @@ def test_apagar_el_aviso_de_sena_lo_apaga_tambien_para_el_mostrador(
     guardar_configuracion(sesion, ConfiguracionDeAvisos(sena_por_vencer=False))
     sesion.commit()
 
-    assert servicio.despachar(sesion, Transporte(), VENCE - timedelta(hours=2)).enviados == 0
+    assert servicio.barrer(sesion, ProveedorFalso(), VENCE - timedelta(hours=2)).enviados == 0
 
 
 # ── El central y los conflictos ──────────────────────────────────────────

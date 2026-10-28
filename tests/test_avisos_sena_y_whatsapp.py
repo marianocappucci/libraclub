@@ -1,7 +1,11 @@
-"""Aviso de seña por vencer, WhatsApp en modo registro y la configuración de avisos (ADR-029).
+"""Aviso de seña por vencer, WhatsApp en modo registro y la configuración de tipos de aviso (ADR-029, ADR-030).
 
 Igual que `test_avisos.py`: todo con un `momento` explícito y `created_at` / `vence_at` puestos a
 mano. Un test que dependa de la hora a la que corre el CI no se puede reproducir.
+
+Desde el ADR-030 el modo de WhatsApp (apagado, registro, Evolution) es del motor: acá se prueba con los proveedores del
+motor (`ProveedorRegistro`, `ProveedorApagado`) y la configuración de **tipos** con `/api/avisos/tipos`. La del motor
+(`/api/avisos/config`, `probar`, `envios`) está en `test_avisos_del_motor.py`.
 """
 
 from __future__ import annotations
@@ -14,17 +18,18 @@ import pytest
 from fastapi.testclient import TestClient
 from libraauth.models import Base as AuthBase
 from libraauth.testing import crear_schema_de_auth
-from sqlalchemy import select, update
+from libracore.avisos import ProveedorApagado, ProveedorRegistro
+from sqlalchemy import text, update
 
 from app.config import Config
 from app.main import crear_app
-from app.models.avisos import Aviso
-from app.models.enums import CanalAviso, EstadoAviso, EstadoReserva, ModoWhatsapp, TipoAviso
+from app.models.enums import CanalAviso, EstadoAviso, EstadoReserva, TipoAviso
 from app.models.reservas import EstadoPago, PagoDeReserva, Reserva
 from app.servicios import avisos as servicio
 from app.servicios import pagos as servicio_pagos
 from app.servicios import reservas as servicio_reservas
 from app.tiempo import TZ
+from tests.avisos_apoyo import Guardado, ProveedorFalso, borrar_guardados, guardados
 
 #: El turno de todos los tests, igual que en `test_avisos.py`: martes 01-09-2026 a las 20:00.
 CUANDO = datetime(2026, 9, 1, 20, 0, tzinfo=TZ)
@@ -34,32 +39,16 @@ AHORA = datetime(2026, 9, 1, 19, 0, tzinfo=TZ)
 USUARIO, CLAVE = "admin", "clave-de-prueba"
 
 
-class Transporte:
-    """Un canal que anota en vez de mandar. `simulado` es lo que cambia entre los dos usos."""
-
-    def __init__(self, canal=CanalAviso.EMAIL, *, simulado=False, disponible=True):
-        self.canal = canal
-        self.simulado = simulado
-        self._disponible = disponible
-        self.enviados: list[tuple[str, str, str]] = []
-
-    def disponible(self) -> bool:
-        return self._disponible
-
-    def enviar(self, *, destino: str, asunto: str, cuerpo: str) -> None:
-        self.enviados.append((destino, asunto, cuerpo))
-
-
 @pytest.fixture
-def jugador(sesion, cliente):
+def jugador(sesion, cliente, motor):
     """El cliente del conftest (teléfono `2255-123456`), con email."""
     cliente.email = "jugador@ejemplo.com"
     sesion.commit()
     return cliente
 
 
-def _avisos(sesion) -> list[Aviso]:
-    return list(sesion.scalars(select(Aviso).order_by(Aviso.id)).all())
+def _avisos(sesion) -> list[Guardado]:
+    return guardados()
 
 
 def _creada(sesion, reserva: Reserva, cuando: datetime) -> None:
@@ -98,13 +87,13 @@ def test_avisa_que_el_turno_se_libera_cuando_faltan_pocos_minutos(
     sesion, cancha, jugador, tarifa_base
 ):
     reserva = _retenida(sesion, cancha, jugador, vence_en=timedelta(minutes=6))
-    transporte = Transporte()
+    proveedor = ProveedorFalso()
 
-    resumen = servicio.despachar(sesion, transporte, AHORA)
+    resumen = servicio.barrer(sesion, proveedor, AHORA)
     sesion.commit()
 
     assert resumen.enviados == 1
-    (destino, asunto, cuerpo) = transporte.enviados[0]
+    (destino, asunto, cuerpo) = proveedor.enviados[0]
     assert destino == "jugador@ejemplo.com"
     assert asunto == "Tu turno se libera a las 19:06: Cancha 1, 01-09-2026 20:00"
     assert "retenido hasta las 19:06" in cuerpo
@@ -119,14 +108,14 @@ def test_no_avisa_si_falta_mucho(sesion, cancha, jugador, tarifa_base):
     """Al minuto de empezar a pagar no hay nada que avisar: le quedan 14."""
     _retenida(sesion, cancha, jugador, vence_en=timedelta(minutes=14))
 
-    assert servicio.despachar(sesion, Transporte(), AHORA).enviados == 0
+    assert servicio.barrer(sesion, ProveedorFalso(), AHORA).enviados == 0
 
 
 def test_no_avisa_un_turno_que_ya_se_libero(sesion, cancha, jugador, tarifa_base):
     """🔴 «Se libera en unos minutos» cuando ya se liberó es peor que no mandar nada."""
     _retenida(sesion, cancha, jugador, vence_en=-timedelta(minutes=1))
 
-    assert servicio.despachar(sesion, Transporte(), AHORA).enviados == 0
+    assert servicio.barrer(sesion, ProveedorFalso(), AHORA).enviados == 0
 
 
 @pytest.mark.parametrize("pago", [EstadoPago.APROBADO, EstadoPago.RECHAZADO, EstadoPago.VENCIDO])
@@ -134,7 +123,7 @@ def test_solo_avisa_si_el_pago_sigue_pendiente(sesion, cancha, jugador, tarifa_b
     """Si ya no hay un pago en curso, no hay seña que se esté pagando."""
     _retenida(sesion, cancha, jugador, vence_en=timedelta(minutes=6), pago=pago)
 
-    assert servicio.despachar(sesion, Transporte(), AHORA).enviados == 0
+    assert servicio.barrer(sesion, ProveedorFalso(), AHORA).enviados == 0
 
 
 def test_una_provisoria_sin_pago_no_se_avisa(sesion, cancha, jugador, tarifa_base):
@@ -146,19 +135,19 @@ def test_una_provisoria_sin_pago_no_se_avisa(sesion, cancha, jugador, tarifa_bas
     reserva.vence_at = AHORA + timedelta(minutes=6)
     sesion.commit()
 
-    assert servicio.despachar(sesion, Transporte(), AHORA).enviados == 0
+    assert servicio.barrer(sesion, ProveedorFalso(), AHORA).enviados == 0
 
 
 def test_no_se_repite(sesion, cancha, jugador, tarifa_base):
     _retenida(sesion, cancha, jugador, vence_en=timedelta(minutes=7))
-    transporte = Transporte()
+    proveedor = ProveedorFalso()
 
-    servicio.despachar(sesion, transporte, AHORA)
+    servicio.barrer(sesion, proveedor, AHORA)
     sesion.commit()
-    segunda = servicio.despachar(sesion, transporte, AHORA + timedelta(minutes=5))
+    segunda = servicio.barrer(sesion, proveedor, AHORA + timedelta(minutes=5))
     sesion.commit()
 
-    assert segunda.enviados == 0 and len(transporte.enviados) == 1
+    assert segunda.enviados == 0 and len(proveedor.enviados) == 1
 
 
 def test_el_cron_cada_5_minutos_siempre_avisa_antes_de_que_venza(
@@ -175,7 +164,7 @@ def test_el_cron_cada_5_minutos_siempre_avisa_antes_de_que_venza(
     assert servicio.VENTANA_DE_SENA < servicio_reservas.VENCIMIENTO_PROVISORIA
 
     for desfase in range(5):
-        sesion.execute(Aviso.__table__.delete())
+        borrar_guardados(sesion)
         sesion.execute(PagoDeReserva.__table__.delete())
         sesion.execute(Reserva.__table__.delete())
         sesion.commit()
@@ -183,14 +172,14 @@ def test_el_cron_cada_5_minutos_siempre_avisa_antes_de_que_venza(
         inicio = AHORA + timedelta(minutes=desfase)
         reserva = _retenida(sesion, cancha, jugador, vence_en=timedelta(minutes=desfase + 15))
         assert reserva.vence_at - inicio == servicio_reservas.VENCIMIENTO_PROVISORIA
-        transporte = Transporte()
+        proveedor = ProveedorFalso()
 
         salio_a = None
         for minuto in range(0, 40, 5):
             tick = AHORA + timedelta(minutes=minuto)
             if tick >= reserva.vence_at:
                 break
-            if servicio.despachar(sesion, transporte, tick).enviados:
+            if servicio.barrer(sesion, proveedor, tick).enviados:
                 salio_a = tick
                 break
             sesion.commit()
@@ -210,14 +199,14 @@ def test_el_aviso_de_sena_no_habilita_la_cancelacion(sesion, cancha, jugador, ta
     turno que nunca tuvo.
     """
     reserva = _retenida(sesion, cancha, jugador, vence_en=timedelta(minutes=6))
-    transporte = Transporte()
-    servicio.despachar(sesion, transporte, AHORA)
+    proveedor = ProveedorFalso()
+    servicio.barrer(sesion, proveedor, AHORA)
     sesion.commit()
 
     servicio_reservas.vencer_provisorias(sesion, AHORA + timedelta(minutes=7))
     sesion.commit()
     sesion.expire(reserva)
-    resumen = servicio.despachar(sesion, transporte, AHORA + timedelta(minutes=8))
+    resumen = servicio.barrer(sesion, proveedor, AHORA + timedelta(minutes=8))
     sesion.commit()
 
     assert reserva.estado is EstadoReserva.CANCELADA
@@ -230,12 +219,12 @@ def test_el_aviso_de_sena_no_habilita_la_cancelacion(sesion, cancha, jugador, ta
 
 def test_apagado_no_registra_nada(sesion, cancha, jugador, tarifa_base):
     reserva = _confirmada(sesion, cancha, jugador)
-    transporte = servicio.TransporteWhatsAppRegistro(ModoWhatsapp.APAGADO)
+    proveedor = ProveedorApagado()
 
-    resumen = servicio.despachar(sesion, transporte, AHORA)
+    resumen = servicio.barrer(sesion, proveedor, AHORA)
     sesion.commit()
 
-    assert reserva.id and not transporte.disponible()
+    assert reserva.id and not proveedor.disponible()
     assert str(resumen) == "enviados: 0 · fallidos: 0 · omitidos: 0"
     assert _avisos(sesion) == []
 
@@ -244,9 +233,9 @@ def test_en_modo_registro_el_mensaje_queda_anotado_y_no_sale(
     sesion, cancha, jugador, tarifa_base
 ):
     _confirmada(sesion, cancha, jugador)
-    transporte = servicio.TransporteWhatsAppRegistro(ModoWhatsapp.REGISTRO)
+    proveedor = ProveedorRegistro()
 
-    resumen = servicio.despachar(sesion, transporte, AHORA)
+    resumen = servicio.barrer(sesion, proveedor, AHORA)
     sesion.commit()
 
     assert (resumen.enviados, resumen.registrados) == (0, 1)
@@ -256,7 +245,8 @@ def test_en_modo_registro_el_mensaje_queda_anotado_y_no_sale(
     # 🔴 `registrado` y **no** `enviado`: ese estado dice que alguien lo recibió.
     assert guardado.estado is EstadoAviso.REGISTRADO
     assert guardado.enviado_at is None
-    assert guardado.detalle == servicio.DETALLE_REGISTRADO
+    assert guardado.detalle == "Registrado en modo prueba: no se mandó nada."
+    assert guardado.proveedor == "registro"
     # El teléfono `2255-123456` (característica 2255, sin el 0 ni el 15) sale con país y el 9 del celular.
     assert guardado.destino == "5492255123456"
     assert guardado.asunto is None
@@ -266,11 +256,11 @@ def test_en_modo_registro_el_mensaje_queda_anotado_y_no_sale(
 
 def test_el_registro_no_se_repite_con_el_mismo_transporte(sesion, cancha, jugador, tarifa_base):
     _confirmada(sesion, cancha, jugador)
-    transporte = servicio.TransporteWhatsAppRegistro(ModoWhatsapp.REGISTRO)
+    proveedor = ProveedorRegistro()
 
-    servicio.despachar(sesion, transporte, AHORA)
+    servicio.barrer(sesion, proveedor, AHORA)
     sesion.commit()
-    segunda = servicio.despachar(sesion, transporte, AHORA + timedelta(minutes=5))
+    segunda = servicio.barrer(sesion, proveedor, AHORA + timedelta(minutes=5))
     sesion.commit()
 
     assert segunda.registrados == 0 and len(_avisos(sesion)) == 1
@@ -279,31 +269,33 @@ def test_el_registro_no_se_repite_con_el_mismo_transporte(sesion, cancha, jugado
 def test_un_proveedor_real_manda_lo_que_solo_se_registro(sesion, cancha, jugador, tarifa_base):
     """🔑 El día que se conecte WhatsApp de verdad, lo anotado en modo prueba no se da por mandado.
 
-    Es lo que justifica que `registrado` no sea terminal para un transporte real: el mensaje
+    Es lo que justifica que `registrado` no sea terminal para un proveedor real: el mensaje
     nunca llegó a nadie.
     """
     reserva = _confirmada(sesion, cancha, jugador)
-    servicio.despachar(sesion, servicio.TransporteWhatsAppRegistro(ModoWhatsapp.REGISTRO), AHORA)
+    servicio.barrer(sesion, ProveedorRegistro(), AHORA)
     sesion.commit()
-    real = Transporte(CanalAviso.WHATSAPP, simulado=False)
+    real = ProveedorFalso(CanalAviso.WHATSAPP)
 
-    resumen = servicio.despachar(sesion, real, AHORA + timedelta(minutes=5))
+    resumen = servicio.barrer(sesion, real, AHORA + timedelta(minutes=5))
     sesion.commit()
 
     assert resumen.enviados == 1 and len(real.enviados) == 1
     (guardado,) = _avisos(sesion)
     assert guardado.reserva_id == reserva.id
-    assert guardado.estado is EstadoAviso.ENVIADO and guardado.intentos == 2
+    # El intento de prueba no gasta uno de los de verdad: el motor reinicia el contador al pasar a un proveedor real
+    # (ADR-090). Antes, con el registro de LibraClub, éste era el segundo intento.
+    assert guardado.estado is EstadoAviso.ENVIADO and guardado.intentos == 1
     assert guardado.enviado_at is not None and guardado.detalle is None
 
 
 def test_el_registro_no_pisa_lo_que_ya_se_mando(sesion, cancha, jugador, tarifa_base):
     _confirmada(sesion, cancha, jugador)
-    servicio.despachar(sesion, Transporte(CanalAviso.WHATSAPP), AHORA)
+    servicio.barrer(sesion, ProveedorFalso(CanalAviso.WHATSAPP), AHORA)
     sesion.commit()
 
-    resumen = servicio.despachar(
-        sesion, servicio.TransporteWhatsAppRegistro(ModoWhatsapp.REGISTRO), AHORA
+    resumen = servicio.barrer(
+        sesion, ProveedorRegistro(), AHORA
     )
     sesion.commit()
 
@@ -314,8 +306,8 @@ def test_el_registro_no_pisa_lo_que_ya_se_mando(sesion, cancha, jugador, tarifa_
 def test_mail_y_whatsapp_son_avisos_distintos_del_mismo_turno(sesion, cancha, jugador, tarifa_base):
     _confirmada(sesion, cancha, jugador)
 
-    servicio.despachar(sesion, Transporte(CanalAviso.EMAIL), AHORA)
-    servicio.despachar(sesion, servicio.TransporteWhatsAppRegistro(ModoWhatsapp.REGISTRO), AHORA)
+    servicio.barrer(sesion, ProveedorFalso(CanalAviso.EMAIL), AHORA)
+    servicio.barrer(sesion, ProveedorRegistro(), AHORA)
     sesion.commit()
 
     assert sorted(a.canal.value for a in _avisos(sesion)) == ["email", "whatsapp"]
@@ -326,8 +318,8 @@ def test_sin_telefono_reconocible_el_aviso_se_omite_con_motivo(sesion, cancha, j
     sesion.commit()
     _confirmada(sesion, cancha, jugador)
 
-    resumen = servicio.despachar(
-        sesion, servicio.TransporteWhatsAppRegistro(ModoWhatsapp.REGISTRO), AHORA
+    resumen = servicio.barrer(
+        sesion, ProveedorRegistro(), AHORA
     )
     sesion.commit()
 
@@ -342,7 +334,7 @@ def test_el_cliente_que_no_quiere_avisos_no_recibe_whatsapp(sesion, cancha, juga
     sesion.commit()
     _confirmada(sesion, cancha, jugador)
 
-    servicio.despachar(sesion, servicio.TransporteWhatsAppRegistro(ModoWhatsapp.REGISTRO), AHORA)
+    servicio.barrer(sesion, ProveedorRegistro(), AHORA)
     sesion.commit()
 
     (guardado,) = _avisos(sesion)
@@ -354,15 +346,15 @@ def test_la_cancelacion_por_whatsapp_dice_mensaje_y_la_de_mail_dice_mail(
     sesion, cancha, jugador, tarifa_base
 ):
     reserva = _confirmada(sesion, cancha, jugador)
-    mail, wsp = Transporte(CanalAviso.EMAIL), servicio.TransporteWhatsAppRegistro(ModoWhatsapp.REGISTRO)
+    mail, wsp = ProveedorFalso(CanalAviso.EMAIL), ProveedorRegistro()
     for t in (mail, wsp):
-        servicio.despachar(sesion, t, AHORA)
+        servicio.barrer(sesion, t, AHORA)
     sesion.commit()
     servicio_reservas.cambiar_estado(sesion, reserva.id, EstadoReserva.CANCELADA, motivo="Lluvia")
     sesion.commit()
 
     for t in (mail, wsp):
-        servicio.despachar(sesion, t, AHORA + timedelta(minutes=10))
+        servicio.barrer(sesion, t, AHORA + timedelta(minutes=10))
     sesion.commit()
 
     cancelaciones = {
@@ -379,14 +371,14 @@ def test_un_proveedor_real_no_cancela_lo_que_solo_se_registro(sesion, cancha, ju
     """Si la confirmación nunca llegó, avisar la cancelación sería hablar de un turno que el
     jugador no sabía que tenía."""
     reserva = _confirmada(sesion, cancha, jugador)
-    servicio.despachar(sesion, servicio.TransporteWhatsAppRegistro(ModoWhatsapp.REGISTRO), AHORA)
+    servicio.barrer(sesion, ProveedorRegistro(), AHORA)
     sesion.commit()
     servicio_reservas.cambiar_estado(sesion, reserva.id, EstadoReserva.CANCELADA)
     sesion.commit()
-    real = Transporte(CanalAviso.WHATSAPP)
+    real = ProveedorFalso(CanalAviso.WHATSAPP)
 
     # Sólo cuenta lo que ya existe: la confirmación registrada se manda (intento 2), la cancelación no.
-    servicio.despachar(sesion, real, AHORA + timedelta(minutes=10))
+    servicio.barrer(sesion, real, AHORA + timedelta(minutes=10))
     sesion.commit()
 
     assert all("cancel" not in (a[1] or "").lower() for a in real.enviados)
@@ -395,7 +387,7 @@ def test_un_proveedor_real_no_cancela_lo_que_solo_se_registro(sesion, cancha, ju
 def test_tambien_avisa_la_sena_por_whatsapp(sesion, cancha, jugador, tarifa_base):
     _retenida(sesion, cancha, jugador, vence_en=timedelta(minutes=6))
 
-    servicio.despachar(sesion, servicio.TransporteWhatsAppRegistro(ModoWhatsapp.REGISTRO), AHORA)
+    servicio.barrer(sesion, ProveedorRegistro(), AHORA)
     sesion.commit()
 
     (guardado,) = _avisos(sesion)
@@ -403,16 +395,30 @@ def test_tambien_avisa_la_sena_por_whatsapp(sesion, cancha, jugador, tarifa_base
     assert guardado.cuerpo.startswith("*Tu turno se libera a las 19:06")
 
 
-def test_construir_transportes_arma_uno_por_canal(sesion):
-    transportes = servicio.construir_transportes(sesion, lambda: None)
-    assert [t.canal for t in transportes] == [CanalAviso.EMAIL, CanalAviso.WHATSAPP]
-    assert [t.simulado for t in transportes] == [False, True]
-    assert not transportes[1].disponible(), "sin configuración, WhatsApp está apagado"
+def test_construir_proveedores_arma_uno_por_canal_y_el_modo_es_del_motor(sesion, motor):
+    """El modo de WhatsApp sale de la configuración del motor (`config.json`), no de `config_avisos` (ADR-030)."""
+    from libracore.avisos import configuracion
 
-    servicio.guardar_configuracion(
-        sesion, servicio.ConfiguracionDeAvisos(whatsapp=ModoWhatsapp.REGISTRO)
-    )
-    assert servicio.construir_transportes(sesion, lambda: None)[1].disponible()
+    email, whatsapp = servicio.construir_proveedores(lambda: None)
+    assert (email.canal, whatsapp.canal) == ("email", "whatsapp")
+    assert [email.simulado, whatsapp.simulado] == [False, False]
+    assert not whatsapp.disponible(), "sin configuración, WhatsApp está apagado"
+
+    configuracion.guardar(modo="registro")
+    _, whatsapp = servicio.construir_proveedores(lambda: None)
+    assert whatsapp.simulado and whatsapp.disponible()
+    assert whatsapp.nombre == "registro"
+
+
+def test_la_fila_de_config_avisos_ya_no_decide_el_modo_de_whatsapp(sesion, motor):
+    """🔴 Una sola fuente de verdad: lo que diga `config_avisos.whatsapp` (la columna vieja) no cuenta."""
+    sesion.execute(text("INSERT INTO config_avisos (id, whatsapp, avisar_confirmacion, avisar_recordatorio, "
+                        "avisar_cancelacion, avisar_sena_por_vencer) VALUES (1, 'registro', true, true, true, true)"))
+    sesion.commit()
+
+    _, whatsapp = servicio.construir_proveedores(lambda: None)
+
+    assert not whatsapp.disponible()
 
 
 # ── El teléfono ──────────────────────────────────────────────────────────
@@ -447,7 +453,9 @@ def test_telefono_para_whatsapp(texto, esperado):
 
 def test_sin_fila_rigen_los_defaults(sesion):
     assert servicio.configuracion(sesion) == servicio.ConfiguracionDeAvisos()
-    assert servicio.configuracion(sesion).whatsapp is ModoWhatsapp.APAGADO
+    assert servicio.configuracion(sesion) == servicio.ConfiguracionDeAvisos(
+        confirmacion=True, recordatorio=True, cancelacion=True, sena_por_vencer=True
+    )
 
 
 @pytest.mark.parametrize("apagado", ["confirmacion", "recordatorio"])
@@ -461,15 +469,15 @@ def test_un_tipo_apagado_no_sale_y_el_otro_sigue(sesion, cancha, jugador, tarifa
         sesion, cancha, jugador, cuando=CUANDO + timedelta(hours=2),
         creada=momento - timedelta(minutes=5),
     )
-    transporte = Transporte()
+    proveedor = ProveedorFalso()
 
-    servicio.despachar(sesion, transporte, momento)
+    servicio.barrer(sesion, proveedor, momento)
     sesion.commit()
     con_todo = {a.tipo.value for a in _avisos(sesion)}
-    sesion.execute(Aviso.__table__.delete())
+    borrar_guardados(sesion)
     servicio.guardar_configuracion(sesion, servicio.ConfiguracionDeAvisos(**{apagado: False}))
     sesion.commit()
-    servicio.despachar(sesion, transporte, momento)
+    servicio.barrer(sesion, proveedor, momento)
     sesion.commit()
     con_uno_apagado = {a.tipo.value for a in _avisos(sesion)}
 
@@ -484,19 +492,19 @@ def test_la_sena_apagada_no_sale(sesion, cancha, jugador, tarifa_base):
     )
     sesion.commit()
 
-    assert servicio.despachar(sesion, Transporte(), AHORA).enviados == 0
+    assert servicio.barrer(sesion, ProveedorFalso(), AHORA).enviados == 0
 
 
 def test_la_cancelacion_apagada_no_sale(sesion, cancha, jugador, tarifa_base):
     reserva = _confirmada(sesion, cancha, jugador)
-    transporte = Transporte()
-    servicio.despachar(sesion, transporte, AHORA)
+    proveedor = ProveedorFalso()
+    servicio.barrer(sesion, proveedor, AHORA)
     sesion.commit()
     servicio_reservas.cambiar_estado(sesion, reserva.id, EstadoReserva.CANCELADA)
     servicio.guardar_configuracion(sesion, servicio.ConfiguracionDeAvisos(cancelacion=False))
     sesion.commit()
 
-    assert servicio.despachar(sesion, transporte, AHORA + timedelta(minutes=10)).enviados == 0
+    assert servicio.barrer(sesion, proveedor, AHORA + timedelta(minutes=10)).enviados == 0
 
 
 # ── La API ───────────────────────────────────────────────────────────────
@@ -529,64 +537,48 @@ def clientes_api(engine, sesion, monkeypatch):
     AuthBase.metadata.drop_all(engine)
 
 
-def test_la_api_devuelve_los_defaults_y_guarda_la_configuracion(clientes_api, sesion):
+def test_la_api_devuelve_los_defaults_y_guarda_los_tipos(clientes_api, sesion):
     admin, _ = clientes_api
-    assert admin.get("/api/avisos/config").json() == {
-        "whatsapp": "apagado", "confirmacion": True, "recordatorio": True,
-        "cancelacion": True, "sena_por_vencer": True,
+    assert admin.get("/api/avisos/tipos").json() == {
+        "confirmacion": True, "recordatorio": True, "cancelacion": True, "sena_por_vencer": True, "demo": False,
     }
 
-    nueva = {
-        "whatsapp": "registro", "confirmacion": True, "recordatorio": False,
-        "cancelacion": True, "sena_por_vencer": False,
-    }
-    assert admin.put("/api/avisos/config", json=nueva).json() == nueva
-    assert admin.get("/api/avisos/config").json() == nueva
-    leida = servicio.configuracion(sesion)
-    assert leida.whatsapp is ModoWhatsapp.REGISTRO and not leida.recordatorio
+    nueva = {"confirmacion": True, "recordatorio": False, "cancelacion": True, "sena_por_vencer": False}
+    assert admin.put("/api/avisos/tipos", json=nueva).json() == {**nueva, "demo": False}
+    assert admin.get("/api/avisos/tipos").json() == {**nueva, "demo": False}
+    assert not servicio.configuracion(sesion).recordatorio
     # Guardar de nuevo actualiza la única fila; no crea otra.
-    assert admin.put("/api/avisos/config", json={**nueva, "whatsapp": "apagado"}).status_code == 200
-    assert servicio.configuracion(sesion).whatsapp is ModoWhatsapp.APAGADO
+    assert admin.put("/api/avisos/tipos", json={**nueva, "recordatorio": True}).status_code == 200
+    assert servicio.configuracion(sesion).recordatorio
+    assert sesion.execute(text("SELECT count(*) FROM config_avisos")).scalar_one() == 1
 
 
-def test_el_encargado_ve_la_configuracion_pero_no_la_cambia(clientes_api):
-    """Apagar la confirmación o prender WhatsApp cambia lo que reciben los clientes: es de admin."""
+def test_guardar_los_tipos_no_toca_la_columna_vieja_de_whatsapp(clientes_api, sesion):
+    """La fila nueva nace sin `whatsapp` (la columna es nullable desde la `0018`): el modo ya no se guarda acá."""
+    admin, _ = clientes_api
+    cuerpo = {"confirmacion": True, "recordatorio": True, "cancelacion": True, "sena_por_vencer": True}
+    assert admin.put("/api/avisos/tipos", json=cuerpo).status_code == 200
+    assert sesion.execute(text("SELECT whatsapp FROM config_avisos")).scalar_one() is None
+
+
+def test_la_api_dice_si_es_una_demo(clientes_api, monkeypatch):
+    """Lo necesita `ConfiguracionDeAvisos` del kit para explicar de entrada que en una demo WhatsApp nunca manda."""
+    admin, _ = clientes_api
+    monkeypatch.setenv("DEMO_MODE", "1")
+    assert admin.get("/api/avisos/tipos").json()["demo"] is True
+
+
+def test_el_encargado_ve_los_tipos_pero_no_los_cambia(clientes_api):
+    """Apagar la confirmación cambia lo que reciben los clientes: es de admin."""
     admin, encargado = clientes_api
-    assert encargado.get("/api/avisos/config").status_code == 200
-    r = encargado.put("/api/avisos/config", json=admin.get("/api/avisos/config").json())
+    assert encargado.get("/api/avisos/tipos").status_code == 200
+    r = encargado.put("/api/avisos/tipos", json=admin.get("/api/avisos/tipos").json())
     assert r.status_code == 403
 
 
-def test_la_api_rechaza_un_modo_que_no_existe(clientes_api):
+def test_la_api_no_sigue_sirviendo_el_registro_ni_el_modo_viejos(clientes_api):
+    """`/registro` lo reemplaza `/envios` del motor; `/config` es ahora del motor y ya no lleva los tipos."""
     admin, _ = clientes_api
-    cuerpo = {**admin.get("/api/avisos/config").json(), "whatsapp": "evolution"}
-    assert admin.put("/api/avisos/config", json=cuerpo).status_code == 422
-
-
-def test_el_registro_trae_lo_que_salio_y_lo_que_solo_se_registro(
-    clientes_api, sesion, cancha, jugador, tarifa_base
-):
-    _, encargado = clientes_api
-    _confirmada(sesion, cancha, jugador)
-    servicio.despachar(sesion, Transporte(), AHORA)
-    servicio.despachar(sesion, servicio.TransporteWhatsAppRegistro(ModoWhatsapp.REGISTRO), AHORA)
-    sesion.commit()
-
-    todos = encargado.get("/api/avisos/registro")
-    solo_wsp = encargado.get("/api/avisos/registro?canal=whatsapp").json()
-    solo_enviados = encargado.get("/api/avisos/registro?estado=enviado").json()
-
-    assert todos.status_code == 200, todos.text
-    assert {(a["canal"], a["estado"]) for a in todos.json()} == {
-        ("email", "enviado"), ("whatsapp", "registrado"),
-    }
-    (wsp,) = solo_wsp
-    assert wsp["destino"] == "5492255123456" and wsp["cancha"] == "Cancha 1"
-    assert wsp["tipo"] == "confirmacion" and wsp["cuerpo"].startswith("*Turno confirmado")
-    assert [a["canal"] for a in solo_enviados] == ["email"]
-
-
-def test_el_registro_acota_el_limite(clientes_api):
-    admin, _ = clientes_api
-    assert admin.get("/api/avisos/registro?limite=0").status_code == 422
-    assert admin.get("/api/avisos/registro?limite=501").status_code == 422
+    assert admin.get("/api/avisos/registro").status_code == 404
+    config = admin.get("/api/avisos/config").json()
+    assert set(config) == {"whatsapp", "email"}, "es la del motor, no la de los tipos"

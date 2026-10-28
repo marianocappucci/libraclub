@@ -82,8 +82,10 @@ SCHEMA_VERSION = 1
 #: - `arca_credenciales_servicio` y el almacén de claves (`secretos_instancia`): **el ticket de ARCA lo presta el
 #:   central**, la clave privada no sale del VPS. `arca_config` sí (CUIT, punto de venta, ambiente: no es secreto);
 #: - lo que sólo existe en la web: el portal (`cuentas_de_jugador`, `pagos_de_reserva`, `busquedas_de_jugadores`,
-#:   `anotados_en_partido`), los torneos y los eventos (ADR-024), los avisos (`avisos` y `config_avisos`, ADR-029)
-#:   y la copia de Mercado Pago.
+#:   `anotados_en_partido`), los torneos y los eventos (ADR-024), los avisos (`avisos_envios`, la tabla del motor, y
+#:   `config_avisos`, ADR-029 y ADR-030; `avisos` quedó de respaldo) y la copia de Mercado Pago. **El nodo no manda
+#:   avisos**: los deduce y los manda el barrido del central, y el motor contesta `en_nodo` si se lo pide (libracore
+#:   ADR-090).
 TABLAS_DE_REFERENCIA = frozenset({
     # LibraCore y libraauth: la sesión, el gate de módulos y de Términos, las cajas y facturar.
     "usuarios", "aceptaciones_terminos", "modulos", "cajas", "arca_config",

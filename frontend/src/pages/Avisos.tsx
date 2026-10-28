@@ -1,32 +1,36 @@
-/** Avisos al cliente: qué se manda y qué se mandó (ADR-015, ADR-029).
+/** Avisos al cliente: qué se manda, cómo sale y qué se mandó (ADR-015, ADR-029, ADR-030).
  *
- *  Dos pestañas. **Configuración**: qué tipos de aviso salen y el modo del canal de WhatsApp.
- *  **Registro**: lo que `avisos` guardó de cada intento, que existía desde ADR-015 sin una
- *  pantalla para mirarlo (y es para lo único que se mira: «¿le llegó el aviso?»).
+ *  Tres cosas, y de tres dueños:
  *
- *  🔴 **El interruptor general no está acá.** Es la tarea programada del servidor
- *  (`scripts/enviar_avisos.py`): sin ella no sale nada, se prenda lo que se prenda en esta
- *  pantalla. Por eso el texto no promete envíos: dice qué se manda *cuando* corre.
+ *  - **Qué tipos de aviso salen** (confirmación, recordatorio, cancelación, seña por vencer): es de LibraClub
+ *    (`/api/avisos/tipos`). El mostrador lo ve; cambiarlo es de admin.
+ *  - **Cómo sale** (WhatsApp apagado, en registro o por Evolution; «probar envío»; si hay servidor de correo): es del
+ *    motor (`libracore.avisos`, ADR-090) y lo pinta el kit con `ConfiguracionDeAvisos`.
+ *  - **Qué salió** (el registro, con su estado y su motivo): es del motor y lo pinta el kit con `RegistroDeAvisos`.
+ *
+ *  🔴 Las dos últimas son **sólo de administrador** (el router del motor lleva `require_admin`: la apikey de Evolution y
+ *  los teléfonos y textos de los clientes no son del mostrador). Para el mostrador la pantalla se reduce a los tipos,
+ *  de sólo lectura, y lo dice.
+ *
+ *  🔴 **El interruptor general no está acá.** Es la tarea programada del servidor (`scripts/enviar_avisos.py`): sin ella
+ *  no sale nada, se prenda lo que se prenda en esta pantalla. Por eso el texto no promete envíos: dice qué se manda
+ *  *cuando* corre.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { ColumnDef } from 'libra-ui/data-table'
-import { DataTable } from 'libra-ui/data-table'
+import { useCallback, useEffect, useState } from 'react'
+import { ConfiguracionDeAvisos } from 'libra-ui/ConfiguracionDeAvisos'
+import { RegistroDeAvisos } from 'libra-ui/RegistroDeAvisos'
 import { TituloPantalla } from 'libra-ui/titulo-pantalla'
-import { BadgeEstado } from 'libra-ui/badge-estado'
-import type { TonoEstado } from 'libra-ui/badge-estado'
 import { Switch } from 'libra-ui/ui/switch'
-import { BellRing, MessageSquareText } from 'lucide-react'
+import { BellRing } from 'lucide-react'
 
 import { avisos as api } from '@/lib/api'
-import type { AvisoRegistrado, ConfigAvisos, EstadoAviso, ModoWhatsapp, TipoAviso } from '@/lib/api'
-import { fechaHora } from '@/lib/fechas'
+import type { TipoAviso, TiposDeAviso, TiposDeAvisoConDemo } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
 import { AvisoDeError } from '@/components/listado'
-import { Button, buttonVariants } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { buttonVariants } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-const TIPOS: { clave: keyof Omit<ConfigAvisos, 'whatsapp'>; titulo: string; detalle: string }[] = [
+const TIPOS: { clave: TipoAviso; titulo: string; detalle: string }[] = [
   {
     clave: 'confirmacion',
     titulo: 'Confirmación',
@@ -51,11 +55,7 @@ const TIPOS: { clave: keyof Omit<ConfigAvisos, 'whatsapp'>; titulo: string; deta
   },
 ]
 
-const MODOS: { valor: ModoWhatsapp; texto: string }[] = [
-  { valor: 'apagado', texto: 'Apagado' },
-  { valor: 'registro', texto: 'Registrar mensajes (prueba)' },
-]
-
+/** El rótulo de cada tipo en el registro: el `tipo` lo pone quien avisa (este producto), así que el vocabulario es suyo. */
 const NOMBRE_DEL_TIPO: Record<TipoAviso, string> = {
   confirmacion: 'Confirmación',
   recordatorio: 'Recordatorio',
@@ -63,48 +63,50 @@ const NOMBRE_DEL_TIPO: Record<TipoAviso, string> = {
   sena_por_vencer: 'Seña por vencer',
 }
 
-const ESTADOS: Record<EstadoAviso, { tono: TonoEstado; texto: string }> = {
-  enviado: { tono: 'ok', texto: 'Enviado' },
-  // «Registrado» y no «enviado»: el mensaje se armó y quedó anotado, pero nadie lo recibió.
-  registrado: { tono: 'curso', texto: 'Registrado (no salió)' },
-  omitido: { tono: 'neutro', texto: 'Omitido' },
-  fallido: { tono: 'negativo', texto: 'Falló' },
-}
+const etiquetaDelTipo = (tipo: string) => NOMBRE_DEL_TIPO[tipo as TipoAviso] ?? tipo
+
+/** Los cuatro interruptores sin el dato de la demo, que no se edita ni se guarda. */
+const soloLosTipos = (c: TiposDeAvisoConDemo): TiposDeAviso => ({
+  confirmacion: c.confirmacion,
+  recordatorio: c.recordatorio,
+  cancelacion: c.cancelacion,
+  sena_por_vencer: c.sena_por_vencer,
+})
 
 export function Avisos() {
   const { user } = useAuth()
-  const puedeEscribir = user?.role === 'admin'
-  const [config, setConfig] = useState<ConfigAvisos | null>(null)
-  const [guardada, setGuardada] = useState<ConfigAvisos | null>(null)
-  const [registro, setRegistro] = useState<AvisoRegistrado[]>([])
+  const esAdmin = user?.role === 'admin'
+  const [tipos, setTipos] = useState<TiposDeAvisoConDemo | null>(null)
+  const [guardados, setGuardados] = useState<TiposDeAviso | null>(null)
+  const [demo, setDemo] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
   const [guardando, setGuardando] = useState(false)
-  const [viendo, setViendo] = useState<AvisoRegistrado | null>(null)
 
   const cargar = useCallback(() => {
-    Promise.all([api.config(), api.registro()])
-      .then(([c, r]) => {
-        setConfig(c)
-        setGuardada(c)
-        setRegistro(r)
+    api.tipos()
+      .then((t) => {
+        setTipos(t)
+        setGuardados(soloLosTipos(t))
+        setDemo(t.demo)
       })
       .catch((e: Error) => setError(e.message))
   }, [])
 
   useEffect(cargar, [cargar])
 
-  const sinGuardar = config !== null && JSON.stringify(config) !== JSON.stringify(guardada)
+  const sinGuardar = tipos !== null && JSON.stringify(soloLosTipos(tipos)) !== JSON.stringify(guardados)
 
   async function guardar() {
-    if (!config) return
+    if (!tipos) return
     setGuardando(true)
     setError(null)
     setAviso(null)
     try {
-      const nueva = await api.guardarConfig(config)
-      setConfig(nueva)
-      setGuardada(nueva)
+      const nuevos = await api.guardarTipos(soloLosTipos(tipos))
+      setTipos(nuevos)
+      setGuardados(soloLosTipos(nuevos))
+      setDemo(nuevos.demo)
       setAviso('Configuración guardada.')
     } catch (e) {
       setError((e as Error).message)
@@ -113,74 +115,51 @@ export function Avisos() {
     }
   }
 
-  const columnas = useMemo<ColumnDef<AvisoRegistrado, unknown>[]>(
-    () => [
-      { id: 'cuando', header: 'Cuándo', cell: ({ row }) => fechaHora(row.original.creado_at) },
-      {
-        id: 'tipo',
-        header: 'Aviso',
-        cell: ({ row }) => (
-          <div>
-            {NOMBRE_DEL_TIPO[row.original.tipo]}
-            <div className="text-xs text-muted-foreground">
-              {row.original.canal === 'email' ? 'Correo' : 'WhatsApp'}
+  const seccionDeTipos = tipos && (
+    <section className="space-y-2 rounded-lg border bg-card p-4">
+      <h3 className="text-sm font-semibold">Qué avisos se mandan</h3>
+      <p className="text-sm text-muted-foreground">
+        Los avisos por correo salen con el servidor cargado en Configuración → Correo, y los de WhatsApp según
+        cómo esté conectado (pestaña «WhatsApp y correo»). Si un cliente no tiene el dato o pidió no recibir avisos, el
+        intento queda anotado como omitido en el registro.
+      </p>
+      <ul className="divide-y">
+        {TIPOS.map((t) => (
+          <li key={t.clave} className="flex items-start justify-between gap-4 py-3">
+            <div>
+              <label htmlFor={`aviso-${t.clave}`} className="text-sm font-medium">
+                {t.titulo}
+              </label>
+              <p className="text-sm text-muted-foreground">{t.detalle}</p>
             </div>
-          </div>
-        ),
-      },
-      {
-        id: 'turno',
-        header: 'Turno',
-        cell: ({ row }) => (
-          <div>
-            {row.original.cancha ?? ''}
-            <div className="text-xs text-muted-foreground">{fechaHora(row.original.comienza_at)}</div>
-          </div>
-        ),
-      },
-      {
-        id: 'destino',
-        header: 'Destino',
-        cell: ({ row }) => row.original.destino || <span className="text-muted-foreground">—</span>,
-      },
-      {
-        id: 'estado',
-        header: 'Estado',
-        cell: ({ row }) => {
-          const { tono, texto } = ESTADOS[row.original.estado]
-          return (
-            <div className="space-y-0.5">
-              <BadgeEstado tono={tono}>{texto}</BadgeEstado>
-              {/* `whitespace-normal`: el motivo es una frase y en una línea ensancha la tabla. */}
-              {row.original.detalle && (
-                <div className="w-56 whitespace-normal text-xs text-muted-foreground">
-                  {row.original.detalle}
-                </div>
-              )}
-            </div>
-          )
-        },
-      },
-      {
-        id: 'mensaje',
-        header: () => <div className="text-right">Mensaje</div>,
-        enableSorting: false,
-        cell: ({ row }) =>
-          row.original.cuerpo ? (
-            <div className="flex justify-end">
-              <Button
-                variant="outline"
-                size="icon"
-                aria-label={`Ver el mensaje a ${row.original.destino}`}
-                onClick={() => setViendo(row.original)}
-              >
-                <MessageSquareText className="size-4" />
-              </Button>
-            </div>
-          ) : null,
-      },
-    ],
-    [],
+            <Switch
+              id={`aviso-${t.clave}`}
+              checked={tipos[t.clave]}
+              disabled={!esAdmin}
+              onCheckedChange={(v) => setTipos({ ...tipos, [t.clave]: v })}
+            />
+          </li>
+        ))}
+      </ul>
+      {esAdmin ? (
+        <div className="flex items-center justify-end gap-3 pt-2">
+          {aviso && <span role="status" className="text-sm text-muted-foreground">{aviso}</span>}
+          <button
+            type="button"
+            className={buttonVariants()}
+            disabled={guardando || !sinGuardar}
+            onClick={guardar}
+          >
+            {guardando ? 'Guardando…' : 'Guardar'}
+          </button>
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Sólo un administrador cambia esto. Cómo salen los mensajes por WhatsApp y el registro de lo que salió también
+          son del administrador.
+        </p>
+      )}
+    </section>
   )
 
   return (
@@ -188,113 +167,27 @@ export function Avisos() {
       <TituloPantalla icono={BellRing}>Avisos</TituloPantalla>
       <AvisoDeError mensaje={error} />
 
-      <Tabs defaultValue="configuracion">
-        <TabsList>
-          <TabsTrigger value="configuracion">Configuración</TabsTrigger>
-          <TabsTrigger value="registro">Registro</TabsTrigger>
-        </TabsList>
+      {esAdmin ? (
+        <Tabs defaultValue="avisos">
+          <TabsList>
+            <TabsTrigger value="avisos">Avisos</TabsTrigger>
+            <TabsTrigger value="whatsapp">WhatsApp y correo</TabsTrigger>
+            <TabsTrigger value="registro">Registro</TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="configuracion" className="space-y-4">
-          {config && (
-            <>
-              <section className="space-y-2 rounded-lg border bg-card p-4">
-                <h3 className="text-sm font-semibold">Qué avisos se mandan</h3>
-                <p className="text-sm text-muted-foreground">
-                  Los avisos por correo salen con el servidor cargado en Configuración → Correo.
-                  Si un cliente no tiene el dato o pidió no recibir avisos, el intento queda
-                  anotado como omitido en el registro.
-                </p>
-                <ul className="divide-y">
-                  {TIPOS.map((t) => (
-                    <li key={t.clave} className="flex items-start justify-between gap-4 py-3">
-                      <div>
-                        <label htmlFor={`aviso-${t.clave}`} className="text-sm font-medium">
-                          {t.titulo}
-                        </label>
-                        <p className="text-sm text-muted-foreground">{t.detalle}</p>
-                      </div>
-                      <Switch
-                        id={`aviso-${t.clave}`}
-                        checked={config[t.clave]}
-                        disabled={!puedeEscribir}
-                        onCheckedChange={(v) => setConfig({ ...config, [t.clave]: v })}
-                      />
-                    </li>
-                  ))}
-                </ul>
-              </section>
+          <TabsContent value="avisos" className="space-y-4">{seccionDeTipos}</TabsContent>
 
-              <section className="space-y-2 rounded-lg border bg-card p-4">
-                <h3 className="text-sm font-semibold">WhatsApp</h3>
-                <label htmlFor="aviso-whatsapp" className="block text-sm font-medium">
-                  Modo
-                </label>
-                {/* select-cerrado: los dos modos de la constante MODOS (apagado y registro) */}
-                <select
-                  id="aviso-whatsapp"
-                  className="h-9 w-full max-w-xs rounded-md border border-input bg-transparent px-2 text-sm shadow-xs"
-                  value={config.whatsapp}
-                  disabled={!puedeEscribir}
-                  onChange={(e) => setConfig({ ...config, whatsapp: e.target.value as ModoWhatsapp })}
-                >
-                  {MODOS.map((m) => (
-                    <option key={m.valor} value={m.valor}>{m.texto}</option>
-                  ))}
-                </select>
-                <p className="text-sm text-muted-foreground">
-                  Todavía no hay un proveedor de WhatsApp conectado. En modo de prueba los mensajes
-                  se arman con los mismos avisos de arriba y quedan en el registro con el estado
-                  «Registrado», <strong>pero no se mandan a nadie</strong>. Sirve para revisar
-                  cómo quedarían y a qué teléfonos saldrían antes de conectarlo.
-                </p>
-              </section>
+          <TabsContent value="whatsapp" className="space-y-4">
+            <ConfiguracionDeAvisos demo={demo} />
+          </TabsContent>
 
-              {puedeEscribir && (
-                <div className="flex items-center justify-end gap-3">
-                  {aviso && <span role="status" className="text-sm text-muted-foreground">{aviso}</span>}
-                  <button
-                    type="button"
-                    className={buttonVariants()}
-                    disabled={guardando || !sinGuardar}
-                    onClick={guardar}
-                  >
-                    {guardando ? 'Guardando…' : 'Guardar'}
-                  </button>
-                </div>
-              )}
-            </>
-          )}
-        </TabsContent>
-
-        <TabsContent value="registro" className="space-y-2">
-          <p className="text-sm text-muted-foreground">
-            Los últimos {registro.length === 100 ? '100 ' : ''}intentos, del más nuevo al más viejo.
-            El destino es el que tenía el cliente cuando se mandó.
-          </p>
-          <DataTable
-            columns={columnas}
-            data={registro}
-            emptyMessage="Todavía no se mandó ningún aviso."
-            search={{
-              campos: (a) => [a.destino, a.cancha ?? '', NOMBRE_DEL_TIPO[a.tipo], ESTADOS[a.estado].texto],
-              placeholder: 'Buscar por destino, cancha o estado',
-              ariaLabel: 'Buscar aviso',
-            }}
-          />
-        </TabsContent>
-      </Tabs>
-
-      <Dialog open={viendo !== null} onOpenChange={(o) => { if (!o) setViendo(null) }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {viendo ? `${NOMBRE_DEL_TIPO[viendo.tipo]} · ${viendo.destino}` : 'Mensaje'}
-            </DialogTitle>
-          </DialogHeader>
-          {viendo?.asunto && <p className="text-sm font-medium">{viendo.asunto}</p>}
-          <pre className="whitespace-pre-wrap rounded-md bg-muted p-3 text-sm">{viendo?.cuerpo}</pre>
-        </DialogContent>
-      </Dialog>
+          <TabsContent value="registro" className="space-y-2">
+            <RegistroDeAvisos esAdmin etiquetaDelTipo={etiquetaDelTipo} />
+          </TabsContent>
+        </Tabs>
+      ) : (
+        seccionDeTipos
+      )}
     </div>
   )
 }

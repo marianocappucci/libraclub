@@ -404,6 +404,22 @@ def base_de_libracore(request):
 
 
 @pytest.fixture
+def motor(base_de_libracore, monkeypatch):
+    """`libracore.db.core` apuntando a la base de este test (la del dominio: una sola base, ADR-020).
+
+    Para lo que escribe por su cuenta: el barrido de avisos deja `avisos_envios` por el motor (cada paso se confirma
+    solo), no por la sesión de SQLAlchemy, así que sin esto no encuentra la tabla. Se restauran los globales del motor
+    al terminar: la configuración de un test no puede quedar puesta para el siguiente.
+    """
+    from libracore.db import core as libracore_core
+
+    for nombre in ("_db_path", "_database_url", "_timeout", "_extra_pragmas"):
+        monkeypatch.setattr(libracore_core, nombre, getattr(libracore_core, nombre))
+    libracore_core.configure(base_de_libracore)
+    return base_de_libracore
+
+
+@pytest.fixture
 def base_temporal():
     """Fábrica de bases descartables en el servidor de la suite, que se borran al terminar.
 
