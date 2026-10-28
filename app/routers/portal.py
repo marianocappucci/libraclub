@@ -104,22 +104,16 @@ def _exigir_captcha(request: Request, captcha: str) -> None:
     existe— sirva de desafío también para el portal, sin un
     `/api/portal/captcha` propio.
 
-    🔑 **`_captcha_de` es un nombre privado de `libraauth.session_auth`** —no
-    hay uno público todavía— y se resuelve por ATRIBUTO DE MÓDULO
-    (`_session_auth._captcha_de(request)`) y no con
-    `from libraauth.session_auth import _captcha_de`: la suite parchea
-    justamente `libraauth.session_auth._captcha_de` (fixture
-    `_captcha_aprobado` en `tests/conftest.py`) para que el resto de los tests
-    no tenga que resolver un desafío real en cada login. Un `from` capturaría
-    la función real en el momento del import, ANTES del parche, y esta ruta
-    dejaría de aprobar el captcha con el resto de la suite. El arreglo de
-    fondo sería que libraauth exporte una versión pública de esto.
+    Con `verificar_captcha` de libraauth (v0.56.0, ADR-029), la forma pública de
+    hacerlo. Busca `_captcha_de` en su módulo en cada llamada, así que el parche
+    de la suite (fixture `_captcha_aprobado` en `tests/conftest.py`) sigue
+    valiendo para esta ruta.
 
     🔴 **Con `USADOS_DEL_CAPTCHA`** (libraauth v0.50.0, ADR-023): si a este worker le toca crear el `Captcha` del
     proceso (el `GET /auth/captcha` pudo caer en otro), lo crea anotando en la base y no en memoria, igual que el
     router de `/auth`.
     """
-    if not _session_auth._captcha_de(request, USADOS_DEL_CAPTCHA).verificar(captcha):
+    if not _session_auth.verificar_captcha(request, captcha, USADOS_DEL_CAPTCHA):
         raise HTTPException(400, _session_auth.CAPTCHA_INVALIDO)
 
 
