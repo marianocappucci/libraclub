@@ -246,7 +246,7 @@ def test_el_alta_anota_un_evento_propio_y_no_login(api, sesion):
 def test_el_portal_crea_su_captcha_con_los_usados_en_la_base(engine, sesion, monkeypatch):
     """Con varios workers, el `GET /auth/captcha` puede caer en uno y el login del portal en otro. Al que no tiene
     todavía el `Captcha` del proceso le toca crearlo, y tiene que anotar los desafíos en la base y no en su memoria
-    (libraauth v0.50.0, ADR-023). Si `routers/portal.py` vuelve a llamar `_captcha_de(request)` sin
+    (libraauth v0.50.0, ADR-023). Si `routers/portal.py` vuelve a llamar `verificar_captcha` (o `_captcha_de`) sin
     `USADOS_DEL_CAPTCHA`, este test da rojo."""
     from libraauth.captcha import UsadosEnBase
 

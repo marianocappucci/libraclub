@@ -35,9 +35,9 @@ from app import db
 #: antes de uvicorn. La fábrica de sesiones se resuelve en cada uso (`lambda`): `db.inicializar()` la rearma cada vez
 #: que `crear_app()` corre.
 #:
-#: 🔑 **Es uno solo para `/auth` y para el portal** (`routers/portal.py`): el portal verifica con `_captcha_de(request,
-#: ...)` y, si le toca crear el `Captcha` del proceso, tiene que crearlo con los mismos `usados` o ese worker anota en
-#: memoria.
+#: 🔑 **Es uno solo para `/auth` y para el portal** (`routers/portal.py`): el portal verifica con
+#: `verificar_captcha(request, ..., USADOS_DEL_CAPTCHA)` y, si le toca crear el `Captcha` del proceso, tiene que crearlo
+#: con los mismos `usados` o ese worker anota en memoria.
 USADOS_DEL_CAPTCHA = UsadosEnBase(lambda: db.fabrica_de_sesiones()())
 
 
