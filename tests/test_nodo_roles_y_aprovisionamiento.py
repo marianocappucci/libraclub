@@ -223,6 +223,10 @@ PROHIBIDAS = {
     "pagos_de_reserva": "el pago de una reserva dada en el nodo sube como caja.movimiento; el reapuntado de la reserva "
                         "provisoria borraría estas filas si se espejaran",
     "cc_asientos": "la cuenta corriente no se opera en el nodo",
+    "avisos_envios": "el nodo no manda avisos: los deduce y los manda el barrido del central (libracore ADR-090, "
+                     "LibraClub ADR-030); espejarla bajaría a cada club los teléfonos y los textos de los demás",
+    "avisos": "legado: el registro viejo de avisos (ADR-030), sin uso; tampoco se espeja",
+    "config_avisos": "qué tipos de aviso salen lo decide el central, que es el que los manda",
     "sync_outbox": "es del nodo",
     "sync_inbox": "es del central",
     "node_identity": "es del central",

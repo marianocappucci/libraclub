@@ -1,4 +1,8 @@
-"""El motor de avisos: qué se manda, qué no, y qué pasa cuando falla.
+"""El barrido de avisos: qué se manda, qué no, y qué pasa cuando falla.
+
+Desde el ADR-030 el envío es del motor (`libracore.avisos`): estos tests miden **lo que es de LibraClub** —qué
+corresponde avisar y con qué texto— contra un proveedor falso, y que el barrido deja el rastro en `avisos_envios`. Cómo
+reintenta, cómo reserva y cómo contesta cada proveedor lo miden los tests del motor.
 
 Todo se mide con un `momento` explícito y un `created_at` puesto a mano. Nada
 depende de la hora real a la que corra el CI: un test de recordatorios que use
@@ -12,15 +16,16 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select, update
+from libracore.avisos import MAX_INTENTOS
+from sqlalchemy import update
 
-from app.models.avisos import Aviso
-from app.models.enums import CanalAviso, EstadoAviso, EstadoReserva, TipoAviso
+from app.models.enums import EstadoAviso, EstadoReserva, TipoAviso
 from app.models.reservas import CanalDePago, EstadoPago, Reserva
 from app.servicios import avisos as servicio
 from app.servicios import pagos as servicio_pagos
 from app.servicios import reservas as servicio_reservas
 from app.tiempo import TZ
+from tests.avisos_apoyo import Guardado, ProveedorFalso, guardados
 
 #: El turno de todos los tests: martes 01-09-2026 a las 20:00, hora local. Fijo
 #: —como `un_martes` del conftest— y dentro del horario por defecto (08:00 a
@@ -28,34 +33,9 @@ from app.tiempo import TZ
 CUANDO = datetime(2026, 9, 1, 20, 0, tzinfo=TZ)
 
 
-class TransporteFalso:
-    """Un canal que anota en vez de mandar.
-
-    Implementa el mismo `Protocol` que `TransporteEmail` —`canal`,
-    `disponible()` y `enviar()`— y nada más. Que la clase real cumpla ese
-    contrato lo mide `test_el_transporte_de_email_sin_smtp_no_esta_disponible`,
-    que la usa de verdad: un doble solo prueba lo que uno supone.
-    """
-
-    canal = CanalAviso.EMAIL
-
-    def __init__(self, *, disponible: bool = True, falla: str | None = None) -> None:
-        self.enviados: list[tuple[str, str, str]] = []
-        self._disponible = disponible
-        self._falla = falla
-
-    def disponible(self) -> bool:
-        return self._disponible
-
-    def enviar(self, *, destino: str, asunto: str, cuerpo: str) -> None:
-        if self._falla:
-            raise RuntimeError(self._falla)
-        self.enviados.append((destino, asunto, cuerpo))
-
-
 @pytest.fixture
-def jugador(sesion, cliente):
-    """El cliente del conftest, con email: sin email no hay aviso que mandar."""
+def jugador(sesion, cliente, motor):
+    """El cliente del conftest, con email (sin email no hay aviso que mandar), y el motor apuntando a la base."""
     cliente.email = "jugador@ejemplo.com"
     sesion.commit()
     return cliente
@@ -87,8 +67,9 @@ def _reserva(sesion, cancha, jugador, *, estado=EstadoReserva.CONFIRMADA, cuando
     return reserva
 
 
-def _avisos(sesion) -> list[Aviso]:
-    return list(sesion.scalars(select(Aviso).order_by(Aviso.id)).all())
+def _avisos(sesion) -> list[Guardado]:
+    """Lo que el barrido dejó en `avisos_envios`, del más viejo al más nuevo."""
+    return guardados()
 
 
 # --------------------------------------------------------------------------
@@ -105,16 +86,16 @@ def test_la_confirmacion_sale_y_no_se_repite(sesion, cancha, jugador, tarifa_bas
     reserva = _reserva(sesion, cancha, jugador)
     momento = CUANDO - timedelta(hours=10)
     _creada(sesion, reserva, momento - timedelta(minutes=5))
-    transporte = TransporteFalso()
+    proveedor = ProveedorFalso()
 
-    primera = servicio.despachar(sesion, transporte, momento)
+    primera = servicio.barrer(sesion, proveedor, momento)
     sesion.commit()
-    segunda = servicio.despachar(sesion, transporte, momento + timedelta(minutes=5))
+    segunda = servicio.barrer(sesion, proveedor, momento + timedelta(minutes=5))
     sesion.commit()
 
     assert primera.enviados == 1, "el control positivo: la primera sí manda"
     assert segunda.enviados == 0
-    assert len(transporte.enviados) == 1
+    assert len(proveedor.enviados) == 1
     (guardado,) = _avisos(sesion)
     assert guardado.tipo is TipoAviso.CONFIRMACION
     assert guardado.estado is EstadoAviso.ENVIADO
@@ -132,9 +113,9 @@ def test_no_se_confirman_las_reservas_viejas(sesion, cancha, jugador, tarifa_bas
     reserva = _reserva(sesion, cancha, jugador)
     momento = CUANDO - timedelta(hours=10)
     _creada(sesion, reserva, momento - timedelta(days=30))
-    transporte = TransporteFalso()
+    proveedor = ProveedorFalso()
 
-    servicio.despachar(sesion, transporte, momento)
+    servicio.barrer(sesion, proveedor, momento)
     sesion.commit()
 
     tipos = [a.tipo for a in _avisos(sesion)]
@@ -167,7 +148,7 @@ def test_la_reserva_confirmada_por_el_webhook_tambien_avisa(
     momento = CUANDO - timedelta(hours=10)
     _creada(sesion, reserva, momento - timedelta(minutes=5))
 
-    resumen = servicio.despachar(sesion, TransporteFalso(), momento)
+    resumen = servicio.barrer(sesion, ProveedorFalso(), momento)
     sesion.commit()
 
     assert reserva.estado is EstadoReserva.CONFIRMADA
@@ -189,13 +170,13 @@ def test_los_dos_recordatorios_son_avisos_distintos(sesion, cancha, jugador, tar
     """
     reserva = _reserva(sesion, cancha, jugador)
     _creada(sesion, reserva, CUANDO - timedelta(days=3))
-    transporte = TransporteFalso()
+    proveedor = ProveedorFalso()
 
-    de_24 = servicio.despachar(sesion, transporte, CUANDO - timedelta(hours=20))
+    de_24 = servicio.barrer(sesion, proveedor, CUANDO - timedelta(hours=20))
     sesion.commit()
-    de_2 = servicio.despachar(sesion, transporte, CUANDO - timedelta(hours=1))
+    de_2 = servicio.barrer(sesion, proveedor, CUANDO - timedelta(hours=1))
     sesion.commit()
-    otra_vez = servicio.despachar(sesion, transporte, CUANDO - timedelta(minutes=55))
+    otra_vez = servicio.barrer(sesion, proveedor, CUANDO - timedelta(minutes=55))
     sesion.commit()
 
     assert (de_24.enviados, de_2.enviados, otra_vez.enviados) == (1, 1, 0)
@@ -216,9 +197,9 @@ def test_no_se_recuerda_un_turno_que_se_acaba_de_reservar(
     reserva = _reserva(sesion, cancha, jugador)
     momento = CUANDO - timedelta(hours=1)
     _creada(sesion, reserva, momento - timedelta(minutes=5))
-    transporte = TransporteFalso()
+    proveedor = ProveedorFalso()
 
-    servicio.despachar(sesion, transporte, momento)
+    servicio.barrer(sesion, proveedor, momento)
     sesion.commit()
 
     tipos = [a.tipo for a in _avisos(sesion)]
@@ -229,7 +210,7 @@ def test_no_se_avisa_un_turno_que_ya_empezo(sesion, cancha, jugador, tarifa_base
     reserva = _reserva(sesion, cancha, jugador)
     _creada(sesion, reserva, CUANDO - timedelta(days=3))
 
-    resumen = servicio.despachar(sesion, TransporteFalso(), CUANDO + timedelta(minutes=1))
+    resumen = servicio.barrer(sesion, ProveedorFalso(), CUANDO + timedelta(minutes=1))
     sesion.commit()
 
     assert resumen.enviados == 0
@@ -247,15 +228,15 @@ def test_la_cancelacion_se_avisa_si_el_cliente_sabia_que_tenia_turno(
     reserva = _reserva(sesion, cancha, jugador)
     momento = CUANDO - timedelta(hours=10)
     _creada(sesion, reserva, momento - timedelta(minutes=5))
-    transporte = TransporteFalso()
-    servicio.despachar(sesion, transporte, momento)
+    proveedor = ProveedorFalso()
+    servicio.barrer(sesion, proveedor, momento)
     sesion.commit()
 
     servicio_reservas.cambiar_estado(
         sesion, reserva.id, EstadoReserva.CANCELADA, motivo="Lluvia"
     )
     sesion.commit()
-    resumen = servicio.despachar(sesion, transporte, momento + timedelta(minutes=10))
+    resumen = servicio.barrer(sesion, proveedor, momento + timedelta(minutes=10))
     sesion.commit()
 
     assert resumen.enviados == 1
@@ -290,8 +271,8 @@ def _aviso_de_cancelacion(
         sesion.commit()
     momento = CUANDO - timedelta(hours=10)
     _creada(sesion, reserva, momento - timedelta(minutes=5))
-    transporte = TransporteFalso()
-    servicio.despachar(sesion, transporte, momento)
+    proveedor = ProveedorFalso()
+    servicio.barrer(sesion, proveedor, momento)
     sesion.commit()
 
     if pago is not None:
@@ -302,11 +283,11 @@ def _aviso_de_cancelacion(
         sesion, reserva.id, EstadoReserva.CANCELADA, motivo="Lluvia"
     )
     sesion.commit()
-    servicio.despachar(sesion, transporte, momento + timedelta(minutes=10))
+    servicio.barrer(sesion, proveedor, momento + timedelta(minutes=10))
     sesion.commit()
 
-    cuerpos = [c for _d, a, c in transporte.enviados if a.startswith("Turno cancelado")]
-    assert len(cuerpos) == 1, transporte.enviados
+    cuerpos = [c for _d, a, c in proveedor.enviados if a.startswith("Turno cancelado")]
+    assert len(cuerpos) == 1, proveedor.enviados
     return cuerpos[0]
 
 
@@ -412,7 +393,7 @@ def test_la_provisoria_vencida_no_avisa_nada(sesion, cancha, jugador, tarifa_bas
     )
     sesion.commit()
 
-    resumen = servicio.despachar(sesion, TransporteFalso(), CUANDO - timedelta(hours=9))
+    resumen = servicio.barrer(sesion, ProveedorFalso(), CUANDO - timedelta(hours=9))
     sesion.commit()
 
     assert reserva.estado is EstadoReserva.CANCELADA, "el control: sí quedó cancelada"
@@ -425,7 +406,7 @@ def test_la_provisoria_vencida_no_avisa_nada(sesion, cancha, jugador, tarifa_bas
 # --------------------------------------------------------------------------
 
 
-def test_sin_email_queda_omitido_y_no_se_reevalua(sesion, cancha, cliente, tarifa_base):
+def test_sin_email_queda_omitido_y_no_se_reevalua(sesion, cancha, cliente, tarifa_base, motor):
     """El cliente del conftest no tiene email: el turno se toma igual.
 
     Queda la fila `OMITIDO` y no nada: sin ella la barrida siguiente lo vuelve a
@@ -435,11 +416,11 @@ def test_sin_email_queda_omitido_y_no_se_reevalua(sesion, cancha, cliente, tarif
     reserva = _reserva(sesion, cancha, cliente)
     momento = CUANDO - timedelta(hours=10)
     _creada(sesion, reserva, momento - timedelta(minutes=5))
-    transporte = TransporteFalso()
+    proveedor = ProveedorFalso()
 
-    primera = servicio.despachar(sesion, transporte, momento)
+    primera = servicio.barrer(sesion, proveedor, momento)
     sesion.commit()
-    segunda = servicio.despachar(sesion, transporte, momento + timedelta(minutes=5))
+    segunda = servicio.barrer(sesion, proveedor, momento + timedelta(minutes=5))
     sesion.commit()
 
     assert (primera.omitidos, segunda.omitidos) == (1, 0)
@@ -447,7 +428,7 @@ def test_sin_email_queda_omitido_y_no_se_reevalua(sesion, cancha, cliente, tarif
     assert aviso.estado is EstadoAviso.OMITIDO
     assert aviso.destino == ""
     assert "email" in (aviso.detalle or "")
-    assert transporte.enviados == []
+    assert proveedor.enviados == []
 
 
 def test_el_que_pidio_no_recibir_no_recibe(sesion, cancha, jugador, tarifa_base):
@@ -456,17 +437,17 @@ def test_el_que_pidio_no_recibir_no_recibe(sesion, cancha, jugador, tarifa_base)
     reserva = _reserva(sesion, cancha, jugador)
     momento = CUANDO - timedelta(hours=10)
     _creada(sesion, reserva, momento - timedelta(minutes=5))
-    transporte = TransporteFalso()
+    proveedor = ProveedorFalso()
 
-    resumen = servicio.despachar(sesion, transporte, momento)
+    resumen = servicio.barrer(sesion, proveedor, momento)
     sesion.commit()
 
     assert (resumen.enviados, resumen.omitidos) == (0, 1)
-    assert transporte.enviados == []
+    assert proveedor.enviados == []
     assert _avisos(sesion)[0].estado is EstadoAviso.OMITIDO
 
 
-def test_quitar_un_bloqueo_no_le_avisa_a_nadie(sesion, cancha, tarifa_base):
+def test_quitar_un_bloqueo_no_le_avisa_a_nadie(sesion, cancha, tarifa_base, motor):
     """🔴 «Quitar bloqueo» deja una `cancelada` **sin cliente**.
 
     Es la única fila viva del sistema donde `cliente_id` puede ser `NULL` fuera
@@ -486,7 +467,7 @@ def test_quitar_un_bloqueo_no_le_avisa_a_nadie(sesion, cancha, tarifa_base):
     servicio_reservas.cambiar_estado(sesion, bloqueo.id, EstadoReserva.CANCELADA)
     sesion.commit()
 
-    resumen = servicio.despachar(sesion, TransporteFalso(), CUANDO - timedelta(hours=10))
+    resumen = servicio.barrer(sesion, ProveedorFalso(), CUANDO - timedelta(hours=10))
     sesion.commit()
 
     assert bloqueo.cliente_id is None, "el control: la cancelada quedó sin cliente"
@@ -494,7 +475,7 @@ def test_quitar_un_bloqueo_no_le_avisa_a_nadie(sesion, cancha, tarifa_base):
     assert _avisos(sesion) == []
 
 
-def test_el_bloqueo_no_le_avisa_a_nadie(sesion, cancha, tarifa_base):
+def test_el_bloqueo_no_le_avisa_a_nadie(sesion, cancha, tarifa_base, motor):
     """Un bloqueo de mantenimiento no tiene cliente. Es una fila de `reservas`
     como cualquier otra, así que lo único que lo deja afuera es el estado.
 
@@ -515,7 +496,7 @@ def test_el_bloqueo_no_le_avisa_a_nadie(sesion, cancha, tarifa_base):
     momento = CUANDO - timedelta(hours=10)
     _creada(sesion, bloqueo, momento - timedelta(minutes=5))
 
-    resumen = servicio.despachar(sesion, TransporteFalso(), momento)
+    resumen = servicio.barrer(sesion, ProveedorFalso(), momento)
     sesion.commit()
 
     assert resumen == servicio.Resumen()
@@ -538,15 +519,15 @@ def test_un_envio_fallido_se_reintenta_y_despues_se_deja(
     reserva = _reserva(sesion, cancha, jugador)
     momento = CUANDO - timedelta(hours=10)
     _creada(sesion, reserva, momento - timedelta(minutes=5))
-    roto = TransporteFalso(falla="550 mailbox unavailable")
+    roto = ProveedorFalso(falla="550 mailbox unavailable")
 
     for i in range(5):
-        servicio.despachar(sesion, roto, momento + timedelta(minutes=i))
+        servicio.barrer(sesion, roto, momento + timedelta(minutes=i))
         sesion.commit()
 
     (aviso,) = _avisos(sesion)
     assert aviso.estado is EstadoAviso.FALLIDO
-    assert aviso.intentos == servicio.MAX_INTENTOS
+    assert aviso.intentos == MAX_INTENTOS
     assert "550" in (aviso.detalle or "")
     assert aviso.enviado_at is None
 
@@ -561,10 +542,10 @@ def test_un_reintento_que_funciona_queda_enviado(sesion, cancha, jugador, tarifa
     momento = CUANDO - timedelta(hours=10)
     _creada(sesion, reserva, momento - timedelta(minutes=5))
 
-    servicio.despachar(sesion, TransporteFalso(falla="conexión rechazada"), momento)
+    servicio.barrer(sesion, ProveedorFalso(falla="conexión rechazada"), momento)
     sesion.commit()
-    bueno = TransporteFalso()
-    resumen = servicio.despachar(sesion, bueno, momento + timedelta(minutes=5))
+    bueno = ProveedorFalso()
+    resumen = servicio.barrer(sesion, bueno, momento + timedelta(minutes=5))
     sesion.commit()
 
     assert resumen.enviados == 1
@@ -586,7 +567,7 @@ def test_sin_transporte_disponible_no_se_anota_nada(sesion, cancha, jugador, tar
     momento = CUANDO - timedelta(hours=10)
     _creada(sesion, reserva, momento - timedelta(minutes=5))
 
-    resumen = servicio.despachar(sesion, TransporteFalso(disponible=False), momento)
+    resumen = servicio.barrer(sesion, ProveedorFalso(disponible=False), momento)
     sesion.commit()
 
     assert resumen == servicio.Resumen()
@@ -594,7 +575,7 @@ def test_sin_transporte_disponible_no_se_anota_nada(sesion, cancha, jugador, tar
 
 
 # --------------------------------------------------------------------------
-# El texto, el transporte real y el cron
+# El texto, el proveedor real y el cron
 # --------------------------------------------------------------------------
 
 
@@ -608,12 +589,12 @@ def test_el_texto_lleva_la_hora_local_y_la_cancha(sesion, cancha, jugador, tarif
     reserva = _reserva(sesion, cancha, jugador)
     momento = CUANDO - timedelta(hours=10)
     _creada(sesion, reserva, momento - timedelta(minutes=5))
-    transporte = TransporteFalso()
+    proveedor = ProveedorFalso()
 
-    servicio.despachar(sesion, transporte, momento)
+    servicio.barrer(sesion, proveedor, momento)
     sesion.commit()
 
-    (destino, asunto, cuerpo) = transporte.enviados[0]
+    (destino, asunto, cuerpo) = proveedor.enviados[0]
     assert destino == "jugador@ejemplo.com"
     assert "01-09-2026 20:00" in cuerpo
     assert "23:00" not in cuerpo
@@ -640,28 +621,26 @@ def test_la_plata_se_escribe_como_en_argentina():
     assert "€" not in servicio.pesos(Decimal("1000"))
 
 
-def test_el_transporte_de_email_sin_smtp_no_esta_disponible():
-    """La clase **real**, no el doble.
+def test_el_proveedor_de_email_sin_smtp_no_esta_disponible():
+    """El proveedor **real** del motor, armado como lo arma el cron (`construir_proveedores`), no el doble.
 
-    Es lo que ata el `Protocol` a la implementación: si `TransporteEmail`
-    cambiara de forma —otro nombre de método, otra firma— el doble seguiría
-    andando y la suite entera quedaría verde midiendo un objeto que ya no
-    existe.
+    Es lo que ata `ProveedorFalso` al contrato: un doble sólo prueba lo que uno supone. Y mide el enganche que es de
+    LibraClub: que el resolver de SMTP de la instancia llegue al proveedor de mail.
     """
     from libraauth.email_sender import SmtpConfig
 
-    transporte = servicio.TransporteEmail(lambda: SmtpConfig())
+    email, _whatsapp = servicio.construir_proveedores(lambda: SmtpConfig())
 
-    assert transporte.canal is CanalAviso.EMAIL
-    assert transporte.disponible() is False
+    assert email.canal == "email"
+    assert email.simulado is False
+    assert email.disponible() is False
 
 
-def test_el_transporte_de_email_con_smtp_cargado_esta_disponible():
+def test_el_proveedor_de_email_con_smtp_cargado_esta_disponible():
     """El control positivo del de arriba: `disponible()` puede dar `True`.
 
-    Sin él, un `disponible()` que devolviera siempre `False` —o que mirara el
-    campo equivocado— pasaría el test anterior sin despeinarse, y en producción
-    no saldría un solo mail.
+    Sin él, un `disponible()` que devolviera siempre `False` —o que mirara el campo equivocado— pasaría el test anterior
+    sin despeinarse, y en producción no saldría un solo mail.
     """
     from libraauth.email_sender import SmtpConfig
 
@@ -669,21 +648,42 @@ def test_el_transporte_de_email_con_smtp_cargado_esta_disponible():
         host="smtp.ejemplo.com", port=587, user="u", password="p",
         from_email="turnos@ejemplo.com",
     )
-    assert servicio.TransporteEmail(lambda: config).disponible() is True
+    email, _whatsapp = servicio.construir_proveedores(lambda: config)
+
+    assert email.disponible() is True
 
 
-def test_el_script_del_cron_existe_y_se_puede_importar():
+def test_el_script_del_cron_existe_y_se_puede_importar(engine, monkeypatch):
     """🔑 El mecanismo que nadie invoca.
 
-    Este script **es** el interruptor de los avisos: sin él no sale nada. Un
-    import roto —una función que se renombró— sólo se descubriría cuando el cron
-    escriba un traceback en un log que nadie mira.
+    Este script **es** el interruptor de los avisos: sin él no sale nada. Un import roto —una función que se
+    renombró— sólo se descubriría cuando el cron escriba un traceback en un log que nadie mira.
+
+    Importarlo levanta el arranque de la app (`import app.asgi`, que enchufa el almacén de secretos): acá con la config
+    de la suite, como en `test_secretos_config_json.py`.
     """
     import importlib
+    import sys
+
+    from libraauth.models import Base as AuthBase
+    from libraauth.testing import crear_schema_de_auth
+
+    import app.main as app_main
+    from tests.test_api import CLAVE, USUARIO, _config
+
+    monkeypatch.setenv("LIBRACLUB_ADMIN_USERNAME", USUARIO)
+    monkeypatch.setenv("LIBRACLUB_ADMIN_PASSWORD", CLAVE)
+    AuthBase.metadata.drop_all(engine)
+    crear_schema_de_auth(engine)
+    real = app_main.crear_app
+    monkeypatch.setattr(app_main, "crear_app", lambda *a, **k: real(_config()))
+    for nombre in ("app.asgi", "scripts.enviar_avisos"):
+        monkeypatch.delitem(sys.modules, nombre, raising=False)
 
     modulo = importlib.import_module("scripts.enviar_avisos")
 
     assert callable(modulo.main)
+    AuthBase.metadata.drop_all(engine)
 
 
 def test_los_dias_de_la_semana_no_cambian_el_resultado():

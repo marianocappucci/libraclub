@@ -35,6 +35,7 @@ from libraauth.terminos import TerminosRepository, build_terminos_router
 from libracommerce.erp import offline_stock
 from libracore import config_manager as _lc_config_manager
 from libracore.arca_router import build_arca_router
+from libracore.avisos_router import build_avisos_router
 from libracore.caja_router import build_cierre_diario_router
 from libracore.candados import una_vez_al_arrancar
 from libracore.cola_arca import pedidos_a_emitir
@@ -434,8 +435,16 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # Los reincidentes de ausentismo. Vive bajo `/api/clientes` pero con dos
     # segmentos, así que no depende de ir antes o después del ABM de clientes.
     app.include_router(ausentismo_router.router, dependencies=_DEL_CENTRAL)
-    # El registro de avisos y su configuración (ADR-029). Los manda el cron del central: en el nodo no hay qué mostrar.
+    # Qué tipos de aviso salen (ADR-029, ADR-030): `/api/avisos/tipos`. Los manda el cron del central: en el nodo no
+    # hay qué mostrar.
     app.include_router(avisos_router.router, dependencies=_DEL_CENTRAL)
+    # Cómo salen y qué salió: WhatsApp (apagado, registro o Evolution), «probar envío» y el registro, del motor
+    # (libracore ADR-090) en el mismo prefijo `/api/avisos`. El gate es el del producto y cubre las cuatro rutas: la
+    # configuración dice con qué cuenta de WhatsApp habla el club y el registro tiene los teléfonos y los textos de
+    # sus clientes. El `smtp_config` es el MISMO resolver del envío de comprobantes y de la recuperación de contraseña
+    # (`app/smtp.py`). En un nodo, el `PUT` y el «probar» contestan 409 `solo_en_el_central` por su cuenta (el nodo no
+    # manda avisos).
+    app.include_router(build_avisos_router(require_admin=require_admin, smtp_config=smtp_config))
     app.include_router(reservas.router)
     # Las reservas en conflicto (ADR-022). Prefijo propio y no `/api/reservas/conflictos`: `GET /api/reservas/{id}`
     # lo leería como un id.

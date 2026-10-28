@@ -55,11 +55,11 @@ Lo que sigue abierto de esta fase, en orden:
 1. **El ausentismo**: `AUSENTE` existe como estado y se puede marcar, pero no se
    cuenta por cliente ni bloquea al reincidente. Es lo que ATC vende como tarjeta
    en garantía y Dónde Juego como lista negra.
-2. **WhatsApp** como segundo canal. **La costura está hecha** (2026-10-28,
-   ADR-029): `TransporteWhatsAppRegistro` arma y anota los mensajes sin mandarlos
-   y la pantalla «Avisos» lo prende. **Falta el proveedor** (Evolution o la API de
-   Meta, que pide plantillas aprobadas), y va en el motor: ver la propuesta de
-   ADR-029.
+2. **WhatsApp** como segundo canal. **Hecho en el motor y adoptado** (2026-10-28, ADR-030): el aviso sale por
+   `libracore.avisos` (apagado, en registro o por Evolution API) y la pantalla «Avisos» lo conecta con los
+   componentes del kit. **Falta** conectar una instancia real de Evolution (URL, instancia y apikey, desde la
+   pantalla) y decidir si se suma la API de Meta, que pide plantillas aprobadas (el contrato del motor ya las
+   admite).
 3. **El aviso de cancelación no dice qué pasó con la seña.** El portal sí se lo
    dice al jugador en el momento de cancelar —que es cuando más le importa— pero
    el mail que sale después no lo repite. Para hacerlo, `redactar` tendría que

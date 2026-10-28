@@ -144,7 +144,7 @@ log —no suponiéndolas.
 | Script | Cada | Qué pasa si no está |
 |---|---|---|
 | `scripts/vencer_provisorias.py` | 5 min | El turno que alguien empezó a reservar por el portal y abandonó **queda retenido para siempre**: la cancha de las 20:00 del viernes deja de venderse. También libera la seña del mostrador (`pendiente_pago`) que no llegó en 24 horas, salvo que ya haya plata adentro (ADR-029) |
-| `scripts/enviar_avisos.py` | 5 min | **No sale ningún aviso** — ni confirmación, ni recordatorio, ni cancelación, ni el de seña por vencer. Es el interruptor de la función (ADR-015); qué tipos salen y el modo de WhatsApp se eligen en «Avisos» (ADR-029) |
+| `scripts/enviar_avisos.py` | 5 min | **No sale ningún aviso** — ni confirmación, ni recordatorio, ni cancelación, ni el de seña por vencer. Es el interruptor de la función (ADR-015); qué tipos salen y cómo sale WhatsApp (apagado, registro o Evolution) se eligen en «Avisos» (ADR-029, ADR-030). Manda el motor: reserva cada aviso en `avisos_envios` antes de mandarlo, así que dos corridas superpuestas no lo duplican |
 
 ```bash
 */5 * * * * docker exec libraclub-dev python /app/scripts/vencer_provisorias.py >> /var/log/libraclub_vencer.log 2>&1
