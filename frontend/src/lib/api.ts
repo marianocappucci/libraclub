@@ -247,6 +247,75 @@ export const tarifas = {
   borrar: (id: number) => api.del(`/api/tarifas/${id}`),
 }
 
+// ── Promociones y hora valle (ADR-029) ───────────────────────────────────
+
+/** Un descuento en porcentaje sobre la tarifa. El precio rebajado lo calcula el servidor
+ *  (`tarifario.cotizar`): la pantalla nunca lo recalcula. */
+export interface PromocionEntrada {
+  sucursal_id: number
+  cancha_id: number | null
+  nombre: string
+  /** 1 a 99: un turno en $0 descuadra la caja. */
+  descuento_porcentaje: number
+  /** 0 = lunes … 6 = domingo. `null` = todos los días. Nunca una lista vacía (422). */
+  dias_semana: number[] | null
+  hora_desde: string
+  hora_hasta: string
+  vigente_desde: string | null
+  vigente_hasta: string | null
+  aplica_en_feriados: boolean
+  activa: boolean
+}
+
+export interface Promocion extends PromocionEntrada {
+  id: number
+}
+
+export const promociones = {
+  listar: () => api.get<Promocion[]>('/api/promociones'),
+  crear: (cuerpo: PromocionEntrada) => api.post<Promocion>('/api/promociones', cuerpo),
+  editar: (id: number, cuerpo: PromocionEntrada) =>
+    api.put<Promocion>(`/api/promociones/${id}`, cuerpo),
+  borrar: (id: number) => api.del(`/api/promociones/${id}`),
+}
+
+// ── Avisos al cliente (ADR-015, ADR-029) ─────────────────────────────────
+
+export type ModoWhatsapp = 'apagado' | 'registro'
+export type TipoAviso = 'confirmacion' | 'recordatorio' | 'cancelacion' | 'sena_por_vencer'
+export type CanalAviso = 'email' | 'whatsapp'
+export type EstadoAviso = 'enviado' | 'fallido' | 'omitido' | 'registrado'
+
+export interface ConfigAvisos {
+  whatsapp: ModoWhatsapp
+  confirmacion: boolean
+  recordatorio: boolean
+  cancelacion: boolean
+  sena_por_vencer: boolean
+}
+
+export interface AvisoRegistrado {
+  id: number
+  creado_at: string
+  tipo: TipoAviso
+  canal: CanalAviso
+  estado: EstadoAviso
+  destino: string
+  detalle: string | null
+  asunto: string | null
+  cuerpo: string | null
+  intentos: number
+  reserva_id: number
+  cancha: string | null
+  comienza_at: string
+}
+
+export const avisos = {
+  config: () => api.get<ConfigAvisos>('/api/avisos/config'),
+  guardarConfig: (cuerpo: ConfigAvisos) => api.put<ConfigAvisos>('/api/avisos/config', cuerpo),
+  registro: (limite = 100) => api.get<AvisoRegistrado[]>(`/api/avisos/registro?limite=${limite}`),
+}
+
 /** El mínimo para dar de alta un cliente desde el campo «Cliente» (`SelectCliente`, ver `lib/clientes.ts`).
  *
  *  Los demás campos quedan en su default del schema: un cliente que llama por
@@ -1189,7 +1258,12 @@ export interface CanchaPublica {
 export interface TurnoLibre {
   comienza_at: string
   termina_at: string
+  /** Lo que se cobra: ya con la promoción, si la hay. */
   precio: number
+  /** El precio sin promoción, para tacharlo. `null` cuando el turno cuesta lo de la tarifa. */
+  precio_lista: number | null
+  /** Cómo se llama la promoción aplicada («Hora valle»). `null` sin promoción. */
+  promocion: string | null
 }
 
 export interface ReservaDelJugador {

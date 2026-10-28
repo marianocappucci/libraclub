@@ -129,6 +129,58 @@ class TarifaSalida(TarifaEntrada):
     id: int
 
 
+class PromocionEntrada(BaseModel):
+    """Una promoción o una hora valle (ver `models/tarifas.Promocion`)."""
+
+    sucursal_id: int
+    cancha_id: int | None = None
+    nombre: str = Field(min_length=1, max_length=80)
+    #: Tope en 99: un turno en $0 descuadra la caja. La base lo vuelve a exigir.
+    descuento_porcentaje: int = Field(ge=1, le=99)
+    #: `None` = todos los días. 0 = lunes … 6 = domingo; sin repetidos y sin lista vacía.
+    dias_semana: list[int] | None = None
+    hora_desde: time
+    hora_hasta: time
+    vigente_desde: date | None = None
+    vigente_hasta: date | None = None
+    aplica_en_feriados: bool = False
+    activa: bool = True
+
+    @field_validator("dias_semana")
+    @classmethod
+    def _dias_validos(cls, valor: list[int] | None) -> list[int] | None:
+        if valor is None:
+            return None
+        if not valor:
+            # Una lista vacía sería «ningún día»: una promoción que nunca aplica. Si no
+            # debe aplicar, se la desactiva; si aplica siempre, va `null`.
+            raise ValueError("elegí al menos un día, o dejá todos los días")
+        if any(d < 0 or d > 6 for d in valor):
+            raise ValueError("los días van de 0 (lunes) a 6 (domingo)")
+        return sorted(set(valor))
+
+    @field_validator("hora_hasta")
+    @classmethod
+    def _franja_valida(cls, valor: time, info) -> time:
+        desde = info.data.get("hora_desde")
+        if desde is not None and valor <= desde:
+            raise ValueError("hora_hasta tiene que ser posterior a hora_desde")
+        return valor
+
+    @field_validator("vigente_hasta")
+    @classmethod
+    def _vigencia_valida(cls, valor: date | None, info) -> date | None:
+        desde = info.data.get("vigente_desde")
+        if valor is not None and desde is not None and valor < desde:
+            raise ValueError("vigente_hasta no puede ser anterior a vigente_desde")
+        return valor
+
+
+class PromocionSalida(PromocionEntrada):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+
+
 class FranjaEntrada(BaseModel):
     sucursal_id: int
     cancha_id: int | None = None

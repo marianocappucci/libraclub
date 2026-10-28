@@ -85,6 +85,7 @@ from app.routers import (
 )
 from app.routers import ausentismo as ausentismo_router
 from app.routers import auth as auth_router
+from app.routers import avisos as avisos_router
 from app.routers import buffet as buffet_router
 from app.routers import caja as caja_router
 from app.routers import cajas as cajas_router
@@ -433,6 +434,8 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # Los reincidentes de ausentismo. Vive bajo `/api/clientes` pero con dos
     # segmentos, así que no depende de ir antes o después del ABM de clientes.
     app.include_router(ausentismo_router.router, dependencies=_DEL_CENTRAL)
+    # El registro de avisos y su configuración (ADR-029). Los manda el cron del central: en el nodo no hay qué mostrar.
+    app.include_router(avisos_router.router, dependencies=_DEL_CENTRAL)
     app.include_router(reservas.router)
     # Las reservas en conflicto (ADR-022). Prefijo propio y no `/api/reservas/conflictos`: `GET /api/reservas/{id}`
     # lo leería como un id.

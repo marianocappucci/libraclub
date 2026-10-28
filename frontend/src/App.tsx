@@ -29,6 +29,8 @@ import { MpBandeja } from '@/pages/MpBandeja'
 import { PanelDelDueno } from '@/pages/PanelDelDueno'
 import { Sucursales } from '@/pages/Sucursales'
 import { Tarifas } from '@/pages/Tarifas'
+import { Promociones } from '@/pages/Promociones'
+import { Avisos } from '@/pages/Avisos'
 import { Evento } from '@/pages/Evento'
 import { Torneo } from '@/pages/Torneo'
 import { Torneos } from '@/pages/Torneos'
@@ -108,6 +110,8 @@ function Backoffice() {
           <Route path="/agenda" element={<Agenda />} />
           <Route path="/canchas" element={<Canchas />} />
           <Route path="/tarifas" element={<Tarifas />} />
+          <Route path="/promociones" element={<Promociones />} />
+          <Route path="/avisos" element={<Avisos />} />
           <Route path="/turnos-fijos" element={<TurnosFijos />} />
           <Route path="/torneos" element={<Torneos />} />
           {/* El detalle va acá y no anidado: no comparte nada con el listado

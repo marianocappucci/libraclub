@@ -28,6 +28,10 @@ class Turno:
     termina_at: datetime
     libre: bool
     precio: Decimal | None = None
+    #: El precio sin promoción, **sólo cuando hay una** (ADR-029); `None` si el turno cuesta lo de la
+    #: tarifa. Es lo que el portal tacha. Va con `promocion`, que es la que la nombra.
+    precio_lista: Decimal | None = None
+    promocion: str | None = None
     reserva_id: int | None = None
     estado: EstadoReserva | None = None
     cliente: str | None = None
@@ -110,12 +114,16 @@ def grilla_del_dia(
                 dibujadas.add(ocupa.id)
                 turnos.append(_ocupado(ocupa, momento, termina))
             else:
+                cotizacion = _cotizar(sesion, cancha, momento) if con_precio else None
+                promo = cotizacion.promocion if cotizacion else None
                 turnos.append(
                     Turno(
                         comienza_at=momento,
                         termina_at=termina,
                         libre=True,
-                        precio=_precio(sesion, cancha, momento) if con_precio else None,
+                        precio=cotizacion.precio if cotizacion else None,
+                        precio_lista=cotizacion.precio_lista if promo else None,
+                        promocion=promo.nombre if promo else None,
                     )
                 )
             momento = termina
@@ -146,15 +154,16 @@ def _ocupado(reserva: Reserva, comienza_at: datetime, termina_at: datetime) -> T
     )
 
 
-def _precio(sesion: Session, cancha: Cancha, momento: datetime) -> Decimal | None:
+def _cotizar(
+    sesion: Session, cancha: Cancha, momento: datetime
+) -> tarifario.Cotizacion | None:
     try:
-        precio, _ = tarifario.precio_y_sena(sesion, cancha, momento)
+        return tarifario.cotizar(sesion, cancha, momento)
     except tarifario.SinTarifa:
         # Un turno sin tarifa **se muestra igual, sin precio**. Si se escondiera,
         # la franja sin precio cargado sería invisible y nadie se enteraría de
         # que falta cargarla.
         return None
-    return precio
 
 
 def grilla_de_la_semana(
