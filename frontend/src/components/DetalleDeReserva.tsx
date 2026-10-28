@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Printer } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
@@ -10,6 +11,7 @@ import type {
 } from '@/lib/api'
 import { useAuth } from '@/context/AuthContext'
 import { fecha, hora, pesos } from '@/lib/fechas'
+import { abrirTicket } from '@/lib/tickets'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SelectBuscable } from '@/components/select-buscable'
@@ -383,6 +385,19 @@ function SeccionDeCobro({ reservaId, estado, abierto, onCobrado }: {
             </li>
           ))}
         </ul>
+      )}
+
+      {/* El recibo no fiscal («no válido como factura»): lo que se le da al jugador
+          al cobrar. Aparece apenas hay plata cobrada, también con saldo pendiente —una
+          seña se recibe como se recibe un pago entero— y se puede reimprimir. */}
+      {datos.cobros.length > 0 && (
+        <button
+          type="button"
+          className={buttonVariants({ size: 'sm', variant: 'outline', className: 'w-fit' })}
+          onClick={() => abrirTicket(cobroDelTurno.urlDelRecibo(reservaId))}
+        >
+          <Printer className="size-4" /> Recibo del cobro
+        </button>
       )}
 
       {error && <p className="text-sm text-destructive">{error}</p>}

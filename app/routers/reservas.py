@@ -11,7 +11,7 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from libracore.cola_arca_respuesta import respuesta_en_cola
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -41,6 +41,7 @@ from app.servicios import cancelacion as servicio_cancelacion
 from app.servicios import cobro_qr, devoluciones, disponibilidad, reservas_nodo, tarifario
 from app.servicios import facturacion as servicio_facturacion
 from app.servicios import pagos as servicio_pagos
+from app.servicios import recibo as servicio_recibo
 from app.servicios import reservas as servicio
 from app.servicios.caja import SinTurnoAbierto
 from app.servicios.factura_del_nodo import facturar_desde_el_nodo as servicio_facturar_desde_el_nodo
@@ -371,6 +372,53 @@ def cobrar_turno(
     except servicio_caja.MedioDePagoInvalido as e:
         raise HTTPException(422, str(e)) from e
     return _estado_de_cobro(reserva)
+
+
+@router.get(
+    "/{reserva_id}/recibo",
+    responses={200: {"content": {"application/pdf": {}}}, 409: {"description": "El turno no tiene plata cobrada"}},
+)
+def recibo_del_turno(
+    reserva_id: int,
+    sesion: Session = Depends(obtener_sesion),
+    _: object = Depends(require_staff),
+):
+    """El recibo **no fiscal** de lo cobrado del turno: un PDF «no válido como factura» para darle al jugador.
+
+    🔑 **Se arma en el momento desde la caja** (`servicios/recibo.py`) y se puede reimprimir las veces que
+    haga falta: si después se cobra el saldo, el mismo recibo lista las dos entradas. No es la factura —esa es
+    `POST .../facturar`— y por eso no se pide que el turno esté facturado ni se bloquea si lo está.
+
+    409 si no entró plata (o se devolvió toda): un recibo afirma que se recibió algo.
+    """
+    _exigir_base_de_caja()
+    reserva = sesion.get(Reserva, reserva_id)
+    if reserva is None:
+        raise HTTPException(404, "no existe esa reserva")
+    cancha = sesion.get(Cancha, reserva.cancha_id)
+    cliente = sesion.get(Cliente, reserva.cliente_id) if reserva.cliente_id else None
+    # El mismo total que `_estado_de_cobro` y que el comprobante: alquiler más buffet.
+    total = Decimal(str(reserva.precio or 0)) + servicio_buffet.total_consumido(reserva.id)
+    try:
+        datos = servicio_recibo.armar_recibo(
+            reserva_id=reserva.id,
+            sucursal_id=cancha.sucursal_id if cancha else None,
+            cancha=cancha.nombre if cancha else "cancha",
+            comienza_at=reserva.comienza_at,
+            jugador=cliente.nombre if cliente else None,
+            cuit=(cliente.cuit or cliente.documento) if cliente else None,
+            total=total,
+            cobros=servicio_caja.cobros_de_reserva(reserva.id),
+            devoluciones=servicio_caja.devoluciones_de_reserva(reserva.id),
+        )
+    except servicio_recibo.SinCobros as e:
+        raise HTTPException(409, str(e)) from e
+    numero = f"{datos['punto_venta']:04d}-{datos['numero']:08d}"
+    return Response(
+        servicio_recibo.pdf_del_recibo(datos),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="recibo-{numero}.pdf"'},
+    )
 
 
 def _facturar_en_el_nodo(reserva: Reserva, usuario: dict):

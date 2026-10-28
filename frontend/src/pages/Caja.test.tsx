@@ -148,6 +148,8 @@ const estado = {
   puedeSimular: true,
   //: Hace cuántos días se abrió el turno. 0 = hoy, que es lo normal.
   diasAbierto: 0,
+  //: Lo cobrado por medio en el turno abierto (neto de egresos).
+  pagosPorMedio: { efectivo: 9000 } as Record<string, number>,
 }
 
 /** Un instante de hace `dias` días, a media mañana. */
@@ -169,9 +171,9 @@ function json(cuerpo: unknown, status = 200) {
 function resumen() {
   return {
     movimientos: estado.movimientos,
-    pagos_por_medio: { efectivo: 9000 },
-    total_ventas: 9000,
-    efectivo_ventas: 9000,
+    pagos_por_medio: estado.pagosPorMedio,
+    total_ventas: Object.values(estado.pagosPorMedio).reduce((a, b) => a + b, 0),
+    efectivo_ventas: estado.pagosPorMedio.efectivo ?? 0,
   }
 }
 
@@ -188,6 +190,7 @@ beforeEach(() => {
   estado.qr = { disponible: true, auto_facturar: true }
   estado.puedeSimular = true
   estado.diasAbierto = 0
+  estado.pagosPorMedio = { efectivo: 9000 }
   vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
     const u = String(url)
     let cuerpo: unknown = null
@@ -413,6 +416,113 @@ describe('un turno de caja es de UNA jornada', () => {
     montar()
     expect(await screen.findAllByText(/hace un día/i)).toHaveLength(2)
     expect(screen.queryByText(/1 días/)).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * Pedido del humano (lista «Caja»): lo cobrado por transferencia, tarjeta o
+ * Mercado Pago tiene que verse claro y separado del efectivo, para que el arqueo
+ * cuadre. El arqueo cuenta sólo el efectivo: el esperado es el fondo más lo
+ * cobrado en efectivo, y lo demás entró a la caja pero no está en el cajón.
+ */
+describe('el turno abierto separa el cajón de lo que no es efectivo', () => {
+  beforeEach(() => {
+    estado.pagosPorMedio = { efectivo: 9000, transferencia: 4000, mercadopago: 2500 }
+  })
+
+  it('🔑 el efectivo y el esperado van en «En el cajón»; lo demás, en «Fuera del cajón»', async () => {
+    montar()
+    const cajon = within(await screen.findByRole('region', { name: 'En el cajón' }))
+    const fuera = within(screen.getByRole('region', { name: 'Fuera del cajón' }))
+
+    expect(cajon.getByText('Esperado en el cajón')).toBeInTheDocument()
+    expect(cajon.getByText(/Efectivo \(menos egresos\)/)).toBeInTheDocument()
+    // El esperado es el fondo inicial más el efectivo, y NO suma lo de afuera.
+    expect(cajon.queryByText('Transferencia')).toBeNull()
+    expect(cajon.queryByText(/6\.500,00/)).toBeNull()
+
+    expect(fuera.getByText('Transferencia')).toBeInTheDocument()
+    expect(fuera.getByText('MercadoPago')).toBeInTheDocument()
+    expect(fuera.getByText('Total fuera del cajón')).toBeInTheDocument()
+    expect(fuera.getByText(/6\.500,00/)).toBeInTheDocument()
+    expect(fuera.queryByText(/Efectivo \(menos egresos\)/)).toBeNull()
+  })
+
+  it('el total cobrado junta las dos mitades', async () => {
+    montar()
+    await screen.findByRole('region', { name: 'En el cajón' })
+    // 9.000 de efectivo + 6.500 por los otros medios.
+    expect(screen.getByText('Total cobrado').nextElementSibling).toHaveTextContent(/15\.500,00/)
+  })
+
+  it('al cerrar la caja avisa que lo de afuera no se cuenta', async () => {
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: /Cerrar caja/ }))
+
+    const dialogo = within(await screen.findByRole('dialog'))
+    expect(dialogo.getByText(/fuera del cajón/i)).toBeInTheDocument()
+    expect(dialogo.getByText(/6\.500,00/)).toBeInTheDocument()
+    expect(dialogo.getByText(/No se cuenta/)).toBeInTheDocument()
+  })
+
+  it('con todo en efectivo no aparece el aviso del diálogo y «Fuera del cajón» lo dice', async () => {
+    estado.pagosPorMedio = { efectivo: 9000 }
+    const user = userEvent.setup()
+    montar()
+    const fuera = within(await screen.findByRole('region', { name: 'Fuera del cajón' }))
+    expect(fuera.getByText(/No se cobró nada por otros medios/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /Cerrar caja/ }))
+    expect(within(await screen.findByRole('dialog')).queryByText(/No se cuenta/)).toBeNull()
+  })
+})
+
+/**
+ * El recibo no fiscal («no válido como factura»): lo que se le da al jugador al
+ * cobrar el turno. Se pide recién cuando entró la plata, y se ofrece aunque la
+ * cuenta se cierre y deje la lista — por eso vive en el padre y no en la cuenta.
+ */
+describe('después de cobrar, se ofrece el recibo', () => {
+  it('🔑 «Imprimir recibo» abre el PDF de ESA reserva', async () => {
+    const abrir = vi.fn()
+    vi.stubGlobal('open', abrir)
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: /Cancha 2/ }))
+    // El control: antes de cobrar no hay recibo que ofrecer.
+    expect(screen.queryByRole('button', { name: /Imprimir recibo/ })).toBeNull()
+
+    const recargasAntes = llamadas.filter((l) => l.ruta.endsWith('/api/caja/turnos/actual')).length
+    await user.click(await screen.findByRole('button', { name: /Cobrar y cerrar la cuenta/ }))
+
+    // 🔴 **Se espera a que la pantalla termine de recargarse antes de mirar.** Cada
+    // cobro vuelve a pedir el turno y reemplaza TODA la pantalla por «Cargando…»:
+    // un recibo guardado en un componente de adentro se desmonta ahí y el botón
+    // desaparece. Sin esta espera el test lo encontraba justo antes de perderse y
+    // pasaba con el defecto puesto — es el que mostró la captura real.
+    await waitFor(() => {
+      const recargas = llamadas.filter((l) => l.ruta.endsWith('/api/caja/turnos/actual')).length
+      expect(recargas).toBeGreaterThan(recargasAntes)
+    })
+    await waitFor(() => expect(screen.queryByText('Cargando…')).toBeNull())
+
+    await user.click(await screen.findByRole('button', { name: /Imprimir recibo/ }))
+
+    expect(abrir).toHaveBeenCalledWith('/api/reservas/42/recibo', '_blank', 'noopener')
+    expect(screen.getByRole('status')).toHaveTextContent('Ana Gómez')
+  })
+
+  it('el aviso se cierra con «Cerrar»', async () => {
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: /Cancha 2/ }))
+    await user.click(await screen.findByRole('button', { name: /Cobrar y cerrar la cuenta/ }))
+    await user.click(await screen.findByRole('button', { name: /Imprimir recibo/ }))
+
+    await user.click(screen.getByRole('button', { name: 'Cerrar' }))
+
+    expect(screen.queryByRole('button', { name: /Imprimir recibo/ })).toBeNull()
   })
 })
 

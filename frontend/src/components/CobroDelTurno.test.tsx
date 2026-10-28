@@ -247,3 +247,39 @@ describe('lo que se cobra', () => {
     expect(await screen.findByText(/No hay una caja abierta/)).toBeInTheDocument()
   })
 })
+
+describe('el recibo no fiscal del cobro', () => {
+  /* Pedido del humano (lista «Caja»): un comprobante «no válido como factura» para
+   * darle al jugador cuando cobra. El PDF lo arma el backend
+   * (`tests/test_recibo_y_cobros_de_la_agenda.py`); acá se prueba cuándo se ofrece y a
+   * qué ruta apunta. */
+
+  const COBRO = { id: 9, fecha: '2026-08-20', monto: 4000, medio_pago: 'efectivo', concepto: 'Turno', factura_id: null }
+
+  it('🔑 con plata cobrada ofrece el recibo, aunque falte el saldo', async () => {
+    estado.cobros = { total: 14000, cobrado: 4000, pendiente: 10000, cobros: [COBRO] }
+    montar()
+    await screen.findByText('Cobro del turno')
+
+    expect(await screen.findByRole('button', { name: /Recibo del cobro/ })).toBeInTheDocument()
+    // Y el cobro del saldo sigue ahí: el recibo no reemplaza nada.
+    expect(screen.getByRole('button', { name: /^Cobrar$/ })).toBeInTheDocument()
+  })
+
+  it('🔴 sin nada cobrado NO lo ofrece: un recibo afirma que entró plata', async () => {
+    montar()
+    await screen.findByText('Cobro del turno')
+    expect(screen.queryByRole('button', { name: /Recibo del cobro/ })).toBeNull()
+  })
+
+  it('abre el PDF de ESA reserva en una pestaña nueva', async () => {
+    const abrir = vi.fn()
+    vi.stubGlobal('open', abrir)
+    estado.cobros = { total: 14000, cobrado: 4000, pendiente: 10000, cobros: [COBRO] }
+    const user = userEvent.setup()
+    montar()
+    await user.click(await screen.findByRole('button', { name: /Recibo del cobro/ }))
+
+    expect(abrir).toHaveBeenCalledWith('/api/reservas/5/recibo', '_blank', 'noopener')
+  })
+})

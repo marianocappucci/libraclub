@@ -40,6 +40,13 @@ class Turno:
     #: grilla: el dato vive en la base de LibraCore y averiguarlo por casillero
     #: sería una conexión por celda.
     cobrado: bool = False
+    #: En qué punto de pago está: `cobrado` (no debe nada), `senado` (entró algo
+    #: y falta) o `pendiente` (no entró nada). `None` si el turno no tiene total
+    #: —un bloqueo, o una franja sin tarifa— o no se averiguó. Lo estampa
+    #: `marcar_cobrados`, con el mismo lote que `cobrado`.
+    cobro: str | None = None
+    #: Lo que falta cobrar del turno. `None` cuando `cobro` es `None`.
+    saldo: Decimal | None = None
 
 
 def _fin_del_dia(dia: date) -> datetime:
@@ -193,8 +200,21 @@ def grilla_de_la_semana(
     return resultado
 
 
-def reservas_saldadas(sesion: Session, reserva_ids: Iterable[int]) -> set[int]:
-    """De esas reservas, las que ya no deben nada — alquiler más buffet.
+COBRADO = "cobrado"
+SENADO = "senado"
+PENDIENTE = "pendiente"
+
+
+@dataclass(frozen=True, slots=True)
+class CobroDeReserva:
+    """Cuánto falta cobrar de una reserva y en qué punto de pago está."""
+
+    estado: str
+    saldo: Decimal
+
+
+def cobros_de_reservas(sesion: Session, reserva_ids: Iterable[int]) -> dict[int, CobroDeReserva]:
+    """De esas reservas, en qué punto de pago está cada una — alquiler más buffet.
 
     🔑 **Se pregunta por todas juntas y por eso recibe una colección.** Los dos
     totales salen de la base de LibraCore, que abre y cierra una conexión por
@@ -202,10 +222,16 @@ def reservas_saldadas(sesion: Session, reserva_ids: Iterable[int]) -> set[int]:
     casilleros, y preguntar por cada uno sería el mismo error que ya tenían el
     listado del mostrador y el buffet antes de sus versiones por lote.
 
-    🔴 **Un turno sin tarifa NO está saldado, está sin precio.** Con total cero,
-    `cobrado >= total` da verdadero sin que haya entrado un peso: la grilla
-    marcaría como cobrada toda franja a la que le falta cargar el precio, que es
-    justo la que hay que ir a mirar. Por eso se exige `total > 0`.
+    Tres estados, que son los que el operador distingue de un vistazo:
+    `cobrado` (entró todo), `senado` (entró algo y falta) y `pendiente` (no
+    entró nada). La cuenta es la de siempre —`cobrado >= total`—; lo nuevo es no
+    tirar a la basura el «entró algo».
+
+    🔴 **Un turno sin tarifa NO está saldado, está sin precio**, y por eso no
+    figura en el resultado. Con total cero, `cobrado >= total` da verdadero sin
+    que haya entrado un peso: la grilla marcaría como cobrada toda franja a la
+    que le falta cargar el precio, que es justo la que hay que ir a mirar. Un
+    bloqueo, que tampoco tiene total, queda afuera por lo mismo.
 
     ⚠️ **Sin base de LibraCore devuelve vacío, y la agenda anda igual.** La caja
     vive del lado del motor; una instancia que todavía no la configuró tiene que
@@ -214,7 +240,7 @@ def reservas_saldadas(sesion: Session, reserva_ids: Iterable[int]) -> set[int]:
     """
     ids = sorted({int(x) for x in reserva_ids})
     if not ids or not servicio_facturacion.hay_base():
-        return set()
+        return {}
 
     precios = dict(
         sesion.execute(select(Reserva.id, Reserva.precio).where(Reserva.id.in_(ids))).all()
@@ -222,7 +248,7 @@ def reservas_saldadas(sesion: Session, reserva_ids: Iterable[int]) -> set[int]:
     consumido = servicio_buffet.consumido_de_reservas(ids)
     cobrado = servicio_caja.cobrado_de_reservas(ids)
 
-    saldadas: set[int] = set()
+    resultado: dict[int, CobroDeReserva] = {}
     for reserva_id in ids:
         # Mismo total que `/agenda/por-cobrar` y que el comprobante: alquiler más
         # buffet. Con `reserva.precio` a secas, un turno con tres gaseosas sin
@@ -231,24 +257,43 @@ def reservas_saldadas(sesion: Session, reserva_ids: Iterable[int]) -> set[int]:
         total += consumido.get(reserva_id, Decimal("0"))
         if total <= 0:
             continue
-        if cobrado.get(reserva_id, Decimal("0")) >= total:
-            saldadas.add(reserva_id)
-    return saldadas
+        entro = cobrado.get(reserva_id, Decimal("0"))
+        if entro >= total:
+            resultado[reserva_id] = CobroDeReserva(COBRADO, Decimal("0"))
+        elif entro > 0:
+            resultado[reserva_id] = CobroDeReserva(SENADO, total - entro)
+        else:
+            resultado[reserva_id] = CobroDeReserva(PENDIENTE, total)
+    return resultado
+
+
+def reservas_saldadas(sesion: Session, reserva_ids: Iterable[int]) -> set[int]:
+    """De esas reservas, las que ya no deben nada. Ver `cobros_de_reservas`."""
+    return {
+        reserva_id
+        for reserva_id, cobro in cobros_de_reservas(sesion, reserva_ids).items()
+        if cobro.estado == COBRADO
+    }
+
+
+def con_cobro(turno: Turno, cobros: dict[int, CobroDeReserva]) -> Turno:
+    """El casillero con su punto de pago estampado (`cobrado`, `cobro` y `saldo`)."""
+    cobro = cobros.get(turno.reserva_id) if turno.reserva_id is not None else None
+    if cobro is None:
+        return turno
+    return replace(turno, cobrado=cobro.estado == COBRADO, cobro=cobro.estado, saldo=cobro.saldo)
 
 
 def marcar_cobrados(sesion: Session, turnos: Sequence[Turno]) -> list[Turno]:
-    """`reservas_saldadas` aplicado a una lista de casilleros, en un solo lote.
+    """`cobros_de_reservas` aplicado a una lista de casilleros, en un solo lote.
 
     Una reserva larga ocupa varios casilleros y **todos** reciben la misma
     marca: es lo que se quiere ver en la grilla.
     """
-    saldadas = reservas_saldadas(
+    cobros = cobros_de_reservas(
         sesion, (t.reserva_id for t in turnos if t.reserva_id is not None)
     )
-    return [
-        replace(turno, cobrado=True) if turno.reserva_id in saldadas else turno
-        for turno in turnos
-    ]
+    return [con_cobro(turno, cobros) for turno in turnos]
 
 
 def proximas(sesion: Session, sucursal_id: int, momento: datetime, limite: int = 20):
