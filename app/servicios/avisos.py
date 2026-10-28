@@ -33,6 +33,9 @@ consulta por regla en cada corrida del cron, con índice y acotada por fecha.
   `VENCIMIENTO_PROVISORIA` mientras se paga se está por liberar. Como los otros, **se deduce**: la
   barrida le pregunta a `reservas` por las provisorias con pago pendiente que vencen en
   `VENTANA_DE_SENA`, sin cola.
+- **La seña del mostrador** (addendum del 2026-10-28): la reserva `pendiente_pago` tomada por teléfono
+  o en el local vence a las 24 h (`reservas.vencimiento_de_sena`) y el mismo `SENA_POR_VENCER` avisa
+  `VENTANA_DE_SENA_DEL_MOSTRADOR` antes, con otro texto y sin pasar por MercadoPago.
 - **WhatsApp en modo registro** (`TransporteWhatsAppRegistro`): arma el mensaje y lo anota como
   `registrado`, sin mandar nada. Es la costura para el proveedor real, que va en el motor.
 - **La configuración** (`ConfiguracionDeAvisos`): qué tipos salen y si WhatsApp está prendido. No es
@@ -47,6 +50,7 @@ cron superpuestas pasan las dos por el `if` antes de que cualquiera escriba.
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -62,7 +66,10 @@ from app.models.enums import CanalAviso, EstadoAviso, EstadoReserva, ModoWhatsap
 from app.models.maestros import Cliente
 from app.models.reservas import EstadoPago, PagoDeReserva, Reserva
 from app.servicios import cancelacion as servicio_cancelacion
+from app.servicios import reservas as servicio_reservas
 from app.tiempo import a_local, ahora, formatear_fecha_hora
+
+logger = logging.getLogger(__name__)
 
 #: Con cuánta anticipación se recuerda un turno, en horas. Dos avisos: uno el
 #: día antes —a tiempo para cancelar y que el turno se revenda— y otro dos horas
@@ -97,6 +104,21 @@ VENTANA_DE_CANCELACION = timedelta(hours=24)
 #: de `VENCIMIENTO_PROVISORIA` deja al jugador tiempo de volver a pagar. Si cambia el período del
 #: cron o el de la retención, esta constante se revisa con ellos.
 VENTANA_DE_SENA = timedelta(minutes=8)
+
+#: Cuánto antes de que venza el plazo de la seña **del mostrador** (24 h, `reservas.PLAZO_DE_SENA`) se avisa.
+#:
+#: 🔑 **Tres horas**, no minutos como la del portal, y por qué no las mismas: el jugador de la
+#: provisoria está con la tarjeta en la mano y le alcanzan 8 minutos; el que reservó por teléfono
+#: tiene que ver el mensaje, buscar el alias y hacer la transferencia (o pasar por el local), y eso
+#: no se hace en 8 minutos ni se hace si el mensaje llega con la cancha ya perdida.
+#: - **Menos de 2 horas** deja sin margen a quien lee el aviso tarde (el mail se mira de a ratos);
+#: - **más de 3** lo manda tan lejos del vencimiento que se lee como «ya veré» y se olvida: de las 24
+#:   horas del plazo, el aviso sale a las ~21;
+#: - el cron de 5 minutos agrega a lo sumo 5 más, y 3 horas lo absorbe sobradamente.
+#: Sale una vez (`uq_avisos_reserva_tipo_canal`) y **sólo si el plazo era más largo que la ventana**:
+#: a quien se le dio media hora porque el turno era sobre la hora no se le avisa a los dos minutos
+#: de haber cortado el teléfono que «se libera en media hora».
+VENTANA_DE_SENA_DEL_MOSTRADOR = timedelta(hours=3)
 
 #: Cuántas veces se reintenta un envío fallido antes de dejarlo. El reintento lo
 #: hace la corrida siguiente del cron: no hay backoff propio porque el cron ya
@@ -394,38 +416,91 @@ def pendientes(
             for r in cancelaciones
         ]
 
-    # 4. Seña por vencer: el turno retenido mientras se paga se libera en unos minutos.
-    #
-    # 🔑 **Las dos condiciones sobre el pago son la regla.** Una provisoria sin pago pendiente
-    # no es una seña que se esté pagando (la del mostrador, por ejemplo, no pasa por MercadoPago)
-    # y una con el pago aprobado ya no es provisoria. `vence_at > momento` evita avisar de un
-    # turno que ya se perdió: esa reserva la cancela `vencer_provisorias`, y mandarle «se libera
-    # en unos minutos» cuando ya se liberó es peor que no mandar nada.
+    # 4. Seña por vencer: el turno retenido mientras se paga se libera pronto. Son dos casos con el
+    # mismo tipo de aviso y la misma configuración, y distinta ventana.
     if config.sena_por_vencer:
-        por_vencer = sesion.scalars(
-            select(Reserva).where(
-                Reserva.estado == EstadoReserva.PROVISORIA,
-                Reserva.vence_at.is_not(None),
-                Reserva.vence_at > momento,
-                Reserva.vence_at <= momento + VENTANA_DE_SENA,
-                exists().where(
-                    PagoDeReserva.reserva_id == Reserva.id,
-                    PagoDeReserva.estado == EstadoPago.PENDIENTE,
-                ),
-                sin_aviso(TipoAviso.SENA_POR_VENCER, None),
-            )
-        ).all()
-        candidatos += [
+        candidatos += _senas_por_vencer(sesion, canal, momento, sin_aviso)
+
+    return candidatos
+
+
+def _senas_por_vencer(sesion: Session, canal: CanalAviso, momento: datetime, sin_aviso) -> list[Candidato]:
+    """Las señas a punto de vencer: la provisoria del portal y la `pendiente_pago` del mostrador.
+
+    1. **Portal** (`VENTANA_DE_SENA`, minutos).
+    2. **Mostrador** (`VENTANA_DE_SENA_DEL_MOSTRADOR`, horas).
+
+    🔑 **Las condiciones sobre el pago son la regla.** Una provisoria sin pago pendiente no es una seña
+    que se esté pagando (la del mostrador, por ejemplo, no pasa por MercadoPago) y una con el pago
+    aprobado ya no es provisoria. `vence_at > momento` evita avisar de un turno que ya se perdió: esa
+    reserva la cancela `vencer_provisorias`, y mandarle «se libera en unos minutos» cuando ya se liberó
+    es peor que no mandar nada.
+    """
+    por_vencer = sesion.scalars(
+        select(Reserva).where(
+            Reserva.estado == EstadoReserva.PROVISORIA,
+            Reserva.vence_at.is_not(None),
+            Reserva.vence_at > momento,
+            Reserva.vence_at <= momento + VENTANA_DE_SENA,
+            exists().where(
+                PagoDeReserva.reserva_id == Reserva.id,
+                PagoDeReserva.estado == EstadoPago.PENDIENTE,
+            ),
+            sin_aviso(TipoAviso.SENA_POR_VENCER, None),
+        )
+    ).all()
+    candidatos = [
+        Candidato(
+            r,
+            TipoAviso.SENA_POR_VENCER,
+            None,
+            _previo(sesion, r.id, TipoAviso.SENA_POR_VENCER, canal, None),
+            a_pagar=_monto_pendiente(sesion, r.id),
+        )
+        for r in por_vencer
+    ]
+
+    del_mostrador = sesion.scalars(
+        select(Reserva).where(
+            Reserva.estado == EstadoReserva.PENDIENTE_PAGO,
+            Reserva.vence_at.is_not(None),
+            Reserva.vence_at > momento,
+            Reserva.vence_at <= momento + VENTANA_DE_SENA_DEL_MOSTRADOR,
+            # Se tomó **antes** de que se abriera la ventana: el mismo criterio que el recordatorio
+            # (`created_at < comienza_at - ventana`). Sin esto, una seña con plazo corto (el turno
+            # era sobre la hora) avisaría «se libera» a los segundos de haberla tomado.
+            Reserva.created_at < Reserva.vence_at - VENTANA_DE_SENA_DEL_MOSTRADOR,
+            sin_aviso(TipoAviso.SENA_POR_VENCER, None),
+        )
+    ).all()
+    if not del_mostrador:
+        return candidatos
+
+    # 🔴 Quien ya pagó no recibe «se libera tu turno». Lo cobrado en caja es la única señal: el
+    # mostrador no pasa por MercadoPago. Si la caja no responde no se sabe quién pagó y no se avisa a
+    # nadie en esta corrida (el aviso sale en la próxima, con tiempo de sobra: son 3 horas).
+    ids = [r.id for r in del_mostrador]
+    try:
+        con_plata = servicio_reservas.con_plata_adentro(sesion, ids)
+        cobrado = servicio_reservas.cobrado_en_caja(ids)
+    except Exception:  # noqa: BLE001
+        logger.exception("No se pudo consultar la caja: no se avisan las señas del mostrador")
+        return candidatos
+    for r in del_mostrador:
+        if r.id in con_plata:
+            continue
+        falta = (
+            max(Decimal(r.sena) - cobrado.get(r.id, Decimal("0")), Decimal("0")) if r.sena else None
+        )
+        candidatos.append(
             Candidato(
                 r,
                 TipoAviso.SENA_POR_VENCER,
                 None,
                 _previo(sesion, r.id, TipoAviso.SENA_POR_VENCER, canal, None),
-                a_pagar=_monto_pendiente(sesion, r.id),
+                a_pagar=falta or None,
             )
-            for r in por_vencer
-        ]
-
+        )
     return candidatos
 
 
@@ -489,6 +564,24 @@ def _redactar(candidato: Candidato, medio: str) -> tuple[str, str]:
             f"Cuándo: {cuando}\n"
             f"{_linea_de_precio(reserva)}"
             f"\nSi no vas a poder venir, avisanos así lo liberamos."
+            f"{firma}"
+        )
+        return asunto, cuerpo
+
+    if candidato.tipo is TipoAviso.SENA_POR_VENCER and reserva.estado is EstadoReserva.PENDIENTE_PAGO:
+        # La seña de una reserva tomada por teléfono o en el local: el plazo es de un día, así que
+        # lleva fecha, y no hay «Mis reservas» donde completarla: se paga y se avisa al complejo.
+        hasta = formatear_fecha_hora(reserva.vence_at)
+        asunto = f"Tu turno se libera el {hasta}: {donde}, {cuando}"
+        monto = f"Seña a pagar: {pesos(candidato.a_pagar)}\n" if candidato.a_pagar else ""
+        cuerpo = (
+            f"{hola}\n\n"
+            f"Tu turno está reservado hasta el {hasta} esperando la seña.\n\n"
+            f"Cancha: {donde}\n"
+            f"Cuándo: {cuando}\n"
+            f"{monto}"
+            f"\nSi la seña no llega a tiempo, el turno se libera y lo puede tomar otra persona. "
+            f"Para conservarlo, pagala antes de esa hora y avisanos: respondé este {medio}."
             f"{firma}"
         )
         return asunto, cuerpo

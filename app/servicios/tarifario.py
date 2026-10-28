@@ -190,7 +190,9 @@ def _a_centavos(valor: Decimal) -> Decimal:
     return valor.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def cotizar(sesion: Session, cancha: Cancha, comienza_at: datetime) -> Cotizacion:
+def cotizar(
+    sesion: Session, cancha: Cancha, comienza_at: datetime, *, con_promocion: bool = True
+) -> Cotizacion:
     """El precio del turno: la tarifa ganadora, menos la mejor promoción si hay.
 
     🔑 **Es el único lugar donde se calcula un precio** (ADR-029). El mostrador, las series, el
@@ -199,13 +201,21 @@ def cotizar(sesion: Session, cancha: Cancha, comienza_at: datetime) -> Cotizacio
     portal muestra tachado es el mismo que `Reserva.precio` congela después.
 
     La seña se saca del **precio con promoción**: quien paga menos pone menos de seña.
+
+    🔑 **`con_promocion=False` cotiza al precio de lista**, con el mismo cálculo y sin mirar las
+    promociones. Es lo que usan los **turnos fijos** (las series): quien tiene la cancha todas las
+    semanas paga la tarifa, no la hora valle ni la promoción de la semana (decisión del humano,
+    2026-10-28). No es un segundo cálculo: es éste sin el paso de la promoción, así que la tarifa,
+    el feriado y la seña salen exactamente igual.
     """
     feriado = es_feriado(sesion, cancha.sucursal_id, comienza_at)
     tarifa = resolver(sesion, cancha, comienza_at, feriado=feriado)
     lista = Decimal(tarifa.precio)
 
-    promocion = _mejor_promocion(
-        promociones_aplicables(sesion, cancha, comienza_at, feriado=feriado)
+    promocion = (
+        _mejor_promocion(promociones_aplicables(sesion, cancha, comienza_at, feriado=feriado))
+        if con_promocion
+        else None
     )
     precio = lista
     if promocion is not None:
@@ -219,8 +229,8 @@ def cotizar(sesion: Session, cancha: Cancha, comienza_at: datetime) -> Cotizacio
 
 
 def precio_y_sena(
-    sesion: Session, cancha: Cancha, comienza_at: datetime
+    sesion: Session, cancha: Cancha, comienza_at: datetime, *, con_promocion: bool = True
 ) -> tuple[Decimal, Decimal]:
-    """El precio del turno (con promoción) y la seña que le corresponde."""
-    cotizacion = cotizar(sesion, cancha, comienza_at)
+    """El precio del turno (con promoción, salvo `con_promocion=False`) y la seña que le corresponde."""
+    cotizacion = cotizar(sesion, cancha, comienza_at, con_promocion=con_promocion)
     return cotizacion.precio, cotizacion.sena

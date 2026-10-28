@@ -210,6 +210,11 @@ export function FormularioDeSerie({
               los turnos de los próximos 90 días y después se extiende desde el
               listado.
             </p>
+            {/* Los turnos fijos no llevan descuento (libraclub ADR-029, 2026-10-28): el operador lo sabe antes de
+                cargar la serie y no cuando el cliente pregunta por qué no le tomaron la hora valle. */}
+            <p className="text-xs text-muted-foreground" data-testid="aviso-sin-promocion">
+              Los turnos fijos pagan la tarifa de lista: no llevan promoción ni hora valle.
+            </p>
 
             <AvisoDeError mensaje={error} />
 

@@ -328,3 +328,21 @@ describe('ausentismo: avisa y NO bloquea', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 })
+
+describe('el plazo de la seña (libraclub ADR-029)', () => {
+  it('🔑 al elegir «Pendiente de pago» avisa que la seña vence a las 24 horas, y con «Confirmada» no dice nada', async () => {
+    abrir()
+    const estado = await screen.findByLabelText('Estado')
+
+    expect(screen.queryByTestId('aviso-plazo-de-sena')).toBeNull()
+
+    await userEvent.selectOptions(estado, 'pendiente_pago')
+
+    expect(screen.getByTestId('aviso-plazo-de-sena')).toHaveTextContent(/24 horas/)
+    expect(screen.getByTestId('aviso-plazo-de-sena')).toHaveTextContent(/2 horas antes del turno/)
+
+    await userEvent.selectOptions(estado, 'confirmada')
+
+    expect(screen.queryByTestId('aviso-plazo-de-sena')).toBeNull()
+  })
+})

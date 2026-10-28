@@ -189,7 +189,7 @@ def vencer(
     sesion: Session = Depends(obtener_sesion),
     _: object = Depends(require_admin),
 ) -> dict[str, int]:
-    """Cancela las provisorias vencidas. Lo llama un cron, o el operador.
+    """Libera las provisorias del portal y las señas del mostrador vencidas. Lo llama un cron, o el operador.
 
     Es un endpoint y no sólo una tarea de fondo para que se pueda **ver** que
     funciona: un barrido que sólo corre en un scheduler es un barrido del que
