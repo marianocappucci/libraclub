@@ -105,6 +105,8 @@ def _config_de_libracore_aislada(tmp_path, monkeypatch):
     from libracore import config_manager
 
     monkeypatch.setattr(config_manager, "CONFIG_PATH", str(tmp_path / "config.json"))
+    # La marca de la instancia (logo y Terminos propios, ADR-092/093) tambien vive en disco.
+    monkeypatch.setattr(config_manager, "MARCA_DIR", str(tmp_path / "marca"))
 
 
 @pytest.fixture(autouse=True)
