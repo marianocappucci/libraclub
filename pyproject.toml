@@ -122,7 +122,8 @@ dependencies = [
     # v1.202.1 -> v1.206.0 (2026-10-30): la marca de la instancia y sus Terminos propios (ADR-092 y ADR-093, marca blanca); incluye v1.204.0 (un aviso por un solo canal y demos sin mails, ADR-090 y ADR-091). Sin migracion.
     # v1.206.0 -> v1.207.0 (2026-10-30): el index.html sale con la marca de la instancia (ADR-095) y el resguardo lleva el nombre de la marca (ADR-094). Sin migracion.
     # v1.207.0 -> v1.207.1 (2026-10-30): la marca y los Terminos propios se leen sin el almacen de secretos (addendum ADR-095); v1.207.0 trae el index.html con la marca (ADR-095) y la carpeta del resguardo con el nombre de la marca (ADR-094). Sin migracion.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.207.1",
+    # v1.207.1 -> v1.207.2 (2026-10-30): index_con_marca deja un solo icono, el de la marca (addendum 2 ADR-095); v1.207.1 lee la marca sin el almacen de secretos; v1.207.0 trae el index.html con la marca (ADR-095) y la carpeta del resguardo con el nombre de la marca (ADR-094). Sin migracion.
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.207.2",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
