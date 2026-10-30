@@ -1057,3 +1057,23 @@ que `/api/reservas/series/listado`.
   - **No se usa la API de Meta**: el contrato del motor ya admite plantillas (`Mensaje.plantilla`/`variables`), pero no hay proveedor.
   - **El intento de prueba ya no cuenta**: un `registrado` que pasa a un proveedor real vuelve a `intentos = 1` (ADR-090, punto 6); antes, en LibraClub, era el intento 2. Sólo cambia un número en el registro.
 - Consecuencias: `servicios/avisos.py` pierde ~250 líneas de mecánica de envío y gana `clave_de` y `barrer`; el cron imprime la misma línea por canal con el `Resumen` del motor (que suma `rechazados`, `repetidos` y `sin_proveedor` cuando hay). Tests: `tests/test_avisos.py`, `tests/test_avisos_sena_y_whatsapp.py` y `tests/test_sena_del_mostrador.py` adaptados al proveedor del motor; nuevos `tests/test_avisos_migracion.py` (la `0018` sobre una base de antes, la idempotencia entre el barrido viejo y el nuevo y el modo de WhatsApp) y `tests/test_avisos_del_motor.py` (la matriz de roles de `/api/avisos/*`, registro → Evolution simulado de punta a punta, y el nodo); `Avisos.test.tsx` rehecho para los componentes del kit.
+
+
+## ADR-031 — La marca blanca: la instancia puede llevar el nombre, el logo, el color y los términos de un revendedor (2026-10-30)
+
+**Estado:** aceptada. Cableado del piloto de marca blanca (libracore ADR-092 y ADR-093, libraauth ADR-030, libra-ui ADR-098).
+
+**Decisión.**
+1. `app/main.py` monta `build_marca_router(dist=…)` (lectura pública, manifest e íconos) y `build_marca_admin_router()` detrás de
+   `require_admin_o_servicio`, igual que el tema: lo cambia el admin o el backoffice (token de servicio).
+2. 🔴 `TerminosRepository(contrato_propio=leer_terminos_propios, exigir_propio=es_marca_propia)`: con marca propia la instancia
+   **exige** los términos del revendedor y, sin ellos, queda frenada; nunca cae a los de la familia.
+3. `PasswordResetService(product_name=lambda: nombre_de_marca("LibraClub"))`: el mail de recuperación sale con el nombre de la marca.
+4. El manifest tiene que ganarle al catch-all de la SPA (que arma `app/asgi.py`), así que `app/frontend_dist.py` resuelve el dist una
+   sola vez y lo usan `main.py` (el manifest de respaldo) y `asgi.py` (para servirlo).
+5. `main.tsx` espera `cargarMarca()` (tope de 2 s, no falla) antes de montar la SPA.
+
+**Pendiente a propósito.** `LIBRACLUB_RESET_URL_BASE` tiene por defecto `dev.libraclub.com.ar`: una instancia de revendedor tiene que
+definirla o el enlace de recuperación apunta al dominio equivocado. Tests: `tests/test_marca_blanca.py` y
+`tests/test_marca_blanca_terminos.py`.
+

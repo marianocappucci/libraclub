@@ -50,6 +50,7 @@ from libracore.db.core import get_connection as lc_get_connection
 from libracore.docs_api import cerrar_docs_de_la_api
 from libracore.errores import instalar_registro_de_errores
 from libracore.estado_del_sistema import build_estado_del_sistema_router
+from libracore.marca_router import build_marca_admin_router, build_marca_router, es_marca_propia, nombre_de_marca
 from libracore.mp_config_router import build_mp_config_router
 from libracore.nodo_conexion_router import build_conexion_del_nodo_router
 from libracore.nodo_offline import SinConexion, SoloEnElCentral
@@ -58,6 +59,7 @@ from libracore.respaldo import Instancia
 from libracore.security_headers import CSP_SPA, SecurityHeadersMiddleware
 from libracore.smtp_router import build_smtp_probe_router
 from libracore.tema_router import build_tema_admin_router, build_tema_router
+from libracore.terminos_propios import leer_terminos_propios
 from libraedge.pantalla_del_central import create_canje_router, create_nodos_router
 
 from app import db, offline
@@ -71,6 +73,7 @@ from app.auth import (
     require_staff,
 )
 from app.config import Config, misma_base
+from app.frontend_dist import frontend_dist
 from app.models.maestros import Sucursal
 from app.routers import (
     admin,
@@ -724,6 +727,11 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     # token).
     app.include_router(build_tema_router())
     app.include_router(build_tema_admin_router(), dependencies=[Depends(require_admin_o_servicio)])
+    # La marca de la instancia (nombre, logo, color, iconos y manifest), para venderla a marca blanca. La lectura es
+    # publica (el login tambien lleva la marca) y va **antes** del catch-all de la SPA (`asgi.py`): si no,
+    # `/manifest.webmanifest` devolveria el `index.html`. Escribir es del admin o del backoffice (token de servicio).
+    app.include_router(build_marca_router(dist=frontend_dist()))
+    app.include_router(build_marca_admin_router(), dependencies=[Depends(require_admin_o_servicio)])
 
     # `GET`/`PUT`/`DELETE /admin/smtp`. El router ya exige rol admin por dentro,
     # así que no lleva `dependencies`: quien pueda escribir ahí puede redirigir a
@@ -741,10 +749,16 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     #
     # 🔴 Sin esta linea el gate NO corta y la instancia no falla: se queda sin
     # gate, en silencio. Por eso cada producto tiene un test que lo prueba.
-    app.state.terminos = TerminosRepository(db.fabrica_de_sesiones())
+    #
+    # Marca blanca (ADR-092/093 del motor): una instancia con marca propia **exige** los Terminos de su revendedor
+    # y, sin ellos, queda frenada; nunca cae a los de la familia.
+    app.state.terminos = TerminosRepository(
+        db.fabrica_de_sesiones(), contrato_propio=leer_terminos_propios, exigir_propio=es_marca_propia
+    )
     app.state.password_reset = PasswordResetService(
         db.fabrica_de_sesiones(),
-        product_name="LibraClub",
+        # CALLABLE: con marca propia el mail de recuperacion sale con el nombre del revendedor.
+        product_name=lambda: nombre_de_marca("LibraClub"),
         reset_url_base=os.environ.get(
             "LIBRACLUB_RESET_URL_BASE", "https://dev.libraclub.com.ar/reset-password"
         ),

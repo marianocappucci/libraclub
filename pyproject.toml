@@ -29,7 +29,8 @@ dependencies = [
     # v0.53.0 -> v0.54.0 (2026-10-21): en un nodo de LibraEdge los usuarios son los del central (ADR-027); fuera de un nodo no cambia nada. Sin migracion.
     # v0.54.0 -> v0.55.0 (2026-10-21): en un nodo de LibraEdge no se pide captcha y la IP del bloqueo es el par directo (ADR-028); fuera de un nodo no cambia nada. Sin migracion.
     # v0.55.0 -> v0.56.0 (2026-10-28): `verificar_captcha` publica para rutas propias del producto (ADR-029). Sin migracion.
-    "libraauth[migrations] @ git+https://github.com/marianocappucci/libraauth.git@v0.56.0",
+    # v0.56.0 -> v0.57.0 (2026-10-30): Terminos propios de la instancia y textos de marca en el reseteo (ADR-030, marca blanca). Sin migracion.
+    "libraauth[migrations] @ git+https://github.com/marianocappucci/libraauth.git@v0.57.0",
     # Entra en F1 sólo por `respaldo`: una instancia sin backup no se puede
     # poner en produccion. Su alcance crece en F2 (`mp_api`, `pdf_generator`)
     # y F3 (ARCA) — ver ARCHITECTURE.md.
@@ -118,7 +119,8 @@ dependencies = [
     # v1.200.0 -> v1.201.0 (2026-10-28): nota de credito con motivo y emision sin HTTP (ADR-089). Sin migracion.
     # v1.201.0 -> v1.202.0 (2026-10-28): libracore.avisos: WhatsApp por Evolution, mail y registro (ADR-090). Migracion 0032 (avisos_envios).
     # v1.202.0 -> v1.202.1 (2026-10-28): avisos: la demo no manda mails y espera entre reintentos (addendum ADR-090). Sin migracion.
-    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.202.1",
+    # v1.202.1 -> v1.206.0 (2026-10-30): la marca de la instancia y sus Terminos propios (ADR-092 y ADR-093, marca blanca); incluye v1.204.0 (un aviso por un solo canal y demos sin mails, ADR-090 y ADR-091). Sin migracion.
+    "libracore @ git+https://github.com/marianocappucci/libracore.git@v1.206.0",
     # De LibraGenda se consume DOMINIO PURO, no persistencia: la recurrencia de
     # las canchas fijas y el solapamiento de intervalos. El motivo de no usar
     # sus repositorios esta en DECISIONS.md ADR-004.
