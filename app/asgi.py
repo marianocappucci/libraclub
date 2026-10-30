@@ -8,16 +8,13 @@ para el `--reload`, y eso taparía cualquier build copiado adentro.
 
 from __future__ import annotations
 
-from pathlib import Path
-
+from app.frontend_dist import frontend_dist
 from app.main import crear_app
 from app.spa import montar_spa
 
 app = crear_app()
 
-_DIST_DOCKER = Path("/opt/frontend-dist")
-_DIST_LOCAL = Path(__file__).resolve().parent.parent / "frontend" / "dist"
-FRONTEND_DIST = _DIST_DOCKER if _DIST_DOCKER.is_dir() else _DIST_LOCAL
+FRONTEND_DIST = frontend_dist()
 
 if FRONTEND_DIST.is_dir():
     montar_spa(app, FRONTEND_DIST)
