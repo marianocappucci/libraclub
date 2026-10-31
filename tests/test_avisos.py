@@ -629,7 +629,7 @@ def test_el_proveedor_de_email_sin_smtp_no_esta_disponible():
     """
     from libraauth.email_sender import SmtpConfig
 
-    email, _whatsapp = servicio.construir_proveedores(lambda: SmtpConfig())
+    email = servicio.construir_proveedores(lambda: SmtpConfig())["email"]
 
     assert email.canal == "email"
     assert email.simulado is False
@@ -648,7 +648,7 @@ def test_el_proveedor_de_email_con_smtp_cargado_esta_disponible():
         host="smtp.ejemplo.com", port=587, user="u", password="p",
         from_email="turnos@ejemplo.com",
     )
-    email, _whatsapp = servicio.construir_proveedores(lambda: config)
+    email = servicio.construir_proveedores(lambda: config)["email"]
 
     assert email.disponible() is True
 
