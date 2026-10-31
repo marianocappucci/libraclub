@@ -17,8 +17,21 @@ siendo de LibraClub, y por eso vive acá:
 Y lo que pasó al motor: los proveedores (SMTP, Evolution, Registro, Apagado), `despachar` —que manda **una sola vez**
 por `(canal, clave)` y reserva el aviso *antes* de salir a la red—, los reintentos con tope, el registro
 (`avisos_envios`), el modo de WhatsApp y su configuración, `telefono_para_whatsapp`. `barrer` es el pegamento: le
-pregunta a `pendientes` qué hay, y por cada candidato arma el `Mensaje` y llama a `despachar` con la `clave` del hecho
-(`clave_de`).
+pregunta a `pendientes` qué hay, y por cada candidato llama a `avisar` del motor con la `clave` del hecho (`clave_de`) y
+un `redactar` por canal.
+
+## Un aviso, un canal (addendum de ADR-030, 2026-10-28)
+
+Un aviso sale por **un solo canal**: WhatsApp si el cliente tiene un teléfono válido y WhatsApp está disponible (modo
+registro o Evolution); si no, mail. Si WhatsApp lo da por perdido (`rechazado`, `omitido` o agotó los intentos) cae a
+mail **con la misma clave**, y lo que ya salió por un canal no sale por el otro aunque la configuración haya cambiado
+entre dos corridas. La decisión y la comprobación entre canales son del motor (`libracore.avisos.avisar`, v1.204.0); acá
+quedan los dos lugares donde LibraClub tiene que mirar **todos los canales a la vez**:
+
+- `_sin_cerrar`: un aviso está resuelto si salió por cualquiera, o si el canal que le toca ya lo cerró (mismo recorrido
+  que hace `avisar`, para no armar el texto de lo que ya salió ni contarlo como «repetido» en cada barrida).
+- `_salio_la_confirmacion`: la regla «la cancelación exige que la confirmación haya salido» cuenta la confirmación que
+  salió por **cualquiera** de los dos.
 
 ## Por qué no hay una cola
 
@@ -63,28 +76,28 @@ consulta por regla en cada corrida del cron, con índice y acotada por fecha.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 
 from libracore.avisos import (
+    CANALES_POR_DEFECTO,
+    MAX_INTENTOS,
     Mensaje,
     Proveedor,
     Resumen,
-    cerradas,
-    despachar,
+    avisar,
     omitir,
-    proveedores,
-    telefono_para_whatsapp,
 )
-from libracore.avisos.mensaje import CANAL_EMAIL, CANAL_WHATSAPP
+from libracore.avisos import proveedores as proveedores_del_motor
+from libracore.avisos.canales import destino_de
 from libracore.db import avisos_envios as registro_del_motor
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from app.models.avisos import ConfigAvisos
 from app.models.enums import CanalAviso, EstadoReserva, TipoAviso
-from app.models.maestros import Cliente
 from app.models.reservas import EstadoPago, PagoDeReserva, Reserva
 from app.servicios import cancelacion as servicio_cancelacion
 from app.servicios import reservas as servicio_reservas
@@ -222,20 +235,79 @@ def guardar_configuracion(sesion: Session, nueva: ConfiguracionDeAvisos) -> Conf
     return nueva
 
 
-def _sin_cerrar(proveedor: Proveedor, reservas: list[Reserva], tipo: TipoAviso, horas: int | None) -> list[Reserva]:
-    """Las reservas cuyo aviso `tipo` todavía no está resuelto para este proveedor.
+#: Los proveedores de una corrida: `{canal: Proveedor}` (lo que arma `construir_proveedores`), o uno solo, que es
+#: «sólo ese canal» (un barrido de un canal, y los tests).
+Proveedores = Proveedor | Mapping[str, Proveedor]
 
-    Una consulta al motor por tanda de 500 (`cerradas`). **Cierra el tema** un aviso `enviado`, `rechazado` u
-    `omitido`, uno `fallido` con los intentos agotados y —sólo para un proveedor simulado— uno `registrado`. Un
-    `fallido` con intentos de sobra **no** lo cierra: es justamente el que hay que reintentar, y la reserva vuelve a
-    salir como candidata. Lo mismo un `registrado` ante un proveedor real: lo que quedó anotado sin salir (WhatsApp en
-    modo registro) es un mensaje que nadie recibió, y cuando se conecta Evolution tiene que mandarse, no darse por
-    hecho (regla del ADR-029, ahora en el motor).
+
+def _por_canal(proveedores: Proveedores) -> dict[str, Proveedor]:
+    """Los proveedores como `{canal: Proveedor}`. Uno suelto vale por su canal."""
+    if isinstance(proveedores, Mapping):
+        return dict(proveedores)
+    return {proveedores.canal: proveedores}
+
+
+def _filas_por_canal(claves: list[str]) -> dict[str, dict[str, dict]]:
+    """`{canal: {clave: fila de avisos_envios}}` de esas claves en **todos** los canales, estén disponibles o no.
+
+    Lo que ya salió por un canal cuenta aunque hoy esté apagado."""
+    return {canal: registro_del_motor.obtener_varios(canal, claves) for canal in CANALES_POR_DEFECTO}
+
+
+def _perdido(fila: dict) -> bool:
+    """Si por ese canal ese aviso **no va a salir nunca** y toca probar el otro (el mismo criterio que `avisar`)."""
+    estado = fila["estado"]
+    if estado in (registro_del_motor.ESTADO_RECHAZADO, registro_del_motor.ESTADO_OMITIDO):
+        return True
+    return estado == registro_del_motor.ESTADO_FALLIDO and fila["intentos"] >= MAX_INTENTOS
+
+
+def _resuelto(por_canal: dict[str, dict[str, dict]], disponibles: dict[str, Proveedor], clave: str) -> bool:
+    """Si ese aviso no tiene nada más que hacer: salió por algún canal, o el canal que le toca ya lo cerró.
+
+    Recorre los canales como `avisar`: el primero **disponible** donde el aviso no está perdido decide. Sin fila ahí,
+    falta mandarlo. Con fila, lo cierra todo menos lo que sigue vivo: un `fallido` con intentos, un `enviando`, y un
+    `registrado` ante un proveedor real (lo anotado en modo prueba no llegó a nadie: regla del ADR-029, hoy en el
+    motor). Si todos los canales disponibles lo dieron por perdido, no hay otro lado por donde salir y también está
+    resuelto.
+    """
+    for filas in por_canal.values():
+        fila = filas.get(clave)
+        if fila is not None and fila["estado"] == registro_del_motor.ESTADO_ENVIADO:
+            return True
+    for canal in CANALES_POR_DEFECTO:
+        proveedor = disponibles.get(canal)
+        if proveedor is None:
+            continue
+        fila = por_canal[canal].get(clave)
+        if fila is None:
+            return False
+        if _perdido(fila):
+            continue
+        return fila["estado"] == registro_del_motor.ESTADO_REGISTRADO and bool(proveedor.simulado)
+    return True
+
+
+def _disponibles(proveedores: dict[str, Proveedor]) -> dict[str, Proveedor]:
+    return {canal: p for canal, p in proveedores.items() if p.disponible()}
+
+
+def _sin_cerrar(
+    proveedores: dict[str, Proveedor], reservas: list[Reserva], tipo: TipoAviso, horas: int | None
+) -> list[Reserva]:
+    """Las reservas cuyo aviso `tipo` todavía no está resuelto (ver `_resuelto`).
+
+    Una consulta al motor por canal y por tanda de 500. Un `fallido` con intentos de sobra **no** lo cierra: es
+    justamente el que hay que reintentar, y la reserva vuelve a salir como candidata. Lo mismo un `registrado` ante un
+    proveedor real: lo que quedó anotado sin salir (WhatsApp en modo registro) es un mensaje que nadie recibió, y
+    cuando se conecta Evolution tiene que mandarse, no darse por hecho.
     """
     if not reservas:
         return []
-    cerradas_ = cerradas(proveedor, [clave_de(r.id, tipo, horas) for r in reservas])
-    return [r for r in reservas if clave_de(r.id, tipo, horas) not in cerradas_]
+    claves = {r.id: clave_de(r.id, tipo, horas) for r in reservas}
+    por_canal = _filas_por_canal(list(claves.values()))
+    disponibles = _disponibles(proveedores)
+    return [r for r in reservas if not _resuelto(por_canal, disponibles, claves[r.id])]
 
 
 def _monto_pendiente(sesion: Session, reserva_id: int) -> Decimal | None:
@@ -251,40 +323,49 @@ def _monto_pendiente(sesion: Session, reserva_id: int) -> Decimal | None:
     )
 
 
-def _salio_la_confirmacion(proveedor: Proveedor, reservas: list[Reserva]) -> list[Reserva]:
-    """De estas reservas, las que tuvieron una confirmación que **salió** por este proveedor.
+def _salio_la_confirmacion(proveedores: dict[str, Proveedor], reservas: list[Reserva]) -> list[Reserva]:
+    """De estas reservas, las que tuvieron una confirmación que **salió** por alguno de los canales.
 
-    Lo `enviado`, y lo `registrado` sólo si el proveedor también es simulado (si no, nunca llegó a nadie). Mira el
-    estado y no `cerradas`: un `omitido` (sin mail) o un `rechazado` también cierran el tema, pero ahí al cliente
-    **no** se le dijo nada.
+    Lo `enviado` por cualquiera —no importa si hoy ese canal está apagado—, y lo `registrado` sólo si el proveedor de
+    ese canal es hoy uno simulado y disponible (si no, nunca llegó a nadie). Mira el estado y no si «está cerrado»: un
+    `omitido` (sin mail) o un `rechazado` también cierran el tema, pero ahí al cliente **no** se le dijo nada.
     """
     if not reservas:
         return []
-    salieron = ("enviado", "registrado") if proveedor.simulado else ("enviado",)
-    filas = registro_del_motor.obtener_varios(
-        proveedor.canal, [clave_de(r.id, TipoAviso.CONFIRMACION) for r in reservas]
-    )
-    return [
-        r for r in reservas
-        if (filas.get(clave_de(r.id, TipoAviso.CONFIRMACION)) or {}).get("estado") in salieron
-    ]
+    claves = {r.id: clave_de(r.id, TipoAviso.CONFIRMACION) for r in reservas}
+    por_canal = _filas_por_canal(list(claves.values()))
+
+    def salio(clave: str) -> bool:
+        for canal, filas in por_canal.items():
+            estado = (filas.get(clave) or {}).get("estado")
+            if estado == registro_del_motor.ESTADO_ENVIADO:
+                return True
+            proveedor = proveedores.get(canal)
+            if (estado == registro_del_motor.ESTADO_REGISTRADO and proveedor is not None
+                    and proveedor.simulado and proveedor.disponible()):
+                return True
+        return False
+
+    return [r for r in reservas if salio(claves[r.id])]
 
 
 def pendientes(
     sesion: Session,
-    proveedor: Proveedor,
+    proveedores: Proveedores,
     momento: datetime | None = None,
     *,
     config: ConfiguracionDeAvisos | None = None,
 ) -> list[Candidato]:
-    """Qué corresponde avisar por el canal de este proveedor en este instante.
+    """Qué corresponde avisar en este instante, por el canal que le toque a cada uno (un aviso, un canal).
 
     No toca la base más que para leer. Separada del envío a propósito: es la
     parte que tiene las reglas, y así se puede probar sin mandar nada.
 
-    `config` decide qué **tipos** se evalúan (sin ella, los de la instancia); el proveedor dice por qué canal se manda
-    y si es simulado, que cambia qué cuenta como «ya avisado» (ver `_sin_cerrar`).
+    `config` decide qué **tipos** se evalúan (sin ella, los de la instancia); `proveedores` dice qué canales hay y si
+    son simulados, que cambia qué cuenta como «ya avisado» (ver `_sin_cerrar`). Un candidato lo es una sola vez por
+    hecho, no una por canal.
     """
+    proveedores = _por_canal(proveedores)
     momento = momento or ahora()
     config = config or configuracion(sesion)
     candidatos: list[Candidato] = []
@@ -306,7 +387,7 @@ def pendientes(
         ).all()
         candidatos += [
             Candidato(r, TipoAviso.CONFIRMACION, None)
-            for r in _sin_cerrar(proveedor, list(confirmaciones), TipoAviso.CONFIRMACION, None)
+            for r in _sin_cerrar(proveedores, list(confirmaciones), TipoAviso.CONFIRMACION, None)
         ]
 
     # 2. Recordatorios: falta poco para jugar.
@@ -328,7 +409,7 @@ def pendientes(
             ).all()
             candidatos += [
                 Candidato(r, TipoAviso.RECORDATORIO, horas)
-                for r in _sin_cerrar(proveedor, list(recordatorios), TipoAviso.RECORDATORIO, horas)
+                for r in _sin_cerrar(proveedores, list(recordatorios), TipoAviso.RECORDATORIO, horas)
             ]
 
     # 3. Cancelación: se cayó un turno que el cliente creía tomado.
@@ -347,21 +428,21 @@ def pendientes(
         # que perdió un turno— y el **bloqueo que se quita**, que pasa a
         # `cancelada` sin cliente (`ck_reservas_cliente_segun_estado` exime a
         # las canceladas justamente por eso).
-        avisadas = _salio_la_confirmacion(proveedor, list(canceladas))
+        avisadas = _salio_la_confirmacion(proveedores, list(canceladas))
         candidatos += [
             Candidato(r, TipoAviso.CANCELACION, None, sena=servicio_cancelacion.sena_para_el_aviso(sesion, r))
-            for r in _sin_cerrar(proveedor, avisadas, TipoAviso.CANCELACION, None)
+            for r in _sin_cerrar(proveedores, avisadas, TipoAviso.CANCELACION, None)
         ]
 
     # 4. Seña por vencer: el turno retenido mientras se paga se libera pronto. Son dos casos con el
     # mismo tipo de aviso y la misma configuración, y distinta ventana.
     if config.sena_por_vencer:
-        candidatos += _senas_por_vencer(sesion, proveedor, momento)
+        candidatos += _senas_por_vencer(sesion, proveedores, momento)
 
     return candidatos
 
 
-def _senas_por_vencer(sesion: Session, proveedor: Proveedor, momento: datetime) -> list[Candidato]:
+def _senas_por_vencer(sesion: Session, proveedores: dict[str, Proveedor], momento: datetime) -> list[Candidato]:
     """Las señas a punto de vencer: la provisoria del portal y la `pendiente_pago` del mostrador.
 
     1. **Portal** (`VENTANA_DE_SENA`, minutos).
@@ -387,7 +468,7 @@ def _senas_por_vencer(sesion: Session, proveedor: Proveedor, momento: datetime) 
     ).all()
     candidatos = [
         Candidato(r, TipoAviso.SENA_POR_VENCER, None, a_pagar=_monto_pendiente(sesion, r.id))
-        for r in _sin_cerrar(proveedor, list(por_vencer), TipoAviso.SENA_POR_VENCER, None)
+        for r in _sin_cerrar(proveedores, list(por_vencer), TipoAviso.SENA_POR_VENCER, None)
     ]
 
     del_mostrador = sesion.scalars(
@@ -402,7 +483,7 @@ def _senas_por_vencer(sesion: Session, proveedor: Proveedor, momento: datetime) 
             Reserva.created_at < Reserva.vence_at - VENTANA_DE_SENA_DEL_MOSTRADOR,
         )
     ).all()
-    del_mostrador = _sin_cerrar(proveedor, list(del_mostrador), TipoAviso.SENA_POR_VENCER, None)
+    del_mostrador = _sin_cerrar(proveedores, list(del_mostrador), TipoAviso.SENA_POR_VENCER, None)
     if not del_mostrador:
         return candidatos
 
@@ -569,32 +650,20 @@ def _linea_de_precio(reserva: Reserva) -> str:
     return linea
 
 
-#: Cómo se dice, en el motivo de un aviso omitido, qué dato le falta al cliente para ese canal.
-_DATO_DEL_CANAL = {
-    CanalAviso.EMAIL: "email",
-    CanalAviso.WHATSAPP: "un teléfono que WhatsApp reconozca",
-}
-
-
-def _destino(reserva: Reserva, canal: CanalAviso) -> str:
-    """A dónde va, según el canal. Vacío si el cliente no dejó ese dato (o el teléfono no es de fiar: ver
-    `telefono_para_whatsapp`)."""
-    cliente: Cliente | None = reserva.cliente
-    if cliente is None:
-        return ""
-    if canal is CanalAviso.EMAIL:
-        return (cliente.email or "").strip()
-    return telefono_para_whatsapp(cliente.telefono)
-
-
 def barrer(
     sesion: Session,
-    proveedor: Proveedor,
+    proveedores: Proveedores,
     momento: datetime | None = None,
     *,
     config: ConfiguracionDeAvisos | None = None,
 ) -> Resumen:
-    """Manda todo lo que corresponde por este proveedor. Devuelve el resumen del motor (`libracore.avisos.Resumen`).
+    """Manda todo lo que corresponde, **un aviso por un solo canal**. Devuelve el `Resumen` del motor.
+
+    `proveedores` es `{canal: Proveedor}` (`construir_proveedores`); uno suelto vale «sólo por ese canal». Por cada
+    candidato (`pendientes`) llama a `avisar` del motor: WhatsApp si el cliente tiene un teléfono válido y WhatsApp está
+    disponible, si no mail, y mail también si WhatsApp lo da por perdido. La clave es la misma para los dos canales
+    (`clave_de`). El `Resumen` cuenta lo que pasó en cada canal tocado: un WhatsApp `rechazado` que cae a mail suma un
+    rechazado y un enviado.
 
     **No escribe en `sesion`**: sólo lee las reservas. Lo que se anota (el aviso reservado, enviado, fallido u
     omitido) lo escribe el motor en `avisos_envios`, y cada paso se confirma solo, **antes** de salir a la red: es lo
@@ -605,40 +674,43 @@ def barrer(
     aceptó el aviso y *antes* de anotarlo, a los 10 minutos se lo da por abandonado y se reintenta, y el cliente lo
     recibe dos veces. Para un recordatorio de turno, duplicado es mejor que faltante.
 
-    Un proveedor no disponible (SMTP sin cargar, WhatsApp apagado) no hace nada: ni arma textos ni anota omitidos por
-    una configuración que a lo mejor se completa mañana.
+    Un canal no disponible (SMTP sin cargar, WhatsApp apagado) no hace nada: ni arma textos ni anota omitidos por una
+    configuración que a lo mejor se completa mañana. Sin ningún canal disponible, no hace nada.
     """
-    if not proveedor.disponible():
+    proveedores = _por_canal(proveedores)
+    disponibles = _disponibles(proveedores)
+    if not disponibles:
         return Resumen()
 
-    canal = CanalAviso(proveedor.canal)
     resumen = Resumen()
-    for candidato in pendientes(sesion, proveedor, momento, config=config):
-        destino = _destino(candidato.reserva, canal)
+    for candidato in pendientes(sesion, proveedores, momento, config=config):
         cliente = candidato.reserva.cliente
+        contacto = {
+            "email": (cliente.email if cliente else "") or "",
+            "telefono": (cliente.telefono if cliente else "") or "",
+        }
         tipo = candidato.tipo.value
-        if not destino:
-            resumen = resumen.sumar(omitir(
-                proveedor.canal, candidato.clave, tipo=tipo,
-                motivo=f"El cliente no tiene {_DATO_DEL_CANAL[canal]}.",
-            ))
-            continue
+
         if cliente is not None and not cliente.acepta_avisos:
-            resumen = resumen.sumar(omitir(
-                proveedor.canal, candidato.clave, tipo=tipo, destino=destino,
-                motivo="El cliente pidió no recibir avisos.",
-            ))
+            # Se anota en cada canal disponible: con uno solo, el otro lo volvería a plantear en cada barrida.
+            for canal in disponibles:
+                resumen = resumen.sumar(omitir(
+                    canal, candidato.clave, tipo=tipo, destino=destino_de(canal, contacto),
+                    motivo="El cliente pidió no recibir avisos.",
+                ))
             continue
 
-        asunto, cuerpo = redactar(candidato, canal)
-        resumen = resumen.sumar(despachar(
-            proveedor, Mensaje(destino=destino, asunto=asunto, cuerpo=cuerpo), clave=candidato.clave, tipo=tipo,
-        ))
+        def redactar_por(canal: str, candidato: Candidato = candidato) -> Mensaje:
+            asunto, cuerpo = redactar(candidato, CanalAviso(canal))
+            return Mensaje(destino="", asunto=asunto, cuerpo=cuerpo)  # el destino lo pone `avisar`
+
+        for envio in avisar(proveedores, contacto, redactar_por, clave=candidato.clave, tipo=tipo):
+            resumen = resumen.sumar(envio)
     return resumen
 
 
-def construir_proveedores(config_smtp, *, transporte=None) -> list[Proveedor]:
-    """Los proveedores de esta corrida, uno por canal, según la configuración del motor.
+def construir_proveedores(config_smtp, *, transporte=None) -> dict[str, Proveedor]:
+    """Los proveedores de esta corrida, `{canal: Proveedor}` con uno por canal, según la configuración del motor.
 
     `config_smtp` es el callable que resuelve la config de correo (`app.smtp.smtp_config`): un callable y no el valor,
     porque la config vive en la base y la pantalla la edita mientras el proceso corre. El de WhatsApp lo elige el motor
@@ -647,5 +719,4 @@ def construir_proveedores(config_smtp, *, transporte=None) -> list[Proveedor]:
 
     `transporte` es para los tests: un `httpx.MockTransport` por el que sale Evolution, para que nada real salga.
     """
-    por_canal = proveedores(config_smtp, transporte=transporte)
-    return [por_canal[CANAL_EMAIL], por_canal[CANAL_WHATSAPP]]
+    return dict(proveedores_del_motor(config_smtp, transporte=transporte))

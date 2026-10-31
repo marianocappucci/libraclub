@@ -286,17 +286,22 @@ def jugador(sesion, cliente, motor):
     return cliente
 
 
-def _reserva_ya_avisada_por_el_barrido_viejo(sesion, cancha, jugador, momento: datetime) -> Reserva:
-    """Una reserva confirmada hace 5 minutos cuya confirmación el barrido VIEJO ya mandó (fila en `avisos`)."""
+def _reserva_ya_avisada_por_el_barrido_viejo(
+    sesion, cancha, jugador, momento: datetime, *, por_mail: bool = True
+) -> Reserva:
+    """Una reserva confirmada hace 5 minutos cuya confirmación el barrido VIEJO ya mandó (fila en `avisos`).
+
+    `por_mail=False` es la misma reserva sin la fila de mail: para armar a mano qué más pasó con ella."""
     reserva = servicio_reservas.crear(
         sesion, cancha_id=cancha.id, cliente_id=jugador.id, comienza_at=CUANDO, estado=EstadoReserva.CONFIRMADA,
     )
     sesion.commit()
     sesion.execute(update(Reserva).where(Reserva.id == reserva.id).values(created_at=momento - timedelta(minutes=5)))
-    sesion.add(Aviso(
-        reserva_id=reserva.id, tipo=TipoAviso.CONFIRMACION, canal=CanalAviso.EMAIL, estado=EstadoAviso.ENVIADO,
-        destino="jugador@ejemplo.com", asunto="Turno confirmado", cuerpo="Hola Juan", intentos=1,
-    ))
+    if por_mail:
+        sesion.add(Aviso(
+            reserva_id=reserva.id, tipo=TipoAviso.CONFIRMACION, canal=CanalAviso.EMAIL, estado=EstadoAviso.ENVIADO,
+            destino="jugador@ejemplo.com", asunto="Turno confirmado", cuerpo="Hola Juan", intentos=1,
+        ))
     sesion.commit()
     sesion.expire(reserva)
     return reserva
@@ -344,12 +349,7 @@ def test_la_cancelacion_se_avisa_si_la_confirmacion_la_mando_el_barrido_viejo(se
     assert destino == "jugador@ejemplo.com" and asunto.startswith("Turno cancelado")
 
 
-def test_lo_registrado_por_el_barrido_viejo_se_manda_con_un_proveedor_real_y_no_con_otro_de_prueba(
-    sesion, cancha, jugador, tarifa_base
-):
-    """La regla del ADR-029 sobrevive a la migración: un `registrado` cierra el tema sólo para un proveedor simulado."""
-    momento = CUANDO - timedelta(hours=10)
-    reserva = _reserva_ya_avisada_por_el_barrido_viejo(sesion, cancha, jugador, momento)
+def _registrado_en_whatsapp_por_el_barrido_viejo(sesion, reserva: Reserva) -> None:
     sesion.add(Aviso(
         reserva_id=reserva.id, tipo=TipoAviso.CONFIRMACION, canal=CanalAviso.WHATSAPP, estado=EstadoAviso.REGISTRADO,
         destino="5492255123456", cuerpo="*Turno confirmado*", intentos=1,
@@ -358,6 +358,15 @@ def test_lo_registrado_por_el_barrido_viejo_se_manda_con_un_proveedor_real_y_no_
     _migracion().llevar_los_avisos(sesion.connection())
     sesion.commit()
 
+
+def test_lo_registrado_por_el_barrido_viejo_se_manda_con_un_proveedor_real_y_no_con_otro_de_prueba(
+    sesion, cancha, jugador, tarifa_base
+):
+    """La regla del ADR-029 sobrevive a la migración: un `registrado` cierra el tema sólo para un proveedor simulado."""
+    momento = CUANDO - timedelta(hours=10)
+    reserva = _reserva_ya_avisada_por_el_barrido_viejo(sesion, cancha, jugador, momento, por_mail=False)
+    _registrado_en_whatsapp_por_el_barrido_viejo(sesion, reserva)
+
     de_prueba = servicio.barrer(sesion, ProveedorRegistro(), momento)
     real = ProveedorFalso(CanalAviso.WHATSAPP)
     de_verdad = servicio.barrer(sesion, real, momento)
@@ -365,3 +374,16 @@ def test_lo_registrado_por_el_barrido_viejo_se_manda_con_un_proveedor_real_y_no_
     assert de_prueba.registrados == 0, "otro proveedor de prueba no lo vuelve a anotar"
     assert de_verdad.enviados == 1 and len(real.enviados) == 1, "el real sí lo manda"
     assert [f.estado for f in guardados() if f.canal is CanalAviso.WHATSAPP] == [EstadoAviso.ENVIADO]
+
+
+def test_lo_que_el_barrido_viejo_mando_por_mail_no_se_manda_ahora_por_whatsapp(sesion, cancha, jugador, tarifa_base):
+    """Un aviso, un canal: el barrido viejo mandaba por los dos, y una confirmación que ya salió por mail y quedó
+    `registrada` en WhatsApp no se manda por WhatsApp cuando se conecta Evolution. El cliente ya la recibió."""
+    momento = CUANDO - timedelta(hours=10)
+    reserva = _reserva_ya_avisada_por_el_barrido_viejo(sesion, cancha, jugador, momento)
+    _registrado_en_whatsapp_por_el_barrido_viejo(sesion, reserva)
+    real = ProveedorFalso(CanalAviso.WHATSAPP)
+
+    resumen = servicio.barrer(sesion, {"email": ProveedorFalso(), "whatsapp": real}, momento)
+
+    assert resumen.enviados == 0 and real.enviados == []

@@ -18,12 +18,13 @@ import pytest
 from fastapi.testclient import TestClient
 from libraauth.models import Base as AuthBase
 from libraauth.testing import crear_schema_de_auth
-from libracore.avisos import ProveedorApagado, ProveedorRegistro
+from libracore.avisos import ProveedorApagado, ProveedorRegistro, telefono_para_whatsapp
 from sqlalchemy import text, update
 
 from app.config import Config
 from app.main import crear_app
 from app.models.enums import CanalAviso, EstadoAviso, EstadoReserva, TipoAviso
+from app.models.maestros import Cliente
 from app.models.reservas import EstadoPago, PagoDeReserva, Reserva
 from app.servicios import avisos as servicio
 from app.servicios import pagos as servicio_pagos
@@ -303,14 +304,18 @@ def test_el_registro_no_pisa_lo_que_ya_se_mando(sesion, cancha, jugador, tarifa_
     assert [a.estado for a in _avisos(sesion)] == [EstadoAviso.ENVIADO]
 
 
-def test_mail_y_whatsapp_son_avisos_distintos_del_mismo_turno(sesion, cancha, jugador, tarifa_base):
+def test_mail_y_whatsapp_son_filas_distintas_de_la_misma_clave_pero_el_aviso_sale_una_vez(
+    sesion, cancha, jugador, tarifa_base
+):
+    """Un aviso, un canal (addendum de ADR-030): `(canal, clave)` sigue siendo la unicidad, pero lo que ya salió por un
+    canal no sale por el otro. El mail que sale primero deja al WhatsApp en registro sin nada que anotar."""
     _confirmada(sesion, cancha, jugador)
 
     servicio.barrer(sesion, ProveedorFalso(CanalAviso.EMAIL), AHORA)
     servicio.barrer(sesion, ProveedorRegistro(), AHORA)
     sesion.commit()
 
-    assert sorted(a.canal.value for a in _avisos(sesion)) == ["email", "whatsapp"]
+    assert [a.canal.value for a in _avisos(sesion)] == ["email"]
 
 
 def test_sin_telefono_reconocible_el_aviso_se_omite_con_motivo(sesion, cancha, jugador, tarifa_base):
@@ -345,26 +350,33 @@ def test_el_cliente_que_no_quiere_avisos_no_recibe_whatsapp(sesion, cancha, juga
 def test_la_cancelacion_por_whatsapp_dice_mensaje_y_la_de_mail_dice_mail(
     sesion, cancha, jugador, tarifa_base
 ):
-    reserva = _confirmada(sesion, cancha, jugador)
+    """El texto sigue el canal por el que sale. Dos clientes, uno con teléfono (WhatsApp) y otro sin (mail)."""
+    sin_telefono = Cliente(nombre="Ana Sin Teléfono", email="ana@ejemplo.com")
+    sesion.add(sin_telefono)
+    sesion.commit()
+    por_whatsapp = _confirmada(sesion, cancha, jugador)
+    por_mail = _confirmada(sesion, cancha, sin_telefono, cuando=CUANDO + timedelta(hours=2))
     mail, wsp = ProveedorFalso(CanalAviso.EMAIL), ProveedorRegistro()
-    for t in (mail, wsp):
-        servicio.barrer(sesion, t, AHORA)
+    servicio.barrer(sesion, {"email": mail, "whatsapp": wsp}, AHORA)
     sesion.commit()
-    servicio_reservas.cambiar_estado(sesion, reserva.id, EstadoReserva.CANCELADA, motivo="Lluvia")
-    sesion.commit()
-
-    for t in (mail, wsp):
-        servicio.barrer(sesion, t, AHORA + timedelta(minutes=10))
+    for reserva in (por_whatsapp, por_mail):
+        servicio_reservas.cambiar_estado(sesion, reserva.id, EstadoReserva.CANCELADA, motivo="Lluvia")
     sesion.commit()
 
+    servicio.barrer(sesion, {"email": mail, "whatsapp": wsp}, AHORA + timedelta(minutes=10))
+    sesion.commit()
+
+    # Una cancelación por reserva, cada una por su canal (la de Ana deja además un WhatsApp `omitido`, sin texto).
     cancelaciones = {
-        a.canal: a for a in _avisos(sesion) if a.tipo is TipoAviso.CANCELACION
+        a.reserva_id: a for a in _avisos(sesion)
+        if a.tipo is TipoAviso.CANCELACION and a.estado is not EstadoAviso.OMITIDO
     }
-    assert set(cancelaciones) == {CanalAviso.EMAIL, CanalAviso.WHATSAPP}
-    assert "respondé este mail" in cancelaciones[CanalAviso.EMAIL].cuerpo
-    assert "respondé este mensaje" in cancelaciones[CanalAviso.WHATSAPP].cuerpo
-    assert cancelaciones[CanalAviso.WHATSAPP].estado is EstadoAviso.REGISTRADO
-    assert "Motivo: Lluvia" in cancelaciones[CanalAviso.WHATSAPP].cuerpo
+    assert {a.canal for a in cancelaciones.values()} == {CanalAviso.EMAIL, CanalAviso.WHATSAPP}
+    por_mail, por_wsp = cancelaciones[por_mail.id], cancelaciones[por_whatsapp.id]
+    assert por_mail.canal is CanalAviso.EMAIL and "respondé este mail" in por_mail.cuerpo
+    assert por_wsp.canal is CanalAviso.WHATSAPP and "respondé este mensaje" in por_wsp.cuerpo
+    assert por_wsp.estado is EstadoAviso.REGISTRADO
+    assert "Motivo: Lluvia" in por_wsp.cuerpo
 
 
 def test_un_proveedor_real_no_cancela_lo_que_solo_se_registro(sesion, cancha, jugador, tarifa_base):
@@ -399,13 +411,15 @@ def test_construir_proveedores_arma_uno_por_canal_y_el_modo_es_del_motor(sesion,
     """El modo de WhatsApp sale de la configuración del motor (`config.json`), no de `config_avisos` (ADR-030)."""
     from libracore.avisos import configuracion
 
-    email, whatsapp = servicio.construir_proveedores(lambda: None)
+    por_canal = servicio.construir_proveedores(lambda: None)
+    email, whatsapp = por_canal["email"], por_canal["whatsapp"]
+    assert set(por_canal) == {"email", "whatsapp"}
     assert (email.canal, whatsapp.canal) == ("email", "whatsapp")
     assert [email.simulado, whatsapp.simulado] == [False, False]
     assert not whatsapp.disponible(), "sin configuración, WhatsApp está apagado"
 
     configuracion.guardar(modo="registro")
-    _, whatsapp = servicio.construir_proveedores(lambda: None)
+    whatsapp = servicio.construir_proveedores(lambda: None)["whatsapp"]
     assert whatsapp.simulado and whatsapp.disponible()
     assert whatsapp.nombre == "registro"
 
@@ -416,7 +430,7 @@ def test_la_fila_de_config_avisos_ya_no_decide_el_modo_de_whatsapp(sesion, motor
                         "avisar_cancelacion, avisar_sena_por_vencer) VALUES (1, 'registro', true, true, true, true)"))
     sesion.commit()
 
-    _, whatsapp = servicio.construir_proveedores(lambda: None)
+    whatsapp = servicio.construir_proveedores(lambda: None)["whatsapp"]
 
     assert not whatsapp.disponible()
 
@@ -445,7 +459,7 @@ def test_la_fila_de_config_avisos_ya_no_decide_el_modo_de_whatsapp(sesion, motor
     ],
 )
 def test_telefono_para_whatsapp(texto, esperado):
-    assert servicio.telefono_para_whatsapp(texto) == esperado
+    assert telefono_para_whatsapp(texto) == esperado
 
 
 # ── La configuración ─────────────────────────────────────────────────────
