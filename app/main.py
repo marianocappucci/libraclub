@@ -56,6 +56,7 @@ from libracore.nodo_conexion_router import build_conexion_del_nodo_router
 from libracore.nodo_offline import SinConexion, SoloEnElCentral
 from libracore.resguardo_enlace import build_resguardo_enlace_router
 from libracore.respaldo import Instancia
+from libracore.corte_de_servicio import CorteDeServicioMiddleware
 from libracore.security_headers import CSP_SPA, SecurityHeadersMiddleware
 from libracore.smtp_router import build_smtp_probe_router
 from libracore.tema_router import build_tema_admin_router, build_tema_router
@@ -378,6 +379,9 @@ def crear_app(config: Config | None = None, *, sembrar_admin: bool = True) -> Fa
     #
     # `CSP_SPA` y no la CSP por defecto: esa habilita `cdn.jsdelivr.net` para las
     # apps Jinja2, y este producto no carga nada externo. Ver libracore.
+    # El corte de servicio (ADR-096 de libracore): una instancia suspendida deja de atender. Antes que
+    # SecurityHeadersMiddleware, para que la respuesta del corte salga con las cabeceras de seguridad.
+    app.add_middleware(CorteDeServicioMiddleware)
     app.add_middleware(SecurityHeadersMiddleware, csp=CSP_SPA)
     # El registro de errores de la familia (ADR-045 de libracore): un 500 deja una línea en
     # `DATA_DIR/errores/errores.jsonl` y responde con un `ref`; monta `POST /api/errores-cliente` para los errores del
