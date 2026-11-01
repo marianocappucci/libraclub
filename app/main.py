@@ -46,6 +46,7 @@ from libracore.config_router import (
     build_empresa_router,
 )
 from libracore.consultar_cuit_router import build_consultar_cuit_router
+from libracore.corte_de_servicio import CorteDeServicioMiddleware
 from libracore.db.core import get_connection as lc_get_connection
 from libracore.docs_api import cerrar_docs_de_la_api
 from libracore.errores import instalar_registro_de_errores
@@ -56,7 +57,6 @@ from libracore.nodo_conexion_router import build_conexion_del_nodo_router
 from libracore.nodo_offline import SinConexion, SoloEnElCentral
 from libracore.resguardo_enlace import build_resguardo_enlace_router
 from libracore.respaldo import Instancia
-from libracore.corte_de_servicio import CorteDeServicioMiddleware
 from libracore.security_headers import CSP_SPA, SecurityHeadersMiddleware
 from libracore.smtp_router import build_smtp_probe_router
 from libracore.tema_router import build_tema_admin_router, build_tema_router
