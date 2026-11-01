@@ -1,5 +1,5 @@
 """Sin el middleware, suspender esta instancia no corta nada: el backoffice dice «Suspendida» y el cliente sigue
-entrando (ADR-096 de libracore). El corte se prueba en el motor; acá, que este producto lo monte en el orden correcto."""
+entrando (ADR-096 de libracore). El corte se prueba en el motor; acá, que este producto lo monte en orden."""
 from pathlib import Path
 
 MAIN = Path(__file__).resolve().parent.parent / "app" / "main.py"
