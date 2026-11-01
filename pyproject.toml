@@ -148,7 +148,8 @@ dependencies = [
     # v0.72.1 -> v0.73.0 (2026-10-23): el vinculo del producto viaja con la venta del nodo (ADR-072). Migracion 0010 aditiva (venta_origen_nodo).
     # v0.73.0 -> v0.73.1 (2026-10-24): serializar_esquema toma antes el candado del core (ADR-073). Sin migracion.
     # v0.73.1 -> v0.75.0 (2026-11-01): el puente proveedor <-> party en `erp.proveedores` (ADR-075). Sin migracion.
-    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.75.0",
+    # v0.75.0 -> v0.76.0 (2026-11-01): tipos de movimiento propios y upsert del party que no reescribe (ADR-076). Sin migracion.
+    "libracommerce @ git+https://github.com/marianocappucci/libracommerce.git@v0.76.0",
     # libraedge v0.22.0 (2026-10-24, ADR-025 parte B): el nodo offline de LibraClub (ADR-023 de este producto). Dependencia NORMAL y
     # no extra, como en VentaLibra y RestoLibra: el central monta `/sync/v1/*` (push, pull y el ticket de ARCA prestado) aunque
     # no tenga nodos. El repo es publico: no hace falta deploy key ni en el CI ni en el build del VPS.
