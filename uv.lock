@@ -596,8 +596,8 @@ wheels = [
 
 [[package]]
 name = "libraauth"
-version = "0.57.0"
-source = { git = "https://github.com/marianocappucci/libraauth.git?rev=v0.57.0#0b8640138a2a5952a47b293deda540795e8a306c" }
+version = "0.58.0"
+source = { git = "https://github.com/marianocappucci/libraauth.git?rev=v0.58.0#5cd01f4a75fe4c1d69e59aef7b1e97613361eee5" }
 dependencies = [
     { name = "altcha" },
     { name = "argon2-cffi" },
@@ -647,10 +647,10 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.14" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
-    { name = "libraauth", extras = ["migrations"], git = "https://github.com/marianocappucci/libraauth.git?rev=v0.57.0" },
+    { name = "libraauth", extras = ["migrations"], git = "https://github.com/marianocappucci/libraauth.git?rev=v0.58.0" },
     { name = "libracommerce", git = "https://github.com/marianocappucci/libracommerce.git?rev=v0.77.0" },
-    { name = "libracore", git = "https://github.com/marianocappucci/libracore.git?rev=v1.210.0" },
-    { name = "libraedge", git = "https://github.com/marianocappucci/libraedge.git?rev=v0.25.0" },
+    { name = "libracore", git = "https://github.com/marianocappucci/libracore.git?rev=v1.211.0" },
+    { name = "libraedge", git = "https://github.com/marianocappucci/libraedge.git?rev=v0.26.0" },
     { name = "libragenda", git = "https://github.com/marianocappucci/libragenda.git?rev=v0.11.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.9" },
@@ -671,8 +671,8 @@ source = { git = "https://github.com/marianocappucci/libracommerce.git?rev=v0.77
 
 [[package]]
 name = "libracore"
-version = "1.210.0"
-source = { git = "https://github.com/marianocappucci/libracore.git?rev=v1.210.0#cebe01bdd33bf07d5627081195e288d27bb7af4f" }
+version = "1.211.0"
+source = { git = "https://github.com/marianocappucci/libracore.git?rev=v1.211.0#e07ba63e1f445ace3d1d2d32c75c2f9ca48e024d" }
 dependencies = [
     { name = "cryptography" },
     { name = "fastapi" },
@@ -690,8 +690,8 @@ dependencies = [
 
 [[package]]
 name = "libraedge"
-version = "0.25.0"
-source = { git = "https://github.com/marianocappucci/libraedge.git?rev=v0.25.0#748e5ee90eb515093abe8d48e440f762e637b3c8" }
+version = "0.26.0"
+source = { git = "https://github.com/marianocappucci/libraedge.git?rev=v0.26.0#ec3f36b93d360534cb5cf6e31626641045eefcab" }
 
 [[package]]
 name = "libragenda"
