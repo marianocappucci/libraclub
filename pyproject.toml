@@ -31,7 +31,8 @@ dependencies = [
     # v0.55.0 -> v0.56.0 (2026-10-28): `verificar_captcha` publica para rutas propias del producto (ADR-029). Sin migracion.
     # v0.56.0 -> v0.57.0 (2026-10-30): Terminos propios de la instancia y textos de marca en el reseteo (ADR-030, marca blanca). Sin migracion.
     # v0.57.0 -> v0.58.0 (2026-11-02): segundo factor por usuario, opt-in (ADR-031). OJO: migracion 0004_usuarios_totp, hay que correr libraauth-migrar.
-    "libraauth[migrations] @ git+https://github.com/marianocappucci/libraauth.git@v0.58.0",
+    # -> v0.59.0 (2026-11-02): codigos de recuperacion del 2FA. OJO: migracion 0005, hay que correr libraauth-migrar.
+    "libraauth[migrations] @ git+https://github.com/marianocappucci/libraauth.git@v0.59.0",
     # Entra en F1 sólo por `respaldo`: una instancia sin backup no se puede
     # poner en produccion. Su alcance crece en F2 (`mp_api`, `pdf_generator`)
     # y F3 (ARCA) — ver ARCHITECTURE.md.
