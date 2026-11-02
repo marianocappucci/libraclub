@@ -1,0 +1,59 @@
+name: Imagen
+
+# Construye la imagen de producción (el `Dockerfile`) y comprueba que los motores quedaron instalados.
+#
+# Por qué un workflow aparte y no un job de `ci.yml`: con `paths` a nivel de workflow, un PR que no toca
+# dependencias no lo corre, y el CI de siempre (`test`, `frontend`, `gitleaks`) sigue corriendo entero y
+# sin cambios. Este check NO es obligatorio: si no corre, no bloquea nada.
+#
+# Medido en el piloto (librainmo#48): en frío 2 min 23 s, en paralelo con `test`.
+#
+# Qué atrapa: un `Dockerfile` roto, un `uv.lock` que no resuelve dentro de la imagen, un `npm ci` del frontend que
+# falla en el build de la imagen y no en el job `frontend`. Eso hoy sólo se descubre al desplegar.
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - pyproject.toml
+      - uv.lock
+      - .python-version
+      - frontend/package.json
+      - frontend/package-lock.json
+      - .github/workflows/imagen.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4.4.1
+
+      # Sin `push`: sólo se construye. La caché de capas (`gha`) hace que un cambio que no toca las
+      # dependencias de Python ni de Node reuse casi todo. Los motores (`libracore`, `libraauth`,
+      # `libracommerce`, `libra-ui`) son repos públicos hoy: no hace falta ninguna deploy key.
+      - uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          push: false
+          load: true
+          tags: libraclub:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Que la imagen tenga adentro los motores que dice `pyproject.toml`: un build verde que no los instala
+      # (o instala otra versión) no sirve de nada.
+      - name: Los motores quedaron instalados
+        run: |
+          docker run --rm --entrypoint python libraclub:ci -c \
+            "import libracore, libraauth, libracommerce; print('libracore', libracore.__version__)"
